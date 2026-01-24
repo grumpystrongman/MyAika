@@ -71,3 +71,42 @@ export async function generateWithSapi({ text, outputPath, rate, voiceName }) {
     fs.unlinkSync(tmpText);
   }
 }
+
+export async function listSapiVoices() {
+  return new Promise((resolve, reject) => {
+    const script = `
+Add-Type -AssemblyName System.Speech
+$speak = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$voices = $speak.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }
+$voices | ConvertTo-Json
+`;
+    const args = [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script
+    ];
+
+    const child = spawn("powershell", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", chunk => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+    child.on("close", code => {
+      if (code !== 0) {
+        return reject(new Error(stderr || "sapi_list_failed"));
+      }
+      try {
+        const parsed = JSON.parse(stdout.trim() || "[]");
+        resolve(Array.isArray(parsed) ? parsed : [parsed]);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}

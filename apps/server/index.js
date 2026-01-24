@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import { initMemory, addMemory, searchMemories } from "./memory.js";
 import { Emotion, makeBehavior } from "@myaika/shared";
 import { generateAikaVoice, resolveAudioPath } from "./aika_voice/index.js";
+import { listSapiVoices } from "./aika_voice/engine_sapi.js";
 
 const app = express();
 app.use(cors());
@@ -197,6 +198,37 @@ app.get("/api/aika/voice/:id", (req, res) => {
   if (!filePath) return res.status(404).json({ error: "not_found" });
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not_found" });
   res.sendFile(filePath);
+});
+
+app.get("/api/aika/voices", async (_req, res) => {
+  try {
+    if (process.env.TTS_ENGINE === "sapi" || process.platform === "win32") {
+      const voices = await listSapiVoices();
+      return res.json({ engine: "sapi", voices });
+    }
+    return res.json({ engine: process.env.TTS_ENGINE || "coqui", voices: [] });
+  } catch (err) {
+    console.error("Aika Voice list ERROR:", err);
+    res.status(500).json({ error: "voice_list_failed" });
+  }
+});
+
+app.post("/api/aika/voice/preference", (req, res) => {
+  const { name, reference_wav_path } = req.body || {};
+  const pref =
+    name
+      ? `Aika prefers this voice name: ${name}`
+      : reference_wav_path
+        ? `Aika prefers this voice sample: ${reference_wav_path}`
+        : null;
+  if (!pref) return res.status(400).json({ error: "voice_preference_required" });
+
+  addMemory(db, {
+    role: "assistant",
+    content: pref,
+    tags: "voice_preference"
+  });
+  res.json({ ok: true });
 });
 
 // Start server

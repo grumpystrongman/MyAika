@@ -9,7 +9,7 @@ import { generateWithCoqui } from "./engine_coqui.js";
 import { generateWithSapi } from "./engine_sapi.js";
 import { generateWithStub } from "./engine_stub.js";
 
-const ENGINE = process.env.TTS_ENGINE || "coqui";
+const ENGINE = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
 const MODEL_ID =
   process.env.TTS_MODEL_ID || "tts_models/multilingual/multi-dataset/xtts_v2";
 
