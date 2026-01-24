@@ -5,6 +5,7 @@ import fs from "node:fs";
 import OpenAI from "openai";
 import { initMemory, addMemory, searchMemories } from "./memory.js";
 import { Emotion, makeBehavior } from "@myaika/shared";
+import { generateAikaVoice, resolveAudioPath } from "./aika_voice/index.js";
 
 const app = express();
 app.use(cors());
@@ -160,6 +161,42 @@ INSTRUCTIONS:
     console.error("CHAT ERROR:", err);
     res.status(500).json({ error: "chat_failed" });
   }
+});
+
+// Aika Voice - TTS
+app.post("/api/aika/voice", async (req, res) => {
+  try {
+    const { text, settings } = req.body || {};
+    const mergedSettings =
+      settings && settings.voice && settings.voice.name
+        ? settings
+        : {
+            ...settings,
+            voice: {
+              ...settings?.voice,
+              name: process.env.TTS_VOICE_NAME || settings?.voice?.name
+            }
+          };
+    const result = await generateAikaVoice({ text, settings: mergedSettings });
+    res.json({
+      audioUrl: result.audioUrl,
+      meta: result.meta,
+      warnings: result.warnings || []
+    });
+  } catch (err) {
+    const status = err.status || 500;
+    console.error("Aika Voice ERROR:", err);
+    res.status(status).json({
+      error: err.message || "aika_voice_failed"
+    });
+  }
+});
+
+app.get("/api/aika/voice/:id", (req, res) => {
+  const filePath = resolveAudioPath(req.params.id);
+  if (!filePath) return res.status(404).json({ error: "not_found" });
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not_found" });
+  res.sendFile(filePath);
 });
 
 // Start server

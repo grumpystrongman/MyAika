@@ -1,10 +1,18 @@
 {
   "name": "myaika",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "npm run dev -w apps/server & npm run dev -w apps/web",
     "dev:server": "npm run dev -w apps/server",
-    "dev:web": "npm run dev -w apps/web"
+    "dev:web": "npm run dev -w apps/web",
+    "tts": "node apps/server/scripts/tts_sample.js",
+    "test": "node --test apps/server/tests"
+  },
+  "dependencies": {
+    "tts": "^0.1.0"
   }
 }
