@@ -64,6 +64,7 @@ Avatar rendering is now engine-based with a Live2D Web implementation and PNG fa
 - Live2D model: `apps/web/public/assets/aika/live2d/model3.json`
   - Export your Cubism model to that folder.
   - Keep the entry file named `model3.json` (Cubism 4). If you use `model.json`, update `LIVE2D_MODEL_URL` in `apps/web/src/components/AikaAvatar.tsx`.
+  - See `apps/web/src/avatar/README.md` for expression naming and parameter mapping.
 
 ### Demo
 Open: `http://localhost:3000/avatar-demo`

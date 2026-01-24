@@ -1,19 +1,27 @@
+ "use client";
 import { useEffect, useRef, useState } from "react";
-import type { AvatarEngine, AvatarMood } from "../avatar/AvatarEngine";
+import type { AvatarEngine, Mood } from "../avatar/AvatarEngine";
 import { Live2DWebEngine } from "../avatar/Live2DWebEngine";
 import { PngAvatarEngine } from "../avatar/PngAvatarEngine";
 
 type Props = {
-  mood: AvatarMood;
+  mood: Mood;
   isTalking: boolean;
   talkIntensity?: number;
   isListening: boolean;
+  className?: string;
 };
 
 const FALLBACK_PNG = "/assets/aika/AikaPregnant.png";
 const LIVE2D_MODEL_URL = "/assets/aika/live2d/model3.json";
 
-export default function AikaAvatar({ mood, isTalking, talkIntensity = 0.5, isListening }: Props) {
+export default function AikaAvatar({
+  mood,
+  isTalking,
+  talkIntensity = 0.5,
+  isListening,
+  className
+}: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pngRef = useRef<HTMLDivElement | null>(null);
@@ -25,6 +33,7 @@ export default function AikaAvatar({ mood, isTalking, talkIntensity = 0.5, isLis
 
     async function initEngine() {
       if (!hostRef.current || !canvasRef.current) return;
+      if (typeof window === "undefined") return;
 
       const canUseWebGL = !!canvasRef.current.getContext("webgl");
       let useLive2D = false;
@@ -91,6 +100,7 @@ export default function AikaAvatar({ mood, isTalking, talkIntensity = 0.5, isLis
   return (
     <div
       ref={hostRef}
+      className={className}
       style={{
         width: "100%",
         maxWidth: 520,

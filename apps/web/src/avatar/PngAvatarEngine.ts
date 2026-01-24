@@ -1,9 +1,9 @@
-import type { AvatarEngine, AvatarMood } from "./AvatarEngine";
+import type { AvatarEngine, Mood } from "./AvatarEngine";
 
 export class PngAvatarEngine implements AvatarEngine {
   private container: HTMLElement;
   private img: HTMLImageElement;
-  private mood: AvatarMood = "neutral";
+  private mood: Mood = "neutral";
   private isTalking = false;
   private isListening = false;
   private idleEnabled = true;
@@ -22,11 +22,11 @@ export class PngAvatarEngine implements AvatarEngine {
     this.container.appendChild(this.img);
   }
 
-  async load(): Promise<void> {
+  async load(_modelUrl?: string): Promise<void> {
     return;
   }
 
-  setMood(mood: AvatarMood): void {
+  setMood(mood: Mood): void {
     this.mood = mood;
     this.updateStyle();
   }

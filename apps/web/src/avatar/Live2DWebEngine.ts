@@ -1,6 +1,6 @@
-import type { AvatarEngine, AvatarMood } from "./AvatarEngine";
+import type { AvatarEngine, Mood } from "./AvatarEngine";
 
-type MoodMap = Record<AvatarMood, string | number>;
+type MoodMap = Record<Mood, string | number>;
 
 export class Live2DWebEngine implements AvatarEngine {
   private canvas: HTMLCanvasElement;
@@ -26,11 +26,14 @@ export class Live2DWebEngine implements AvatarEngine {
   }
 
   async load(modelUrl: string): Promise<void> {
+    if (typeof window === "undefined") {
+      throw new Error("live2d_client_only");
+    }
     this.gl = this.canvas.getContext("webgl");
     if (!this.gl) throw new Error("webgl_not_supported");
 
-    const w = window as any;
-    const Cubism = w?.Live2DCubismFramework || w?.Cubism || w?.Live2D;
+    const { getCubismRuntime } = await import("./cubismRuntime");
+    const Cubism = getCubismRuntime();
     if (!Cubism) {
       throw new Error("live2d_sdk_missing");
     }
@@ -43,7 +46,7 @@ export class Live2DWebEngine implements AvatarEngine {
     this.startLoop();
   }
 
-  setMood(mood: AvatarMood): void {
+  setMood(mood: Mood): void {
     const expression = this.moodMap[mood] ?? "neutral";
     if (this.model?.setExpression) {
       this.model.setExpression(expression);
@@ -87,6 +90,11 @@ export class Live2DWebEngine implements AvatarEngine {
         const mouth = this.isTalking ? this.talkIntensity : 0;
         this.model.setParameterValueById("ParamMouthOpenY", mouth);
         this.model.setParameterValueById("ParamEyeBallX", this.isListening ? 0.2 : 0);
+        if (this.model?.setParameterValueById) {
+          const blink = Math.abs(Math.sin(Date.now() / 1200));
+          this.model.setParameterValueById("ParamEyeLOpen", blink);
+          this.model.setParameterValueById("ParamEyeROpen", blink);
+        }
       }
 
       if (this.model?.update) this.model.update();

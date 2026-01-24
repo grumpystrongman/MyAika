@@ -1,4 +1,4 @@
-export type AvatarMood =
+export type Mood =
   | "neutral"
   | "happy"
   | "thinking"
@@ -7,7 +7,7 @@ export type AvatarMood =
 
 export interface AvatarEngine {
   load(modelUrl: string): Promise<void>;
-  setMood(mood: AvatarMood): void;
+  setMood(mood: Mood): void;
   setTalking(isTalking: boolean, intensity?: number): void;
   setListening(isListening: boolean): void;
   setIdle(enabled: boolean): void;

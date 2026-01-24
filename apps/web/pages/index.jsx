@@ -4,6 +4,33 @@ import AikaAvatar from "../src/components/AikaAvatar";
 
 const SERVER_URL = "http://localhost:8787";
 
+const THINKING_CUES = [
+  "Hold on?I'm thinking.",
+  "Give me a second.",
+  "Hmm, let me think.",
+  "Okay, thinking?",
+  "One sec, love.",
+  "Let me piece this together.",
+  "Mmm?processing that.",
+  "Stay there, I'm on it.",
+  "Got it?thinking now.",
+  "Hang tight.",
+  "Let me check that.",
+  "Alright, give me a beat.",
+  "Thinking? don't rush me.",
+  "Okay, okay, I'm thinking.",
+  "One moment.",
+  "Let me work this out.",
+  "Hold still?brain running.",
+  "Give me a blink.",
+  "Thinking, thinking.",
+  "Let me get this right."
+];
+
+function pickThinkingCue() {
+  return THINKING_CUES[Math.floor(Math.random() * THINKING_CUES.length)];
+}
+
 function applyEmotionTuning(settings, behavior) {
   const mood = behavior?.emotion || "neutral";
   const intensity = Number.isFinite(behavior?.intensity) ? behavior.intensity : 0.35;
@@ -64,6 +91,24 @@ function applyEmotionTuning(settings, behavior) {
   };
 }
 
+async function playBlobWithAudioContext(blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) throw new Error("audio_context_unavailable");
+  const ctx = new AudioCtx();
+  const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(ctx.destination);
+  source.start();
+  return new Promise(resolve => {
+    source.onended = () => {
+      ctx.close();
+      resolve();
+    };
+  });
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -76,7 +121,8 @@ export default function Home() {
   const [micError, setMicError] = useState("");
   const [micLevel, setMicLevel] = useState(0);
   const [micStatus, setMicStatus] = useState("Mic idle");
-  const [autoSpeak, setAutoSpeak] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const [textOnly, setTextOnly] = useState(false);
   const [ttsStatus, setTtsStatus] = useState("idle");
   const [ttsError, setTtsError] = useState("");
   const [ttsVoices, setTtsVoices] = useState([]);
@@ -108,6 +154,9 @@ export default function Home() {
     if (!text) return;
 
     stopMic();
+    if (autoSpeak && !textOnly) {
+      speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft" });
+    }
     setLog(l => [...l, { role: "user", text }]);
     setUserText("");
 
@@ -125,7 +174,7 @@ export default function Home() {
     setLog(l => [...l, { role: "assistant", text: reply }]);
     setLastAssistantText(reply);
 
-    if (autoSpeak) {
+    if (autoSpeak && !textOnly) {
       speak(reply);
     }
   }
@@ -182,21 +231,38 @@ export default function Home() {
       const audio = audioRef.current || new Audio();
       audioRef.current = audio;
       audio.src = objectUrl;
+      audio.preload = "auto";
+      audio.volume = 1;
       audio.onended = () => {
         URL.revokeObjectURL(objectUrl);
         setTtsStatus("idle");
         setBehavior(prev => ({ ...prev, speaking: false }));
       };
-      audio.onerror = () => {
+      audio.onerror = async () => {
         URL.revokeObjectURL(objectUrl);
-        setTtsStatus("error");
-        setTtsError("audio_play_failed");
-        setBehavior(prev => ({ ...prev, speaking: false }));
+        try {
+          setTtsStatus("playing");
+          await playBlobWithAudioContext(blob);
+          setTtsStatus("idle");
+          setBehavior(prev => ({ ...prev, speaking: false }));
+        } catch (e) {
+          setTtsStatus("error");
+          setTtsError(e?.message || "audio_play_failed");
+          setBehavior(prev => ({ ...prev, speaking: false }));
+        }
       };
 
       setBehavior(prev => ({ ...prev, speaking: true }));
       setTtsStatus("playing");
-      await audio.play();
+      try {
+        try {
+        await audio.play();
+      } catch (e) {
+        await audio.onerror();
+      }
+      } catch (e) {
+        await audio.onerror();
+      }
     } catch (e) {
       setTtsStatus("error");
       setTtsError(e?.message || "voice_test_failed");
@@ -204,6 +270,7 @@ export default function Home() {
   }
 
   async function speak(textToSpeak, settingsOverride) {
+    if (textOnly) return;
     const text = String(textToSpeak || "").trim();
     if (!text) return;
 
@@ -236,22 +303,34 @@ export default function Home() {
       const audio = audioRef.current || new Audio();
       audioRef.current = audio;
       audio.src = objectUrl;
+      audio.preload = "auto";
       audio.volume = 1;
       audio.onended = () => {
         URL.revokeObjectURL(objectUrl);
         setTtsStatus("idle");
         setBehavior(prev => ({ ...prev, speaking: false }));
       };
-      audio.onerror = () => {
+      audio.onerror = async () => {
         URL.revokeObjectURL(objectUrl);
-        setTtsStatus("error");
-        setTtsError("audio_play_failed");
-        setBehavior(prev => ({ ...prev, speaking: false }));
+        try {
+          setTtsStatus("playing");
+          await playBlobWithAudioContext(blob);
+          setTtsStatus("idle");
+          setBehavior(prev => ({ ...prev, speaking: false }));
+        } catch (e) {
+          setTtsStatus("error");
+          setTtsError(e?.message || "audio_play_failed");
+          setBehavior(prev => ({ ...prev, speaking: false }));
+        }
       };
 
       setBehavior(prev => ({ ...prev, speaking: true }));
       setTtsStatus("playing");
-      await audio.play();
+      try {
+        await audio.play();
+      } catch (e) {
+        await audio.onerror();
+      }
     } catch (e) {
       setTtsStatus("error");
       setTtsError(e?.message || "tts_failed");
@@ -711,9 +790,25 @@ export default function Home() {
           <input
             type="checkbox"
             checked={autoSpeak}
-            onChange={(e) => setAutoSpeak(e.target.checked)}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setAutoSpeak(v);
+              if (v) setTextOnly(false);
+            }}
           />
           Auto Speak
+        </label>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+          <input
+            type="checkbox"
+            checked={textOnly}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setTextOnly(v);
+              if (v) setAutoSpeak(false);
+            }}
+          />
+          Text only (no voice)
         </label>
         <div style={{ color: "#6b7280", fontSize: 12 }}>
           Voice: {ttsStatus}
