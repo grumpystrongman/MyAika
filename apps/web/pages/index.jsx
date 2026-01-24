@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Emotion } from "@myaika/shared";
+import AikaAvatar from "../src/components/AikaAvatar";
 
 const SERVER_URL = "http://localhost:8787";
 
@@ -61,47 +62,6 @@ function applyEmotionTuning(settings, behavior) {
     energy: Number(energy.toFixed(2)),
     pause: Number(pause.toFixed(2))
   };
-}
-
-function Stage2D({ behavior }) {
-  const mood = behavior?.emotion || Emotion.NEUTRAL;
-  const intensity = behavior?.intensity ?? 0.4;
-
-  const face = useMemo(() => {
-    switch (mood) {
-      case Emotion.HAPPY: return "????";
-      case Emotion.SHY: return "????";
-      case Emotion.SAD: return "????";
-      case Emotion.ANGRY: return "????";
-      case Emotion.SURPRISED: return "????";
-      case Emotion.SLEEPY: return "????";
-      default: return "????";
-    }
-  }, [mood]);
-
-  const scale = 1 + intensity * 0.15;
-  const glow = Math.floor(80 + intensity * 140);
-
-  return (
-    <div style={{
-      height: "100%",
-      display: "grid",
-      placeItems: "center",
-      background: `radial-gradient(circle at 50% 40%, rgb(${glow}, ${glow}, 255), #f7f5ff 70%)`
-    }}>
-      <div style={{
-        fontSize: 140,
-        transform: `scale(${scale})`,
-        transition: "transform 150ms ease",
-        filter: behavior?.speaking ? "drop-shadow(0 0 14px rgba(120,120,255,0.65))" : "none"
-      }}>
-        {face}
-      </div>
-      <div style={{ position: "absolute", bottom: 18, opacity: 0.7, fontSize: 14 }}>
-        2D Body Placeholder (next: Inochi2D)
-      </div>
-    </div>
-  );
 }
 
 function sleep(ms) {
@@ -191,6 +151,58 @@ export default function Home() {
     setBehavior(prev => ({ ...prev, speaking: false }));
   }
 
+  async function testVoice() {
+    try {
+      await stopAudio();
+      setTtsError("");
+      setTtsStatus("loading");
+      const r = await fetch(`${SERVER_URL}/api/aika/voice/inline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Testing Aika Voice. If you hear this, audio output is working.",
+          settings: applyEmotionTuning(ttsSettings, behavior)
+        })
+      });
+      if (!r.ok) {
+        let errText = "voice_test_failed";
+        try {
+          const data = await r.json();
+          errText = data.error || errText;
+        } catch {
+          errText = await r.text();
+        }
+        throw new Error(errText || "voice_test_failed");
+      }
+
+      const blob = await r.blob();
+      if (!blob || blob.size < 64) throw new Error("audio_blob_invalid");
+
+      const objectUrl = URL.createObjectURL(blob);
+      const audio = audioRef.current || new Audio();
+      audioRef.current = audio;
+      audio.src = objectUrl;
+      audio.onended = () => {
+        URL.revokeObjectURL(objectUrl);
+        setTtsStatus("idle");
+        setBehavior(prev => ({ ...prev, speaking: false }));
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        setTtsStatus("error");
+        setTtsError("audio_play_failed");
+        setBehavior(prev => ({ ...prev, speaking: false }));
+      };
+
+      setBehavior(prev => ({ ...prev, speaking: true }));
+      setTtsStatus("playing");
+      await audio.play();
+    } catch (e) {
+      setTtsStatus("error");
+      setTtsError(e?.message || "voice_test_failed");
+    }
+  }
+
   async function speak(textToSpeak, settingsOverride) {
     const text = String(textToSpeak || "").trim();
     if (!text) return;
@@ -200,27 +212,38 @@ export default function Home() {
       await stopAudio();
       setTtsError("");
       setTtsStatus("loading");
-      const r = await fetch(`${SERVER_URL}/api/aika/voice`, {
+      const r = await fetch(`${SERVER_URL}/api/aika/voice/inline`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, settings: applyEmotionTuning(settingsOverride || ttsSettings, behavior) })
       });
-      const data = await r.json();
       if (!r.ok) {
-        setTtsError(data.error || "tts_failed");
-        throw new Error(data.error || "tts_failed");
+        let errText = "tts_failed";
+        try {
+          const data = await r.json();
+          errText = data.error || errText;
+        } catch {
+          errText = await r.text();
+        }
+        setTtsError(errText || "tts_failed");
+        throw new Error(errText || "tts_failed");
       }
 
-      const audioUrl = `${SERVER_URL}${data.audioUrl}`;
+      const blob = await r.blob();
+      if (!blob || blob.size < 64) throw new Error("audio_blob_invalid");
+
+      const objectUrl = URL.createObjectURL(blob);
       const audio = audioRef.current || new Audio();
       audioRef.current = audio;
-      audio.src = audioUrl;
+      audio.src = objectUrl;
       audio.volume = 1;
       audio.onended = () => {
+        URL.revokeObjectURL(objectUrl);
         setTtsStatus("idle");
         setBehavior(prev => ({ ...prev, speaking: false }));
       };
       audio.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
         setTtsStatus("error");
         setTtsError("audio_play_failed");
         setBehavior(prev => ({ ...prev, speaking: false }));
@@ -447,7 +470,12 @@ export default function Home() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
       <div style={{ position: "relative" }}>
-        <Stage2D behavior={behavior} />
+        <AikaAvatar
+          mood={behavior?.emotion || Emotion.NEUTRAL}
+          isTalking={behavior?.speaking}
+          talkIntensity={behavior?.intensity ?? 0.35}
+          isListening={micState === "listening"}
+        />
       </div>
 
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -541,6 +569,14 @@ export default function Home() {
         }}>
           <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
             Aika Voice Settings
+          </div>
+          <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
+            <button
+              onClick={testVoice}
+              style={{ padding: "8px 12px", borderRadius: 8 }}
+            >
+              Test Voice
+            </button>
           </div>
           {ttsVoices.length > 0 && (
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>

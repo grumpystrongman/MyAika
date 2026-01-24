@@ -193,10 +193,36 @@ app.post("/api/aika/voice", async (req, res) => {
   }
 });
 
+app.post("/api/aika/voice/inline", async (req, res) => {
+  try {
+    const { text, settings } = req.body || {};
+    const mergedSettings =
+      settings && settings.voice && settings.voice.name
+        ? settings
+        : {
+            ...settings,
+            voice: {
+              ...settings?.voice,
+              name: process.env.TTS_VOICE_NAME || settings?.voice?.name
+            }
+          };
+    const result = await generateAikaVoice({ text, settings: mergedSettings });
+    if (result.filePath.endsWith(".wav")) res.type("audio/wav");
+    if (result.filePath.endsWith(".mp3")) res.type("audio/mpeg");
+    res.sendFile(result.filePath);
+  } catch (err) {
+    const status = err.status || 500;
+    console.error("Aika Voice inline ERROR:", err);
+    res.status(status).json({ error: err.message || "aika_voice_inline_failed" });
+  }
+});
+
 app.get("/api/aika/voice/:id", (req, res) => {
   const filePath = resolveAudioPath(req.params.id);
   if (!filePath) return res.status(404).json({ error: "not_found" });
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not_found" });
+  if (filePath.endsWith(".wav")) res.type("audio/wav");
+  if (filePath.endsWith(".mp3")) res.type("audio/mpeg");
   res.sendFile(filePath);
 });
 
@@ -210,6 +236,27 @@ app.get("/api/aika/voices", async (_req, res) => {
   } catch (err) {
     console.error("Aika Voice list ERROR:", err);
     res.status(500).json({ error: "voice_list_failed" });
+  }
+});
+
+app.post("/api/aika/voice/test", async (req, res) => {
+  try {
+    const sampleText =
+      req.body?.text ||
+      "Testing Aika Voice. If you hear this, audio output is working.";
+    const result = await generateAikaVoice({
+      text: sampleText,
+      settings: req.body?.settings || {}
+    });
+    res.json({
+      audioUrl: result.audioUrl,
+      meta: result.meta,
+      warnings: result.warnings || []
+    });
+  } catch (err) {
+    const status = err.status || 500;
+    console.error("Aika Voice test ERROR:", err);
+    res.status(status).json({ error: err.message || "voice_test_failed" });
   }
 });
 

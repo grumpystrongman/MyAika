@@ -55,3 +55,20 @@ Coqui TTS does not support Python 3.14. Use the built-in Windows voice engine:
 ### Notes
 - First run downloads the model; after that it works offline.
 - MP3 requires `ffmpeg` and `TTS_ENABLE_MP3=1`.
+
+## Aika Avatar (Live2D + PNG fallback)
+Avatar rendering is now engine-based with a Live2D Web implementation and PNG fallback.
+
+### Assets
+- PNG fallback: `apps/web/public/assets/aika/AikaPregnant.png`
+- Live2D model: `apps/web/public/assets/aika/live2d/model3.json`
+  - Export your Cubism model to that folder.
+  - Keep the entry file named `model3.json` (Cubism 4). If you use `model.json`, update `LIVE2D_MODEL_URL` in `apps/web/src/components/AikaAvatar.tsx`.
+
+### Demo
+Open: `http://localhost:3000/avatar-demo`
+
+### Tuning
+- Expression mapping: `apps/web/src/avatar/Live2DWebEngine.ts` (mood → expression)
+- Mouth/eyes params: `apps/web/src/avatar/Live2DWebEngine.ts` (`ParamMouthOpenY`, `ParamEyeBallX`)
+- Fallback styling: `apps/web/src/avatar/PngAvatarEngine.ts`

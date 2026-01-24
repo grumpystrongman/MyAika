@@ -12,6 +12,10 @@ function mapRate(rate = 1.05) {
 
 function runPowerShell({ textPath, outputPath, voiceName, rate }) {
   return new Promise((resolve, reject) => {
+    const scriptPath = path.join(
+      os.tmpdir(),
+      `aika_sapi_${Date.now()}_${Math.random()}.ps1`
+    );
     const script = `
 param([string]$textPath,[string]$outPath,[string]$voice,[int]$rate)
 Add-Type -AssemblyName System.Speech
@@ -23,16 +27,21 @@ $speak.SetOutputToWaveFile($outPath)
 $speak.Speak($text)
 $speak.SetOutputToNull()
 `;
+    fs.writeFileSync(scriptPath, script, "utf-8");
 
     const args = [
       "-NoProfile",
       "-ExecutionPolicy",
       "Bypass",
-      "-Command",
-      script,
+      "-File",
+      scriptPath,
+      "-textPath",
       textPath,
+      "-outPath",
       outputPath,
+      "-voice",
       voiceName || "",
+      "-rate",
       String(rate)
     ];
 
@@ -42,6 +51,7 @@ $speak.SetOutputToNull()
       stderr += chunk.toString();
     });
     child.on("close", code => {
+      fs.unlinkSync(scriptPath);
       if (code !== 0) {
         return reject(new Error(stderr || "sapi_failed"));
       }
@@ -60,6 +70,13 @@ export async function generateWithSapi({ text, outputPath, rate, voiceName }) {
       voiceName,
       rate: mapRate(rate)
     });
+    if (!fs.existsSync(outputPath)) {
+      throw new Error("sapi_output_missing");
+    }
+    const size = fs.statSync(outputPath).size;
+    if (size < 64) {
+      throw new Error("sapi_output_too_small");
+    }
     const meta = readWavMeta(outputPath);
     return {
       engine: "sapi",
