@@ -16,6 +16,16 @@ app.use(express.json({ limit: "2mb" }));
 const persona = JSON.parse(
   fs.readFileSync(new URL("./persona.json", import.meta.url), "utf-8")
 );
+const configPath = new URL("./aika_config.json", import.meta.url);
+
+function readAikaConfig() {
+  try {
+    const raw = fs.readFileSync(configPath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return { voice: {} };
+  }
+}
 
 // Init memory + OpenAI
 const db = initMemory();
@@ -42,6 +52,47 @@ function inferBehaviorFromText(text) {
   return makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 });
 }
 
+
+
+const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini";
+
+async function fallbackChatCompletion({ systemPrompt, userText, maxOutputTokens }) {
+  try {
+    const r = await client.chat.completions.create({
+      model: FALLBACK_MODEL,
+      max_tokens: Math.min(600, Math.max(80, Number(maxOutputTokens) || Number(process.env.OPENAI_MAX_OUTPUT_TOKENS) || 220)),
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userText }
+      ]
+    });
+    const choice = r?.choices?.[0]?.message?.content || "";
+    return String(choice || "").trim();
+  } catch (err) {
+    console.error("OPENAI FALLBACK ERROR:", err);
+    return "";
+  }
+}
+
+function extractResponseText(response) {
+  if (!response) return "";
+  if (response.output_text) return String(response.output_text);
+  const output = Array.isArray(response.output) ? response.output : [];
+  const parts = [];
+  for (const item of output) {
+    if (typeof item?.text === "string") {
+      parts.push(item.text);
+    }
+    const content = Array.isArray(item.content) ? item.content : [];
+    for (const c of content) {
+      if ((c.type === "output_text" || c.type === "text") && typeof c.text === "string") {
+        parts.push(c.text);
+      }
+    }
+  }
+  return parts.join("\n").trim();
+}
+
 // Health check
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
@@ -50,9 +101,12 @@ app.get("/health", (_req, res) => {
 // Chat endpoint
 app.post("/chat", async (req, res) => {
   try {
-    const { userText } = req.body;
+    const { userText, maxOutputTokens } = req.body;
     if (!userText || typeof userText !== "string") {
       return res.status(400).json({ error: "userText required" });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: "missing_openai_api_key" });
     }
 
     // Save user message
@@ -95,8 +149,11 @@ INSTRUCTIONS:
 `.trim();
 
     // ✅ CORRECT Responses API CALL
-    const response = await client.responses.create({
+    let response;
+    try {
+      response = await client.responses.create({
       model: "gpt-5-mini",
+      max_output_tokens: Math.min(600, Math.max(80, Number(maxOutputTokens) || Number(process.env.OPENAI_MAX_OUTPUT_TOKENS) || 220)),
       input: [
         {
           role: "system",
@@ -115,10 +172,30 @@ INSTRUCTIONS:
           ]
         }
       ]
-    });
+      });
+    } catch (err) {
+      console.error("OPENAI ERROR:", err);
+      return res.status(502).json({
+        error: "openai_request_failed",
+        detail: err?.message || String(err)
+      });
+    }
 
     // Extract model text output
-    const rawText = response.output_text || "";
+    let rawText = extractResponseText(response);
+    if (!rawText.trim()) {
+      rawText = await fallbackChatCompletion({ systemPrompt, userText, maxOutputTokens });
+    }
+    if (!rawText.trim()) {
+      const summary = {
+        output_count: Array.isArray(response?.output) ? response.output.length : 0,
+        output_types: Array.isArray(response?.output) ? response.output.map(o => o?.type) : [],
+        content_types: Array.isArray(response?.output)
+          ? response.output.flatMap(o => (Array.isArray(o?.content) ? o.content.map(c => c?.type) : []))
+          : []
+      };
+      return res.status(502).json({ error: "empty_model_response", detail: JSON.stringify(summary) });
+    }
 
     const lines = rawText
       .split("\n")
@@ -168,6 +245,7 @@ INSTRUCTIONS:
 app.post("/api/aika/voice", async (req, res) => {
   try {
     const { text, settings } = req.body || {};
+    const cfg = readAikaConfig();
     const mergedSettings =
       settings && settings.voice && settings.voice.name
         ? settings
@@ -175,10 +253,19 @@ app.post("/api/aika/voice", async (req, res) => {
             ...settings,
             voice: {
               ...settings?.voice,
-              name: process.env.TTS_VOICE_NAME || settings?.voice?.name
+              name: process.env.TTS_VOICE_NAME || cfg.voice?.default_name || settings?.voice?.name
             }
           };
+    if (!mergedSettings.voice?.reference_wav_path && cfg.voice?.default_reference_wav) {
+      mergedSettings.voice = {
+        ...mergedSettings.voice,
+        reference_wav_path: cfg.voice.default_reference_wav
+      };
+    }
     const result = await generateAikaVoice({ text, settings: mergedSettings });
+    if (result.warnings && result.warnings.length > 0) {
+      res.set("x-tts-warnings", result.warnings.join(","));
+    }
     res.json({
       audioUrl: result.audioUrl,
       meta: result.meta,
@@ -196,6 +283,7 @@ app.post("/api/aika/voice", async (req, res) => {
 app.post("/api/aika/voice/inline", async (req, res) => {
   try {
     const { text, settings } = req.body || {};
+    const cfg = readAikaConfig();
     const mergedSettings =
       settings && settings.voice && settings.voice.name
         ? settings
@@ -203,10 +291,19 @@ app.post("/api/aika/voice/inline", async (req, res) => {
             ...settings,
             voice: {
               ...settings?.voice,
-              name: process.env.TTS_VOICE_NAME || settings?.voice?.name
+              name: process.env.TTS_VOICE_NAME || cfg.voice?.default_name || settings?.voice?.name
             }
           };
+    if (!mergedSettings.voice?.reference_wav_path && cfg.voice?.default_reference_wav) {
+      mergedSettings.voice = {
+        ...mergedSettings.voice,
+        reference_wav_path: cfg.voice.default_reference_wav
+      };
+    }
     const result = await generateAikaVoice({ text, settings: mergedSettings });
+    if (result.warnings && result.warnings.length > 0) {
+      res.set("x-tts-warnings", result.warnings.join(","));
+    }
     if (result.filePath.endsWith(".wav")) res.type("audio/wav");
     if (result.filePath.endsWith(".mp3")) res.type("audio/mpeg");
     res.sendFile(result.filePath);
@@ -228,6 +325,9 @@ app.get("/api/aika/voice/:id", (req, res) => {
 
 app.get("/api/aika/voices", async (_req, res) => {
   try {
+    if (process.env.TTS_ENGINE === "gptsovits") {
+      return res.json({ engine: "gptsovits", voices: [] });
+    }
     if (process.env.TTS_ENGINE === "sapi" || process.platform === "win32") {
       const voices = await listSapiVoices();
       return res.json({ engine: "sapi", voices });
@@ -260,6 +360,28 @@ app.post("/api/aika/voice/test", async (req, res) => {
   }
 });
 
+app.get("/api/aika/tts/health", async (_req, res) => {
+  const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+  if (engine !== "gptsovits") {
+    return res.json({ engine, online: engine === "sapi" || engine === "coqui" });
+  }
+  const url = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    const r = await fetch(url, { method: "GET", signal: controller.signal });
+    clearTimeout(timeout);
+    return res.json({ engine, online: true, status: r.status });
+  } catch {
+    return res.json({ engine, online: false });
+  }
+});
+
+app.get("/api/aika/config", (_req, res) => {
+  const cfg = readAikaConfig();
+  res.json(cfg);
+});
+
 app.post("/api/aika/voice/preference", (req, res) => {
   const { name, reference_wav_path } = req.body || {};
   const pref =
@@ -274,6 +396,19 @@ app.post("/api/aika/voice/preference", (req, res) => {
     role: "assistant",
     content: pref,
     tags: "voice_preference"
+  });
+  res.json({ ok: true });
+});
+
+app.post("/api/aika/voice/prompt", (req, res) => {
+  const { prompt_text } = req.body || {};
+  if (!prompt_text || typeof prompt_text !== "string") {
+    return res.status(400).json({ error: "prompt_text_required" });
+  }
+  addMemory(db, {
+    role: "assistant",
+    content: `Aika voice prompt: ${prompt_text}`,
+    tags: "voice_prompt"
   });
   res.json({ ok: true });
 });

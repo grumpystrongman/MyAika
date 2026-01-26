@@ -56,6 +56,23 @@ Coqui TTS does not support Python 3.14. Use the built-in Windows voice engine:
 - First run downloads the model; after that it works offline.
 - MP3 requires `ffmpeg` and `TTS_ENABLE_MP3=1`.
 
+### GPT-SoVITS (better voice quality)
+If you want more natural voice quality, run GPT-SoVITS as a local Python service.
+
+1) Clone GPT-SoVITS somewhere (not inside this repo).
+2) Set env:
+   - `TTS_ENGINE=gptsovits`
+   - `GPTSOVITS_REPO_PATH=path/to/GPT-SoVITS`
+   - `GPTSOVITS_URL=http://localhost:9881/tts`
+3) Install deps:
+   - `python -m pip install -r gptsovits_service/requirements.txt`
+4) Run the service:
+   - `python gptsovits_service/server.py` or `npm run gptsovits`
+
+The engine uses:
+- Reference WAV: `apps/server/voices/*`
+- Prompt text: set in the UI (“Voice prompt text”)
+
 ## Aika Avatar (Live2D + PNG fallback)
 Avatar rendering is now engine-based with a Live2D Web implementation and PNG fallback.
 

@@ -8,6 +8,7 @@ import { readWavMeta } from "./wav_meta.js";
 import { generateWithCoqui } from "./engine_coqui.js";
 import { generateWithSapi } from "./engine_sapi.js";
 import { generateWithStub } from "./engine_stub.js";
+import { generateWithGptSovits } from "./engine_gptsovits.js";
 
 const ENGINE = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
 const MODEL_ID =
@@ -99,6 +100,15 @@ export async function generateAikaVoice({ text, settings = {} }) {
   let engineMeta;
   if (ENGINE === "stub") {
     engineMeta = await generateWithStub({ outputPath });
+  } else if (ENGINE === "gptsovits") {
+    engineMeta = await generateWithGptSovits({
+      text: formatted,
+      outputPath,
+      refWavPath: voicePath,
+      promptText: normalized.voice?.prompt_text || "",
+      language: "en",
+      rate: normalized.rate
+    });
   } else if (ENGINE === "sapi") {
     if (voicePath) warnings.push("reference_wav_path_ignored_for_sapi");
     engineMeta = await generateWithSapi({

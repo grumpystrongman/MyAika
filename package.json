@@ -10,7 +10,8 @@
     "dev:server": "npm run dev -w apps/server",
     "dev:web": "npm run dev -w apps/web",
     "tts": "node apps/server/scripts/tts_sample.js",
-    "test": "node --test apps/server/tests"
+    "test": "node --test apps/server/tests",
+    "gptsovits": "node apps/server/scripts/start_gptsovits.js"
   },
   "dependencies": {
     "tts": "^0.1.0"

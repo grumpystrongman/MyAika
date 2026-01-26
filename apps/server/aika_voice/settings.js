@@ -20,6 +20,9 @@ export function normalizeSettings(input = {}) {
   if (input.voice && typeof input.voice.name === "string") {
     voice.name = input.voice.name;
   }
+  if (input.voice && typeof input.voice.prompt_text === "string") {
+    voice.prompt_text = input.voice.prompt_text;
+  }
 
   if (input.format && input.format !== "wav" && input.format !== "mp3") {
     warnings.push(`Unsupported format "${input.format}", using wav.`);

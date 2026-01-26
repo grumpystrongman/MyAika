@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Emotion } from "@myaika/shared";
 import AikaAvatar from "../src/components/AikaAvatar";
 
-const SERVER_URL = "http://localhost:8787";
+const SERVER_URL = "http://localhost:8790";
 
 const THINKING_CUES = [
   "Hold on?I'm thinking.",
@@ -91,6 +91,19 @@ function applyEmotionTuning(settings, behavior) {
   };
 }
 
+async function unlockAudio() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return false;
+  const ctx = new AudioCtx();
+  const buffer = ctx.createBuffer(1, 1, 22050);
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(ctx.destination);
+  source.start(0);
+  await ctx.close();
+  return true;
+}
+
 async function playBlobWithAudioContext(blob) {
   const arrayBuffer = await blob.arrayBuffer();
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -121,10 +134,19 @@ export default function Home() {
   const [micError, setMicError] = useState("");
   const [micLevel, setMicLevel] = useState(0);
   const [micStatus, setMicStatus] = useState("Mic idle");
+  const [chatError, setChatError] = useState("");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [textOnly, setTextOnly] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [fastReplies, setFastReplies] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [ttsEngineOnline, setTtsEngineOnline] = useState(null);
+  const [voicePromptText, setVoicePromptText] = useState("");
   const [ttsStatus, setTtsStatus] = useState("idle");
   const [ttsError, setTtsError] = useState("");
+  const [ttsWarnings, setTtsWarnings] = useState([]);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [pendingSpeak, setPendingSpeak] = useState(null);
   const [ttsVoices, setTtsVoices] = useState([]);
   const [lastAssistantText, setLastAssistantText] = useState("");
   const [ttsSettings, setTtsSettings] = useState({
@@ -134,12 +156,13 @@ export default function Home() {
     pitch: 0,
     energy: 1.0,
     pause: 1.1,
-    voice: { reference_wav_path: "fem_aika.wav", name: "" }
+    voice: { reference_wav_path: "fem_aika.wav", name: "", prompt_text: "" }
   });
   const recognizerRef = useRef(null);
   const audioRef = useRef(null);
   const prefTimerRef = useRef(null);
   const lastPrefRef = useRef("");
+  const promptTimerRef = useRef(null);
   const inputRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -154,27 +177,47 @@ export default function Home() {
     if (!text) return;
 
     stopMic();
-    if (autoSpeak && !textOnly) {
+    if (voiceMode && autoSpeak && !textOnly) {
       speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft" });
     }
     setLog(l => [...l, { role: "user", text }]);
     setUserText("");
 
-    const r = await fetch(`${SERVER_URL}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userText: text })
-    });
+    setChatError("");
+    let r;
+    try {
+      r = await fetch(`${SERVER_URL}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userText: text, maxOutputTokens: fastReplies ? 140 : 260 })
+      });
+    } catch (err) {
+      setChatError("chat_unreachable");
+      setLog(l => [...l, { role: "assistant", text: "(no reply)" }]);
+      return;
+    }
 
-    const data = await r.json();
-    const reply = data.text || "(no reply)";
+    let data = {};
+    try {
+      data = await r.json();
+    } catch {
+      data = {};
+    }
+    if (!r.ok) {
+      const detail = data.detail ? ` (${data.detail})` : "";
+      setChatError(`${data.error || "chat_failed"}${detail}`);
+    }
+    const reply = data.text || "";
+    if (!reply) {
+      setChatError(data.error || "empty_reply");
+    }
     const b = data.behavior || behavior;
 
     setBehavior({ ...b, speaking: false });
-    setLog(l => [...l, { role: "assistant", text: reply }]);
+    setLog(l => [...l, { role: "assistant", text: reply || "(no reply)" }]);
     setLastAssistantText(reply);
 
-    if (autoSpeak && !textOnly) {
+    if (autoSpeak && !textOnly && reply) {
       speak(reply);
     }
   }
@@ -202,6 +245,10 @@ export default function Home() {
 
   async function testVoice() {
     try {
+      if (!audioUnlocked) {
+        setTtsError("audio_locked_click_enable");
+        return;
+      }
       await stopAudio();
       setTtsError("");
       setTtsStatus("loading");
@@ -224,6 +271,10 @@ export default function Home() {
         throw new Error(errText || "voice_test_failed");
       }
 
+      const warningsHeader = r.headers.get("x-tts-warnings");
+      if (warningsHeader) {
+        setTtsWarnings(warningsHeader.split(",").map(s => s.trim()).filter(Boolean));
+      }
       const blob = await r.blob();
       if (!blob || blob.size < 64) throw new Error("audio_blob_invalid");
 
@@ -237,6 +288,9 @@ export default function Home() {
         URL.revokeObjectURL(objectUrl);
         setTtsStatus("idle");
         setBehavior(prev => ({ ...prev, speaking: false }));
+        if (voiceMode && !textOnly) {
+          setTimeout(() => startMic(), 200);
+        }
       };
       audio.onerror = async () => {
         URL.revokeObjectURL(objectUrl);
@@ -245,6 +299,9 @@ export default function Home() {
           await playBlobWithAudioContext(blob);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          if (voiceMode && !textOnly) {
+            setTimeout(() => startMic(), 200);
+          }
         } catch (e) {
           setTtsStatus("error");
           setTtsError(e?.message || "audio_play_failed");
@@ -271,6 +328,11 @@ export default function Home() {
 
   async function speak(textToSpeak, settingsOverride) {
     if (textOnly) return;
+    if (!audioUnlocked) {
+      setPendingSpeak({ text: textToSpeak, settings: settingsOverride });
+      setTtsError("audio_locked_click_enable");
+      return;
+    }
     const text = String(textToSpeak || "").trim();
     if (!text) return;
 
@@ -296,6 +358,10 @@ export default function Home() {
         throw new Error(errText || "tts_failed");
       }
 
+      const warningsHeader = r.headers.get("x-tts-warnings");
+      if (warningsHeader) {
+        setTtsWarnings(warningsHeader.split(",").map(s => s.trim()).filter(Boolean));
+      }
       const blob = await r.blob();
       if (!blob || blob.size < 64) throw new Error("audio_blob_invalid");
 
@@ -309,6 +375,9 @@ export default function Home() {
         URL.revokeObjectURL(objectUrl);
         setTtsStatus("idle");
         setBehavior(prev => ({ ...prev, speaking: false }));
+        if (voiceMode && !textOnly) {
+          setTimeout(() => startMic(), 200);
+        }
       };
       audio.onerror = async () => {
         URL.revokeObjectURL(objectUrl);
@@ -317,6 +386,9 @@ export default function Home() {
           await playBlobWithAudioContext(blob);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          if (voiceMode && !textOnly) {
+            setTimeout(() => startMic(), 200);
+          }
         } catch (e) {
           setTtsStatus("error");
           setTtsError(e?.message || "audio_play_failed");
@@ -492,6 +564,56 @@ export default function Home() {
   }
 
   useEffect(() => {
+    if (!audioUnlocked || !pendingSpeak) return;
+    const { text, settings } = pendingSpeak;
+    setPendingSpeak(null);
+    speak(text, settings);
+  }, [audioUnlocked, pendingSpeak]);
+
+  useEffect(() => {
+    async function checkTtsEngine() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/aika/tts/health`);
+        const data = await r.json();
+        if (data?.engine === "gptsovits") {
+          setTtsEngineOnline(Boolean(data.online));
+        } else if (data?.engine) {
+          setTtsEngineOnline(false);
+        } else {
+          setTtsEngineOnline(null);
+        }
+      } catch {
+        setTtsEngineOnline(null);
+      }
+    }
+    checkTtsEngine();
+    const id = setInterval(checkTtsEngine, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/aika/config`);
+        const cfg = await r.json();
+        if (cfg?.voice?.default_name) {
+          setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: cfg.voice.default_name } }));
+        }
+        if (cfg?.voice?.default_reference_wav) {
+          setTtsSettings(s => ({ ...s, voice: { ...s.voice, reference_wav_path: cfg.voice.default_reference_wav } }));
+        }
+        if (cfg?.voice?.prompt_text) {
+          setVoicePromptText(cfg.voice.prompt_text);
+          setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: cfg.voice.prompt_text } }));
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadConfig();
+  }, []);
+
+  useEffect(() => {
     async function loadVoices() {
       try {
         const r = await fetch(`${SERVER_URL}/api/aika/voices`);
@@ -532,6 +654,22 @@ export default function Home() {
       }
     }, 600);
   }, [ttsSettings.voice?.name, ttsSettings.voice?.reference_wav_path]);
+
+  useEffect(() => {
+    if (!voicePromptText) return;
+    if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
+    promptTimerRef.current = setTimeout(async () => {
+      try {
+        await fetch(`${SERVER_URL}/api/aika/voice/prompt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt_text: voicePromptText })
+        });
+      } catch {
+        // ignore
+      }
+    }, 800);
+  }, [voicePromptText]);
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -629,14 +767,8 @@ export default function Home() {
           <button onClick={() => send()} style={{ padding: "12px 16px", borderRadius: 12 }}>
             Send
           </button>
-          <button
-            onClick={() => speak(lastAssistantText)}
-            style={{ padding: "12px 16px", borderRadius: 12 }}
-            disabled={!lastAssistantText}
-          >
-            Speak
-          </button>
         </div>
+        {showAdvanced && (
         <div style={{
           display: "grid",
           gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -649,6 +781,19 @@ export default function Home() {
           <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
             Aika Voice Settings
           </div>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+            Voice prompt text
+            <textarea
+              rows={3}
+              value={voicePromptText}
+              onChange={(e) => {
+                setVoicePromptText(e.target.value);
+                setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: e.target.value } }));
+              }}
+              placeholder="Describe Aika's voice/persona..."
+              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+            />
+          </label>
           <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
             <button
               onClick={testVoice}
@@ -656,22 +801,14 @@ export default function Home() {
             >
               Test Voice
             </button>
+            <button
+              onClick={() => speak(lastAssistantText)}
+              style={{ padding: "8px 12px", borderRadius: 8 }}
+              disabled={!lastAssistantText}
+            >
+              Manual Speak
+            </button>
           </div>
-          {ttsVoices.length > 0 && (
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
-              Available voices
-              <select
-                value={ttsSettings.voice.name || ""}
-                onChange={(e) => setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: e.target.value } }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-              >
-                <option value="">(default)</option>
-                {ttsVoices.map(v => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-          )}
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
             Style
             <select
@@ -744,16 +881,6 @@ export default function Home() {
             />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Voice name (Windows SAPI)
-            <input
-              type="text"
-              placeholder="Microsoft Zira Desktop"
-              value={ttsSettings.voice.name || ""}
-              onChange={(e) => setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: e.target.value } }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
             Reference WAV (apps/server/voices)
             <input
               type="text"
@@ -767,12 +894,10 @@ export default function Home() {
             Reference file must be inside apps/server/voices. Leave blank for default voice.
           </div>
           <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-            If using TTS_ENGINE=sapi, set a Windows voice name instead.
-          </div>
-          <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
             For a more feminine voice, add a speaker WAV and set it above.
           </div>
         </div>
+        )}
         {micState === "unsupported" && (
           <div style={{ color: "#b45309", fontSize: 12 }}>
             Mic not supported in this browser. Try Chrome/Edge.
@@ -789,6 +914,24 @@ export default function Home() {
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
           <input
             type="checkbox"
+            checked={voiceMode}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setVoiceMode(v);
+              if (v) {
+                setAutoSpeak(true);
+                setTextOnly(false);
+                startMic();
+              } else {
+                stopMic();
+              }
+            }}
+          />
+          Voice Mode (listen + auto speak)
+        </label>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+          <input
+            type="checkbox"
             checked={autoSpeak}
             onChange={(e) => {
               const v = e.target.checked;
@@ -797,6 +940,14 @@ export default function Home() {
             }}
           />
           Auto Speak
+        </label>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+          <input
+            type="checkbox"
+            checked={fastReplies}
+            onChange={(e) => setFastReplies(e.target.checked)}
+          />
+          Fast replies (shorter, quicker)
         </label>
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
           <input
@@ -813,9 +964,30 @@ export default function Home() {
         <div style={{ color: "#6b7280", fontSize: 12 }}>
           Voice: {ttsStatus}
         </div>
+        <div style={{ color: "#6b7280", fontSize: 12 }}>{ttsEngineOnline === true ? "GPT-SoVITS: online" : ttsEngineOnline === false ? "GPT-SoVITS: offline (fallback)" : "GPT-SoVITS: unknown"}</div>
+        <button
+          onClick={async () => {
+            const ok = await unlockAudio();
+            setAudioUnlocked(Boolean(ok));
+            if (ok) setTtsError("");
+          }}
+          style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
+        >
+          {audioUnlocked ? "Audio Enabled" : "Enable Audio"}
+        </button>
         {ttsError && (
           <div style={{ color: "#b91c1c", fontSize: 12 }}>
             TTS error: {ttsError}
+          </div>
+        )}
+        {chatError && (
+          <div style={{ color: "#b91c1c", fontSize: 12 }}>
+            Chat error: {chatError}
+          </div>
+        )}
+        {ttsWarnings.length > 0 && (
+          <div style={{ color: "#92400e", fontSize: 12 }}>
+            TTS warnings: {ttsWarnings.join(", ")}
           </div>
         )}
         {micState === "idle" && (
