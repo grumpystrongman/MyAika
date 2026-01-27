@@ -365,11 +365,21 @@ app.get("/api/aika/tts/health", async (_req, res) => {
   if (engine !== "gptsovits") {
     return res.json({ engine, online: engine === "sapi" || engine === "coqui" });
   }
-  const url = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";
+  const ttsUrl = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";
+  let healthUrl = ttsUrl;
+  try {
+    const u = new URL(ttsUrl);
+    if (u.pathname.endsWith("/tts")) {
+      u.pathname = u.pathname.replace(/\\/tts$/, "/docs");
+    }
+    healthUrl = u.toString();
+  } catch {
+    healthUrl = ttsUrl.replace(/\\/tts$/, "/docs");
+  }
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1500);
-    const r = await fetch(url, { method: "GET", signal: controller.signal });
+    const r = await fetch(healthUrl, { method: "GET", signal: controller.signal });
     clearTimeout(timeout);
     return res.json({ engine, online: true, status: r.status });
   } catch {

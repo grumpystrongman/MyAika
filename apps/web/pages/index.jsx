@@ -156,7 +156,7 @@ export default function Home() {
     pitch: 0,
     energy: 1.0,
     pause: 1.1,
-    voice: { reference_wav_path: "fem_aika.wav", name: "", prompt_text: "" }
+    voice: { reference_wav_path: "riko_sample.wav", name: "", prompt_text: "" }
   });
   const recognizerRef = useRef(null);
   const audioRef = useRef(null);

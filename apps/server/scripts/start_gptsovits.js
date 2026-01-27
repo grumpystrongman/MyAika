@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import dotenv from "dotenv";
 
@@ -15,7 +16,10 @@ if (!repoPath) {
 const pythonBin = process.env.GPTSOVITS_PYTHON_BIN || "python";
 const port = process.env.GPTSOVITS_PORT || "9882";
 const bindAddr = process.env.GPTSOVITS_BIND || "0.0.0.0";
-const configPath = process.env.GPTSOVITS_CONFIG || "GPT_SoVITS/configs/tts_infer.yaml";
+const defaultConfig = path.join(repoRoot, "apps", "server", "gptsovits_tts_infer_v3.yaml");
+const configPath =
+  process.env.GPTSOVITS_CONFIG ||
+  (fs.existsSync(defaultConfig) ? defaultConfig : "GPT_SoVITS/configs/tts_infer.yaml");
 
 const scriptPath = path.join(repoPath, "api_v2.py");
 const args = [scriptPath, "-a", bindAddr, "-p", port, "-c", configPath];

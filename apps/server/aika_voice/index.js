@@ -9,6 +9,7 @@ import { generateWithCoqui } from "./engine_coqui.js";
 import { generateWithSapi } from "./engine_sapi.js";
 import { generateWithStub } from "./engine_stub.js";
 import { generateWithGptSovits } from "./engine_gptsovits.js";
+import { normalizeReferenceWav } from "./voice_ref.js";
 
 const ENGINE = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
 const MODEL_ID =
@@ -51,9 +52,21 @@ export async function generateAikaVoice({ text, settings = {} }) {
   if (normalized.energy !== 1.0) warnings.push("energy_ignored");
   if (normalized.rate !== 1.05) warnings.push("rate_ignored");
 
-  const voicePath = resolveVoicePath(normalized.voice?.reference_wav_path);
+  let voicePath = resolveVoicePath(normalized.voice?.reference_wav_path);
   if (normalized.voice?.reference_wav_path && !voicePath) {
     warnings.push("reference_wav_path_invalid");
+  }
+  if (voicePath) {
+    try {
+      const normalizedRef = normalizeReferenceWav(voicePath);
+      if (normalizedRef.trimmed) warnings.push("reference_wav_trimmed");
+      voicePath = normalizedRef.path;
+    } catch (err) {
+      const detail = err?.detail ? ` (${err.detail})` : "";
+      const e = new Error(`${err.message || "reference_wav_invalid"}${detail}`);
+      e.status = 400;
+      throw e;
+    }
   }
 
   const voiceHash = voicePath ? hashFile(voicePath) : "";
