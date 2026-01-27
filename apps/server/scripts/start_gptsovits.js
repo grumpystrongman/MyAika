@@ -24,6 +24,11 @@ const configPath =
 const scriptPath = path.join(repoPath, "api_v2.py");
 const args = [scriptPath, "-a", bindAddr, "-p", port, "-c", configPath];
 
+const ffmpegBin = path.join(repoRoot, "tools", "ffmpeg", "ffmpeg-master-latest-win64-gpl-shared", "bin");
+if (fs.existsSync(ffmpegBin)) {
+  process.env.PATH = `${ffmpegBin};${process.env.PATH || ""}`;
+}
+
 const child = spawn(pythonBin, args, {
   cwd: repoPath,
   stdio: "inherit",

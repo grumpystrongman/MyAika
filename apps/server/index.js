@@ -2,11 +2,13 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 import fs from "node:fs";
+import path from "node:path";
 import OpenAI from "openai";
 import { initMemory, addMemory, searchMemories } from "./memory.js";
 import { Emotion, makeBehavior } from "@myaika/shared";
 import { generateAikaVoice, resolveAudioPath } from "./aika_voice/index.js";
-import { listSapiVoices } from "./aika_voice/engine_sapi.js";
+import { trimReferenceWavToFile } from "./aika_voice/voice_ref.js";
+import { voicesDir } from "./aika_voice/paths.js";
 
 const app = express();
 app.use(cors());
@@ -26,6 +28,36 @@ function readAikaConfig() {
     return { voice: {} };
   }
 }
+
+let defaultRefOverride = null;
+function prepareDefaultReference() {
+  const cfg = readAikaConfig();
+  const baseRef = cfg?.voice?.default_reference_wav;
+  if (!baseRef) return;
+  const inputPath = path.resolve(voicesDir, baseRef);
+  if (!fs.existsSync(inputPath)) return;
+  const trimmedName = baseRef.replace(/\\.wav$/i, "_trim_6s.wav");
+  const outputPath = path.resolve(voicesDir, trimmedName);
+  try {
+    trimReferenceWavToFile(inputPath, outputPath, { targetSec: 6 });
+    defaultRefOverride = trimmedName;
+  } catch (err) {
+    console.warn("Reference WAV prep failed:", err?.message || err);
+  }
+}
+prepareDefaultReference();
+
+function prepareFemAikaTrim() {
+  const femPath = path.resolve(voicesDir, "fem_aika.wav");
+  if (!fs.existsSync(femPath)) return;
+  const outPath = path.resolve(voicesDir, "fem_aika_trim_6s.wav");
+  try {
+    trimReferenceWavToFile(femPath, outPath, { targetSec: 6 });
+  } catch (err) {
+    console.warn("Fem Aika trim failed:", err?.message || err);
+  }
+}
+prepareFemAikaTrim();
 
 // Init memory + OpenAI
 const db = initMemory();
@@ -259,7 +291,7 @@ app.post("/api/aika/voice", async (req, res) => {
     if (!mergedSettings.voice?.reference_wav_path && cfg.voice?.default_reference_wav) {
       mergedSettings.voice = {
         ...mergedSettings.voice,
-        reference_wav_path: cfg.voice.default_reference_wav
+        reference_wav_path: defaultRefOverride || cfg.voice.default_reference_wav
       };
     }
     const result = await generateAikaVoice({ text, settings: mergedSettings });
@@ -297,7 +329,7 @@ app.post("/api/aika/voice/inline", async (req, res) => {
     if (!mergedSettings.voice?.reference_wav_path && cfg.voice?.default_reference_wav) {
       mergedSettings.voice = {
         ...mergedSettings.voice,
-        reference_wav_path: cfg.voice.default_reference_wav
+        reference_wav_path: defaultRefOverride || cfg.voice.default_reference_wav
       };
     }
     const result = await generateAikaVoice({ text, settings: mergedSettings });
@@ -325,14 +357,7 @@ app.get("/api/aika/voice/:id", (req, res) => {
 
 app.get("/api/aika/voices", async (_req, res) => {
   try {
-    if (process.env.TTS_ENGINE === "gptsovits") {
-      return res.json({ engine: "gptsovits", voices: [] });
-    }
-    if (process.env.TTS_ENGINE === "sapi" || process.platform === "win32") {
-      const voices = await listSapiVoices();
-      return res.json({ engine: "sapi", voices });
-    }
-    return res.json({ engine: process.env.TTS_ENGINE || "coqui", voices: [] });
+    return res.json({ engine: "gptsovits", voices: [] });
   } catch (err) {
     console.error("Aika Voice list ERROR:", err);
     res.status(500).json({ error: "voice_list_failed" });
@@ -370,11 +395,11 @@ app.get("/api/aika/tts/health", async (_req, res) => {
   try {
     const u = new URL(ttsUrl);
     if (u.pathname.endsWith("/tts")) {
-      u.pathname = u.pathname.replace(/\\/tts$/, "/docs");
+      u.pathname = u.pathname.replace(/\/tts$/, "/docs");
     }
     healthUrl = u.toString();
   } catch {
-    healthUrl = ttsUrl.replace(/\\/tts$/, "/docs");
+    healthUrl = ttsUrl.replace(/\/tts$/, "/docs");
   }
   try {
     const controller = new AbortController();

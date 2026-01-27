@@ -147,7 +147,6 @@ export default function Home() {
   const [ttsWarnings, setTtsWarnings] = useState([]);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [pendingSpeak, setPendingSpeak] = useState(null);
-  const [ttsVoices, setTtsVoices] = useState([]);
   const [lastAssistantText, setLastAssistantText] = useState("");
   const [ttsSettings, setTtsSettings] = useState({
     style: "brat_baddy",
@@ -406,13 +405,7 @@ export default function Home() {
     } catch (e) {
       setTtsStatus("error");
       setTtsError(e?.message || "tts_failed");
-      if ("speechSynthesis" in window) {
-        const u = new SpeechSynthesisUtterance(text);
-        u.onend = () => setBehavior(prev => ({ ...prev, speaking: false }));
-        window.speechSynthesis.speak(u);
-      } else {
-        setBehavior(prev => ({ ...prev, speaking: false }));
-      }
+      setBehavior(prev => ({ ...prev, speaking: false }));
     }
   }
 
@@ -596,9 +589,6 @@ export default function Home() {
       try {
         const r = await fetch(`${SERVER_URL}/api/aika/config`);
         const cfg = await r.json();
-        if (cfg?.voice?.default_name) {
-          setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: cfg.voice.default_name } }));
-        }
         if (cfg?.voice?.default_reference_wav) {
           setTtsSettings(s => ({ ...s, voice: { ...s.voice, reference_wav_path: cfg.voice.default_reference_wav } }));
         }
@@ -613,31 +603,10 @@ export default function Home() {
     loadConfig();
   }, []);
 
-  useEffect(() => {
-    async function loadVoices() {
-      try {
-        const r = await fetch(`${SERVER_URL}/api/aika/voices`);
-        const data = await r.json();
-        if (Array.isArray(data.voices)) {
-          setTtsVoices(data.voices);
-          if (!ttsSettings.voice?.name && data.voices.length > 0) {
-            const preferred = data.voices.includes("Microsoft Zira Desktop")
-              ? "Microsoft Zira Desktop"
-              : data.voices[0];
-            setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: preferred } }));
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-    loadVoices();
-  }, []);
 
   useEffect(() => {
-    const name = ttsSettings.voice?.name || "";
     const ref = ttsSettings.voice?.reference_wav_path || "";
-    const key = name ? `name:${name}` : ref ? `ref:${ref}` : "";
+    const key = ref ? `ref:${ref}` : "";
     if (!key || key === lastPrefRef.current) return;
 
     if (prefTimerRef.current) clearTimeout(prefTimerRef.current);
@@ -646,14 +615,14 @@ export default function Home() {
         await fetch(`${SERVER_URL}/api/aika/voice/preference`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, reference_wav_path: ref })
+          body: JSON.stringify({ reference_wav_path: ref })
         });
         lastPrefRef.current = key;
       } catch {
         // ignore
       }
     }, 600);
-  }, [ttsSettings.voice?.name, ttsSettings.voice?.reference_wav_path]);
+  }, [ttsSettings.voice?.reference_wav_path]);
 
   useEffect(() => {
     if (!voicePromptText) return;
@@ -964,7 +933,7 @@ export default function Home() {
         <div style={{ color: "#6b7280", fontSize: 12 }}>
           Voice: {ttsStatus}
         </div>
-        <div style={{ color: "#6b7280", fontSize: 12 }}>{ttsEngineOnline === true ? "GPT-SoVITS: online" : ttsEngineOnline === false ? "GPT-SoVITS: offline (fallback)" : "GPT-SoVITS: unknown"}</div>
+        <div style={{ color: "#6b7280", fontSize: 12 }}>{ttsEngineOnline === true ? "GPT-SoVITS: online" : ttsEngineOnline === false ? "GPT-SoVITS: offline" : "GPT-SoVITS: unknown"}</div>
         <button
           onClick={async () => {
             const ok = await unlockAudio();

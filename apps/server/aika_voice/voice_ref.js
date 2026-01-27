@@ -90,3 +90,32 @@ export function normalizeReferenceWav(inputPath, { minSec = 3, maxSec = 10, targ
   }
   return { path: outPath, duration: targetSec, trimmed: true };
 }
+
+export function trimReferenceWavToFile(inputPath, outputPath, { minSec = 3, maxSec = 10, targetSec = 6 } = {}) {
+  const ext = path.extname(inputPath).toLowerCase();
+  if (ext !== ".wav") {
+    throw new Error("reference_wav_not_wav");
+  }
+  const buffer = fs.readFileSync(inputPath);
+  const header = parseWavHeader(buffer);
+  const duration = header.data.size / header.fmt.byteRate;
+  if (!duration || duration <= 0) {
+    throw new Error("reference_wav_invalid_duration");
+  }
+  if (duration < minSec) {
+    const err = new Error("reference_wav_too_short");
+    err.detail = `duration=${duration.toFixed(2)}s`;
+    throw err;
+  }
+  if (duration <= maxSec) {
+    if (inputPath !== outputPath) {
+      fs.copyFileSync(inputPath, outputPath);
+    }
+    return { path: outputPath, duration, trimmed: false };
+  }
+  const bytesPerSecond = header.fmt.byteRate;
+  const bytesNeededRaw = Math.floor(targetSec * bytesPerSecond);
+  const bytesNeeded = Math.max(header.fmt.blockAlign, bytesNeededRaw - (bytesNeededRaw % header.fmt.blockAlign));
+  writeTrimmedWav(buffer, header, bytesNeeded, outputPath);
+  return { path: outputPath, duration: targetSec, trimmed: true };
+}

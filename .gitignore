@@ -1,4 +1,7 @@
 node_modules
+.venv
+gptsovits_service/.venv/
+tools/ffmpeg/
 .env
 .env.*
 dist
@@ -6,3 +9,4 @@ dist
 out
 *.sqlite
 .DS_Store
+apps/server/voices/*_trim_6s.wav

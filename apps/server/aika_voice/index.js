@@ -5,9 +5,6 @@ import { normalizeSettings } from "./settings.js";
 import { cacheDir, voicesDir, maxChars } from "./paths.js";
 import { cachePaths, ensureDir, hashFile, sha256 } from "./cache.js";
 import { readWavMeta } from "./wav_meta.js";
-import { generateWithCoqui } from "./engine_coqui.js";
-import { generateWithSapi } from "./engine_sapi.js";
-import { generateWithStub } from "./engine_stub.js";
 import { generateWithGptSovits } from "./engine_gptsovits.js";
 import { normalizeReferenceWav } from "./voice_ref.js";
 
@@ -55,6 +52,12 @@ export async function generateAikaVoice({ text, settings = {} }) {
   let voicePath = resolveVoicePath(normalized.voice?.reference_wav_path);
   if (normalized.voice?.reference_wav_path && !voicePath) {
     warnings.push("reference_wav_path_invalid");
+  }
+  if (voicePath && voicePath.endsWith(`${path.sep}fem_aika.wav`)) {
+    const trimmedFem = path.join(voicesDir, "fem_aika_trim_6s.wav");
+    if (fs.existsSync(trimmedFem)) {
+      voicePath = trimmedFem;
+    }
   }
   if (voicePath) {
     try {
@@ -110,10 +113,14 @@ export async function generateAikaVoice({ text, settings = {} }) {
     voice_path: voicePath
   };
 
+  if (ENGINE !== "gptsovits") {
+    const err = new Error("gptsovits_only");
+    err.status = 400;
+    throw err;
+  }
+
   let engineMeta;
-  if (ENGINE === "stub") {
-    engineMeta = await generateWithStub({ outputPath });
-  } else if (ENGINE === "gptsovits") {
+  if (ENGINE === "gptsovits") {
     engineMeta = await generateWithGptSovits({
       text: formatted,
       outputPath,
@@ -122,16 +129,6 @@ export async function generateAikaVoice({ text, settings = {} }) {
       language: "en",
       rate: normalized.rate
     });
-  } else if (ENGINE === "sapi") {
-    if (voicePath) warnings.push("reference_wav_path_ignored_for_sapi");
-    engineMeta = await generateWithSapi({
-      text: formatted,
-      outputPath,
-      rate: normalized.rate,
-      voiceName: normalized.voice?.name
-    });
-  } else {
-    engineMeta = await generateWithCoqui(payload);
   }
 
   let wavMeta = {};
