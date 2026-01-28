@@ -4,6 +4,7 @@ gptsovits_service/.venv/
 tools/ffmpeg/
 .env
 .env.*
+!.env.example
 dist
 .next
 out
