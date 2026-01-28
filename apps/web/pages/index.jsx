@@ -171,7 +171,7 @@ export default function Home() {
   const [log, setLog] = useState([
     {
       role: "assistant",
-      text: "Hello Master, Aika is here to serve. How may I assist you today."
+      text: "Hello Jeff, Aika is here to serve. How may I assist you today?"
     }
   ]);
   const [behavior, setBehavior] = useState({ emotion: Emotion.NEUTRAL, intensity: 0.35, speaking: false });
@@ -670,6 +670,15 @@ export default function Home() {
       window.removeEventListener("keydown", onFirstGesture);
     };
   }, [audioUnlocked]);
+
+  useEffect(() => {
+    if (!audioUnlocked) return;
+    if (!autoSpeak || textOnly) return;
+    if (lastAssistantText) return;
+    const greeting = "Hello Jeff, Aika is here to serve. How may I assist you today?";
+    setLastAssistantText(greeting);
+    speakChunks(greeting, { use_raw_text: true });
+  }, [audioUnlocked, autoSpeak, textOnly, lastAssistantText]);
 
   useEffect(() => {
     if (!voiceMode || micState !== "idle") return;
