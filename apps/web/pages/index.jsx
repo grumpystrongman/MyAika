@@ -111,6 +111,14 @@ function splitSpeechText(text, maxChars = 180) {
   return chunks;
 }
 
+function stripEmotionTags(text) {
+  let cleaned = String(text || "");
+  cleaned = cleaned.replace(/```json[\s\S]*?```/gi, "");
+  cleaned = cleaned.replace(/```[\s\S]*?"emotion"[\s\S]*?```/gi, "");
+  cleaned = cleaned.replace(/\{[^}]*"emotion"[^}]*\}/gi, "");
+  return cleaned.replace(/\s+/g, " ").trim();
+}
+
 async function unlockAudio() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx) return false;
@@ -196,6 +204,7 @@ export default function Home() {
   const silenceTimerRef = useRef(null);
   const latestTranscriptRef = useRef("");
   const micStartingRef = useRef(false);
+  const ttsActiveRef = useRef(false);
 
   async function send(overrideText) {
     const raw = typeof overrideText === "string" ? overrideText : userText;
@@ -244,7 +253,8 @@ export default function Home() {
     setLastAssistantText(reply);
 
     if (autoSpeak && !textOnly && reply) {
-      speakChunks(reply);
+      const spoken = stripEmotionTags(reply);
+      if (spoken) speakChunks(spoken);
     }
   }
 
@@ -369,6 +379,7 @@ export default function Home() {
         stopMic();
         await stopAudio();
       }
+      ttsActiveRef.current = true;
       setTtsError("");
       setTtsStatus("loading");
       const tuned = applyEmotionTuning(settingsOverride || ttsSettings, behavior);
@@ -408,8 +419,9 @@ export default function Home() {
           URL.revokeObjectURL(objectUrl);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          ttsActiveRef.current = false;
           if (restartMicOnEnd && voiceMode && !textOnly) {
-            setTimeout(() => startMic(), 200);
+            setTimeout(() => startMic(), 600);
           }
           resolve();
         };
@@ -420,13 +432,15 @@ export default function Home() {
             await playBlobWithAudioContext(blob);
             setTtsStatus("idle");
             setBehavior(prev => ({ ...prev, speaking: false }));
+            ttsActiveRef.current = false;
             if (restartMicOnEnd && voiceMode && !textOnly) {
-              setTimeout(() => startMic(), 200);
+              setTimeout(() => startMic(), 600);
             }
           } catch (e) {
             setTtsStatus("error");
             setTtsError(e?.message || "audio_play_failed");
             setBehavior(prev => ({ ...prev, speaking: false }));
+            ttsActiveRef.current = false;
           }
           resolve();
         };
@@ -439,6 +453,7 @@ export default function Home() {
       setTtsStatus("error");
       setTtsError(e?.message || "tts_failed");
       setBehavior(prev => ({ ...prev, speaking: false }));
+      ttsActiveRef.current = false;
     }
   }
 
@@ -451,7 +466,7 @@ export default function Home() {
       await speak(chunk, settingsOverride, { skipStop: true, restartMicOnEnd: false });
     }
     if (voiceMode && !textOnly) {
-      setTimeout(() => startMic(), 200);
+      setTimeout(() => startMic(), 600);
     }
   }
 
@@ -497,6 +512,7 @@ export default function Home() {
     };
 
     r.onresult = (e) => {
+      if (ttsActiveRef.current) return;
       let interim = "";
       let finalText = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -530,7 +546,13 @@ export default function Home() {
   async function startLevelMeter() {
     try {
       if (mediaStreamRef.current) return;
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
       mediaStreamRef.current = stream;
 
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -579,7 +601,7 @@ export default function Home() {
   }
 
   async function startMic() {
-    if (micState === "listening" || micStartingRef.current) return;
+    if (micState === "listening" || micStartingRef.current || ttsActiveRef.current) return;
     const r = ensureRecognizer();
     if (!r) return;
     micStartingRef.current = true;
