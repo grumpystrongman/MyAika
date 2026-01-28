@@ -37,6 +37,39 @@ Notes:
 - Integrations are stubs until credentials are provided.
 - Add the credentials in `apps/server/.env` and restart the server.
 
+### Google Docs + Drive
+1) Create an OAuth client in Google Cloud Console and set:
+   - `GOOGLE_CLIENT_ID`
+   - `GOOGLE_CLIENT_SECRET`
+   - `GOOGLE_REDIRECT_URI` (example: `http://localhost:8790/api/integrations/google/callback`)
+2) Click "Connect" for Google Docs/Drive in the Integrations tab to complete OAuth.
+3) Use these endpoints:
+   - `POST /api/integrations/google/docs/create` `{ title, content }`
+   - `POST /api/integrations/google/docs/append` `{ documentId, content }`
+   - `POST /api/integrations/google/drive/upload` `{ name, content, mimeType }`
+
+Docs: Google Docs API and Drive API. citeturn0search0turn0search1
+
+### Fireflies.ai
+Set `FIREFLIES_API_KEY` and restart the server, then call:
+- `GET /api/integrations/fireflies/transcripts?limit=5`
+
+Fireflies GraphQL API docs. citeturn0search2
+
+### Slack
+Set `SLACK_BOT_TOKEN`, then call:
+- `POST /api/integrations/slack/post` `{ channel, text }`
+
+Slack chat.postMessage API. citeturn0search3
+
+### Agent tasks (server)
+Use `POST /api/agent/task` with:
+- `plex_identity`
+- `fireflies_transcripts` (payload `{ limit }`)
+- `slack_post` (payload `{ channel, text }`)
+- `telegram_send` (payload `{ chatId, text }`)
+- `discord_send` (payload `{ text }`)
+
 ## Aika Voice (GPT-SoVITS only)
 Voice output is handled by a local GPT-SoVITS service. The app calls it and streams the WAV back.
 

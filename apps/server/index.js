@@ -9,6 +9,18 @@ import { Emotion, makeBehavior } from "@myaika/shared";
 import { generateAikaVoice, resolveAudioPath } from "./aika_voice/index.js";
 import { trimReferenceWavToFile } from "./aika_voice/voice_ref.js";
 import { voicesDir } from "./aika_voice/paths.js";
+import {
+  getGoogleAuthUrl,
+  exchangeGoogleCode,
+  createGoogleDoc,
+  appendGoogleDoc,
+  uploadDriveFile,
+  getGoogleAccessToken
+} from "./integrations/google.js";
+import { fetchFirefliesTranscripts, markFirefliesConnected } from "./integrations/fireflies.js";
+import { fetchPlexIdentity } from "./integrations/plex.js";
+import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
+import { getProvider } from "./integrations/store.js";
 
 const app = express();
 app.use(cors());
@@ -77,6 +89,14 @@ const integrationsState = {
   discord: { connected: false },
   plex: { connected: false }
 };
+
+const googleStored = getProvider("google");
+if (googleStored) {
+  integrationsState.google_docs.connected = true;
+  integrationsState.google_drive.connected = true;
+  integrationsState.google_docs.connectedAt = googleStored.connectedAt || new Date().toISOString();
+  integrationsState.google_drive.connectedAt = googleStored.connectedAt || new Date().toISOString();
+}
 
 // Heuristic fallback behavior
 function inferBehaviorFromText(text) {
@@ -456,7 +476,18 @@ app.get("/api/aika/config", (_req, res) => {
 });
 
 app.get("/api/integrations", (_req, res) => {
-  res.json({ integrations: integrationsState });
+  const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  const firefliesConfigured = Boolean(process.env.FIREFLIES_API_KEY);
+  const plexConfigured = Boolean(process.env.PLEX_URL && process.env.PLEX_TOKEN);
+  res.json({
+    integrations: {
+      ...integrationsState,
+      google_docs: { ...integrationsState.google_docs, configured: googleConfigured },
+      google_drive: { ...integrationsState.google_drive, configured: googleConfigured },
+      fireflies: { ...integrationsState.fireflies, configured: firefliesConfigured },
+      plex: { ...integrationsState.plex, configured: plexConfigured }
+    }
+  });
 });
 
 app.post("/api/integrations/connect", (req, res) => {
@@ -477,6 +508,173 @@ app.post("/api/integrations/disconnect", (req, res) => {
   integrationsState[provider].connected = false;
   delete integrationsState[provider].connectedAt;
   res.json({ ok: true, provider });
+});
+
+app.get("/api/integrations/google/auth/start", (_req, res) => {
+  try {
+    const state = Math.random().toString(36).slice(2);
+    const url = getGoogleAuthUrl(state);
+    res.redirect(url);
+  } catch (err) {
+    res.status(500).send(err.message || "google_auth_failed");
+  }
+});
+
+app.get("/api/integrations/google/callback", async (req, res) => {
+  try {
+    const code = req.query.code;
+    if (!code) return res.status(400).send("missing_code");
+    const token = await exchangeGoogleCode(String(code));
+    integrationsState.google_docs.connected = true;
+    integrationsState.google_drive.connected = true;
+    integrationsState.google_docs.connectedAt = new Date().toISOString();
+    integrationsState.google_drive.connectedAt = new Date().toISOString();
+    // store token in persistent store
+    await (async () => {
+      const { setProvider } = await import("./integrations/store.js");
+      setProvider("google", { ...token, connectedAt: new Date().toISOString() });
+    })();
+    res.send("<html><body><h3>Google connected. You can close this tab.</h3></body></html>");
+  } catch (err) {
+    res.status(500).send(err.message || "google_auth_failed");
+  }
+});
+
+app.get("/api/integrations/google/status", async (_req, res) => {
+  try {
+    const token = await getGoogleAccessToken();
+    res.json({ ok: true, connected: true, tokenPresent: Boolean(token) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || "google_not_connected" });
+  }
+});
+
+app.post("/api/integrations/google/docs/create", async (req, res) => {
+  try {
+    const { title, content } = req.body || {};
+    const doc = await createGoogleDoc(title || "Aika Notes", content || "");
+    res.json({ ok: true, doc });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_docs_create_failed" });
+  }
+});
+
+app.post("/api/integrations/google/docs/append", async (req, res) => {
+  try {
+    const { documentId, content } = req.body || {};
+    if (!documentId || !content) {
+      return res.status(400).json({ error: "documentId_and_content_required" });
+    }
+    const result = await appendGoogleDoc(documentId, content);
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_docs_append_failed" });
+  }
+});
+
+app.post("/api/integrations/google/drive/upload", async (req, res) => {
+  try {
+    const { name, content, mimeType } = req.body || {};
+    if (!name || !content) return res.status(400).json({ error: "name_and_content_required" });
+    const file = await uploadDriveFile(name, content, mimeType || "text/plain");
+    res.json({ ok: true, file });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_drive_upload_failed" });
+  }
+});
+
+app.get("/api/integrations/fireflies/transcripts", async (req, res) => {
+  try {
+    markFirefliesConnected();
+    const limit = Number(req.query.limit || 5);
+    const data = await fetchFirefliesTranscripts(limit);
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "fireflies_failed" });
+  }
+});
+
+app.get("/api/integrations/plex/identity", async (_req, res) => {
+  try {
+    const xml = await fetchPlexIdentity();
+    integrationsState.plex.connected = true;
+    integrationsState.plex.connectedAt = new Date().toISOString();
+    res.type("application/xml").send(xml);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "plex_failed" });
+  }
+});
+
+app.post("/api/integrations/slack/post", async (req, res) => {
+  try {
+    const { channel, text } = req.body || {};
+    if (!channel || !text) return res.status(400).json({ error: "channel_and_text_required" });
+    const data = await sendSlackMessage(channel, text);
+    integrationsState.slack.connected = true;
+    integrationsState.slack.connectedAt = new Date().toISOString();
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "slack_failed" });
+  }
+});
+
+app.post("/api/integrations/telegram/send", async (req, res) => {
+  try {
+    const { chatId, text } = req.body || {};
+    if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
+    const data = await sendTelegramMessage(chatId, text);
+    integrationsState.telegram.connected = true;
+    integrationsState.telegram.connectedAt = new Date().toISOString();
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "telegram_failed" });
+  }
+});
+
+app.post("/api/integrations/discord/send", async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text) return res.status(400).json({ error: "text_required" });
+    const data = await sendDiscordMessage(text);
+    integrationsState.discord.connected = true;
+    integrationsState.discord.connectedAt = new Date().toISOString();
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "discord_failed" });
+  }
+});
+
+app.post("/api/agent/task", async (req, res) => {
+  const { type, payload } = req.body || {};
+  try {
+    switch (type) {
+      case "plex_identity": {
+        const xml = await fetchPlexIdentity();
+        return res.json({ ok: true, data: xml });
+      }
+      case "fireflies_transcripts": {
+        const limit = Number(payload?.limit || 5);
+        const data = await fetchFirefliesTranscripts(limit);
+        return res.json({ ok: true, data });
+      }
+      case "slack_post": {
+        const data = await sendSlackMessage(payload?.channel, payload?.text);
+        return res.json({ ok: true, data });
+      }
+      case "telegram_send": {
+        const data = await sendTelegramMessage(payload?.chatId, payload?.text);
+        return res.json({ ok: true, data });
+      }
+      case "discord_send": {
+        const data = await sendDiscordMessage(payload?.text);
+        return res.json({ ok: true, data });
+      }
+      default:
+        return res.status(400).json({ error: "unknown_task" });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "agent_task_failed" });
+  }
 });
 
 app.post("/api/aika/voice/preference", (req, res) => {

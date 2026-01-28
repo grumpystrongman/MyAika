@@ -817,6 +817,10 @@ export default function Home() {
 
   async function toggleIntegration(provider, next) {
     try {
+      if (provider === "google_docs" || provider === "google_drive") {
+        window.open(`${SERVER_URL}/api/integrations/google/auth/start`, "_blank", "width=520,height=680");
+        return;
+      }
       const url = next ? "/api/integrations/connect" : "/api/integrations/disconnect";
       await fetch(`${SERVER_URL}${url}`, {
         method: "POST",
@@ -876,6 +880,7 @@ export default function Home() {
             </div>
             {integrationList.map(item => {
               const status = integrations[item.key]?.connected ? "Connected" : "Not connected";
+              const configured = integrations[item.key]?.configured;
               return (
                 <div key={item.key} style={{
                   border: "1px solid #e5e7eb",
@@ -891,7 +896,9 @@ export default function Home() {
                     <div style={{ fontSize: 12, color: "#6b7280" }}>{item.detail}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12, color: "#6b7280" }}>{status}</span>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>
+                      {status}{configured === false ? " · Missing config" : ""}
+                    </span>
                     <button
                       onClick={() => toggleIntegration(item.key, !integrations[item.key]?.connected)}
                       style={{ padding: "6px 10px", borderRadius: 8 }}
@@ -989,242 +996,245 @@ export default function Home() {
             {showSettings ? "Close Settings" : "Settings"}
           </button>
         </div>
-        {showSettings && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-          gap: 8,
-          padding: 10,
-          border: "1px solid #e5e7eb",
-          borderRadius: 10,
-          background: "#fafafa"
-        }}>
-          <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
-            Voice + Input
-          </div>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+        {activeTab === "chat" && (
+        <>
+          {showSettings && (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 8,
+            padding: 10,
+            border: "1px solid #e5e7eb",
+            borderRadius: 10,
+            background: "#fafafa"
+          }}>
+            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+              Voice + Input
+            </div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+              <input
+                type="checkbox"
+                checked={autoSpeak}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setAutoSpeak(v);
+                  if (v) setTextOnly(false);
+                }}
+              />
+              Auto Speak
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+              <input
+                type="checkbox"
+                checked={fastReplies}
+                onChange={(e) => setFastReplies(e.target.checked)}
+              />
+              Fast replies (shorter, quicker)
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
             <input
               type="checkbox"
-              checked={autoSpeak}
+              checked={textOnly}
               onChange={(e) => {
                 const v = e.target.checked;
-                setAutoSpeak(v);
-                if (v) setTextOnly(false);
+                setTextOnly(v);
+                if (v) {
+                  setAutoSpeak(false);
+                  setMicEnabled(false);
+                  stopMic();
+                } else {
+                  setAutoSpeak(true);
+                }
               }}
             />
-            Auto Speak
-          </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-            <input
-              type="checkbox"
-              checked={fastReplies}
-              onChange={(e) => setFastReplies(e.target.checked)}
-            />
-            Fast replies (shorter, quicker)
-          </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-          <input
-            type="checkbox"
-            checked={textOnly}
-            onChange={(e) => {
-              const v = e.target.checked;
-              setTextOnly(v);
-              if (v) {
-                setAutoSpeak(false);
-                setMicEnabled(false);
-                stopMic();
-              } else {
-                setAutoSpeak(true);
-              }
-            }}
-          />
-            Text only (no voice)
-          </label>
-        </div>
-        )}
-        {showSettings && showAdvanced && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-          gap: 8,
-          padding: 10,
-          border: "1px solid #e5e7eb",
-          borderRadius: 10,
-          background: "#fafafa"
-        }}>
-          <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
-            Aika Voice Settings
+              Text only (no voice)
+            </label>
           </div>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
-            Voice prompt text
-            <textarea
-              rows={3}
-              value={voicePromptText}
-              onChange={(e) => {
-                setVoicePromptText(e.target.value);
-                setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: e.target.value } }));
-              }}
-              placeholder="Describe Aika's voice/persona..."
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
-          </label>
-          <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-            <button
-              onClick={testVoice}
-              style={{ padding: "8px 12px", borderRadius: 8 }}
-            >
-              Test Voice
-            </button>
-            <button
-              onClick={() => speakChunks(lastAssistantText)}
-              style={{ padding: "8px 12px", borderRadius: 8 }}
-              disabled={!lastAssistantText}
-            >
-              Manual Speak
-            </button>
+          )}
+          {showSettings && showAdvanced && (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 8,
+            padding: 10,
+            border: "1px solid #e5e7eb",
+            borderRadius: 10,
+            background: "#fafafa"
+          }}>
+            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+              Aika Voice Settings
+            </div>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+              Voice prompt text
+              <textarea
+                rows={3}
+                value={voicePromptText}
+                onChange={(e) => {
+                  setVoicePromptText(e.target.value);
+                  setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: e.target.value } }));
+                }}
+                placeholder="Describe Aika's voice/persona..."
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              />
+            </label>
+            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
+              <button
+                onClick={testVoice}
+                style={{ padding: "8px 12px", borderRadius: 8 }}
+              >
+                Test Voice
+              </button>
+              <button
+                onClick={() => speakChunks(lastAssistantText)}
+                style={{ padding: "8px 12px", borderRadius: 8 }}
+                disabled={!lastAssistantText}
+              >
+                Manual Speak
+              </button>
+            </div>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Style
+              <select
+                value={ttsSettings.style}
+                onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              >
+                <option value="brat_baddy">brat_baddy</option>
+                <option value="brat_soft">brat_soft</option>
+                <option value="brat_firm">brat_firm</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Format
+              <select
+                value={ttsSettings.format}
+                onChange={(e) => setTtsSettings(s => ({ ...s, format: e.target.value }))}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              >
+                <option value="wav">wav</option>
+                <option value="mp3">mp3</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Rate
+              <input
+                type="number"
+                step="0.05"
+                min="0.8"
+                max="1.3"
+                value={ttsSettings.rate}
+                onChange={(e) => setTtsSettings(s => ({ ...s, rate: Number(e.target.value) }))}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Pitch
+              <input
+                type="number"
+                step="0.5"
+                min="-5"
+                max="5"
+                value={ttsSettings.pitch}
+                onChange={(e) => setTtsSettings(s => ({ ...s, pitch: Number(e.target.value) }))}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Energy
+              <input
+                type="number"
+                step="0.1"
+                min="0.5"
+                max="1.5"
+                value={ttsSettings.energy}
+                onChange={(e) => setTtsSettings(s => ({ ...s, energy: Number(e.target.value) }))}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Pause
+              <input
+                type="number"
+                step="0.1"
+                min="0.8"
+                max="1.8"
+                value={ttsSettings.pause}
+                onChange={(e) => setTtsSettings(s => ({ ...s, pause: Number(e.target.value) }))}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Reference WAV (apps/server/voices)
+              <input
+                type="text"
+                placeholder="example.wav"
+                value={ttsSettings.voice.reference_wav_path}
+                onChange={(e) => setTtsSettings(s => ({ ...s, voice: { reference_wav_path: e.target.value } }))}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              />
+            </label>
+            <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
+              Reference file must be inside apps/server/voices. Leave blank for default voice.
+            </div>
+            <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
+              For a more feminine voice, add a speaker WAV and set it above.
+            </div>
           </div>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Style
-            <select
-              value={ttsSettings.style}
-              onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            >
-              <option value="brat_baddy">brat_baddy</option>
-              <option value="brat_soft">brat_soft</option>
-              <option value="brat_firm">brat_firm</option>
-            </select>
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Format
-            <select
-              value={ttsSettings.format}
-              onChange={(e) => setTtsSettings(s => ({ ...s, format: e.target.value }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            >
-              <option value="wav">wav</option>
-              <option value="mp3">mp3</option>
-            </select>
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Rate
-            <input
-              type="number"
-              step="0.05"
-              min="0.8"
-              max="1.3"
-              value={ttsSettings.rate}
-              onChange={(e) => setTtsSettings(s => ({ ...s, rate: Number(e.target.value) }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Pitch
-            <input
-              type="number"
-              step="0.5"
-              min="-5"
-              max="5"
-              value={ttsSettings.pitch}
-              onChange={(e) => setTtsSettings(s => ({ ...s, pitch: Number(e.target.value) }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Energy
-            <input
-              type="number"
-              step="0.1"
-              min="0.5"
-              max="1.5"
-              value={ttsSettings.energy}
-              onChange={(e) => setTtsSettings(s => ({ ...s, energy: Number(e.target.value) }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Pause
-            <input
-              type="number"
-              step="0.1"
-              min="0.8"
-              max="1.8"
-              value={ttsSettings.pause}
-              onChange={(e) => setTtsSettings(s => ({ ...s, pause: Number(e.target.value) }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-            Reference WAV (apps/server/voices)
-            <input
-              type="text"
-              placeholder="example.wav"
-              value={ttsSettings.voice.reference_wav_path}
-              onChange={(e) => setTtsSettings(s => ({ ...s, voice: { reference_wav_path: e.target.value } }))}
-              style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
-          </label>
-          <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-            Reference file must be inside apps/server/voices. Leave blank for default voice.
+          )}
+          {micState === "unsupported" && (
+            <div style={{ color: "#b45309", fontSize: 12 }}>
+              Mic not supported in this browser. Try Chrome/Edge.
+            </div>
+          )}
+          {micState === "error" && (
+            <div style={{ color: "#b91c1c", fontSize: 12 }}>
+              Mic error: {micError}
+            </div>
+          )}
+          <div style={{ color: "#374151", fontSize: 12 }}>
+            {micStatus}
           </div>
-          <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-            For a more feminine voice, add a speaker WAV and set it above.
+          {showSettings && (
+          <>
+          <button
+            onClick={() => setShowAdvanced(v => !v)}
+            style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
+          >
+            {showAdvanced ? "Hide Advanced Voice" : "Advanced Voice"}
+          </button>
+          </>
+          )}
+          <div style={{ color: "#6b7280", fontSize: 12 }}>
+            Voice: {ttsStatus}
           </div>
-        </div>
-        )}
-        {micState === "unsupported" && (
-          <div style={{ color: "#b45309", fontSize: 12 }}>
-            Mic not supported in this browser. Try Chrome/Edge.
+          <div style={{ color: "#6b7280", fontSize: 12 }}>{ttsEngineOnline === true ? "GPT-SoVITS: online" : ttsEngineOnline === false ? "GPT-SoVITS: offline" : "GPT-SoVITS: unknown"}</div>
+          <div style={{ color: "#6b7280", fontSize: 12 }}>
+            {audioUnlocked ? "Audio Enabled" : "Audio Locked (click once to enable)"} 
           </div>
-        )}
-        {micState === "error" && (
-          <div style={{ color: "#b91c1c", fontSize: 12 }}>
-            Mic error: {micError}
+          {ttsError && (
+            <div style={{ color: "#b91c1c", fontSize: 12 }}>
+              TTS error: {ttsError}
+            </div>
+          )}
+          {chatError && (
+            <div style={{ color: "#b91c1c", fontSize: 12 }}>
+              Chat error: {chatError}
+            </div>
+          )}
+          {ttsWarnings.length > 0 && (
+            <div style={{ color: "#92400e", fontSize: 12 }}>
+              TTS warnings: {ttsWarnings.join(", ")}
+            </div>
+          )}
+          {micState === "idle" && voiceMode && (
+            <div style={{ color: "#1f2937", fontSize: 12, fontWeight: 600 }}>
+              Click Mic to continue
+            </div>
+          )}
+          <div style={{ color: "#6b7280", fontSize: 12 }}>
+            Hotkey: Space (when not typing)
           </div>
-        )}
-        <div style={{ color: "#374151", fontSize: 12 }}>
-          {micStatus}
-        </div>
-        {showSettings && (
-        <>
-        <button
-          onClick={() => setShowAdvanced(v => !v)}
-          style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
-        >
-          {showAdvanced ? "Hide Advanced Voice" : "Advanced Voice"}
-        </button>
         </>
-        )}
-        <div style={{ color: "#6b7280", fontSize: 12 }}>
-          Voice: {ttsStatus}
-        </div>
-        <div style={{ color: "#6b7280", fontSize: 12 }}>{ttsEngineOnline === true ? "GPT-SoVITS: online" : ttsEngineOnline === false ? "GPT-SoVITS: offline" : "GPT-SoVITS: unknown"}</div>
-        <div style={{ color: "#6b7280", fontSize: 12 }}>
-          {audioUnlocked ? "Audio Enabled" : "Audio Locked (click once to enable)"} 
-        </div>
-        {ttsError && (
-          <div style={{ color: "#b91c1c", fontSize: 12 }}>
-            TTS error: {ttsError}
-          </div>
-        )}
-        {chatError && (
-          <div style={{ color: "#b91c1c", fontSize: 12 }}>
-            Chat error: {chatError}
-          </div>
-        )}
-        {ttsWarnings.length > 0 && (
-          <div style={{ color: "#92400e", fontSize: 12 }}>
-            TTS warnings: {ttsWarnings.join(", ")}
-          </div>
-        )}
-        {micState === "idle" && voiceMode && (
-          <div style={{ color: "#1f2937", fontSize: 12, fontWeight: 600 }}>
-            Click Mic to continue
-          </div>
-        )}
-        <div style={{ color: "#6b7280", fontSize: 12 }}>
-          Hotkey: Space (when not typing)
-        </div>
         )}
       </div>
     </div>
