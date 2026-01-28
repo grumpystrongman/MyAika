@@ -183,6 +183,7 @@ export default function Home() {
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [textOnly, setTextOnly] = useState(false);
   const [voiceMode, setVoiceMode] = useState(true);
+  const [micEnabled, setMicEnabled] = useState(true);
   const [fastReplies, setFastReplies] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -641,8 +642,19 @@ export default function Home() {
   }
 
   function toggleMic() {
-    if (micState === "listening") stopMic();
-    else startMic();
+    setMicEnabled(prev => {
+      const next = !prev;
+      if (next) {
+        setVoiceMode(true);
+        setAutoSpeak(true);
+        setTextOnly(false);
+        startMic();
+      } else {
+        setVoiceMode(false);
+        stopMic();
+      }
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -681,9 +693,9 @@ export default function Home() {
   }, [audioUnlocked, autoSpeak, textOnly, lastAssistantText]);
 
   useEffect(() => {
-    if (!voiceMode || micState !== "idle") return;
+    if (!voiceMode || !micEnabled || micState !== "idle") return;
     startMic();
-  }, [voiceMode, micState]);
+  }, [voiceMode, micEnabled, micState]);
 
   useEffect(() => {
     async function checkTtsEngine() {
@@ -830,30 +842,30 @@ export default function Home() {
             padding: "6px 10px",
             borderRadius: 999,
             border: "1px solid #ddd",
-            background: micState === "listening" ? "#ecfdf3" : "#f3f4f6",
-            color: micState === "listening" ? "#047857" : "#6b7280",
+            background: micEnabled && micState === "listening" ? "#ecfdf3" : "#f3f4f6",
+            color: micEnabled && micState === "listening" ? "#047857" : "#6b7280",
             fontSize: 12
           }}>
             <span style={{
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: micState === "listening" ? "#10b981" : "#9ca3af",
+              background: micEnabled && micState === "listening" ? "#10b981" : "#9ca3af",
               display: "inline-block"
             }} />
-            {micState === "listening" ? "Mic active" : "Mic idle"}
+            {micEnabled ? (micState === "listening" ? "Mic active" : "Mic idle") : "Mic off"}
           </div>
           <button
             onClick={toggleMic}
             style={{
               padding: "12px 16px",
               borderRadius: 12,
-              border: micState === "listening" ? "2px solid #2b6cb0" : "1px solid #ccc",
-              background: micState === "listening" ? "#e6f0ff" : "white"
+              border: micEnabled ? "2px solid #2b6cb0" : "1px solid #ccc",
+              background: micEnabled ? "#e6f0ff" : "white"
             }}
-            title={micState === "listening" ? "Stop listening (Space)" : "Start listening (Space)"}
+            title={micEnabled ? "Stop listening (Space)" : "Start listening (Space)"}
           >
-            {micState === "listening" ? "Listening" : "Mic"}
+            {micEnabled ? "Mic On" : "Mic Off"}
           </button>
           <button onClick={() => send()} style={{ padding: "12px 16px", borderRadius: 12 }}>
             Send
@@ -881,24 +893,6 @@ export default function Home() {
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
             <input
               type="checkbox"
-              checked={!textOnly}
-              onChange={(e) => {
-                const enabled = e.target.checked;
-                setTextOnly(!enabled);
-                if (enabled) {
-                  setVoiceMode(true);
-                  setAutoSpeak(true);
-                  startMic();
-                } else {
-                  stopMic();
-                }
-              }}
-            />
-            Voice Enabled (speech in/out)
-          </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-            <input
-              type="checkbox"
               checked={autoSpeak}
               onChange={(e) => {
                 const v = e.target.checked;
@@ -917,15 +911,21 @@ export default function Home() {
             Fast replies (shorter, quicker)
           </label>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-            <input
-              type="checkbox"
-              checked={textOnly}
-              onChange={(e) => {
-                const v = e.target.checked;
-                setTextOnly(v);
-                if (v) setAutoSpeak(false);
-              }}
-            />
+          <input
+            type="checkbox"
+            checked={textOnly}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setTextOnly(v);
+              if (v) {
+                setAutoSpeak(false);
+                setMicEnabled(false);
+                stopMic();
+              } else {
+                setAutoSpeak(true);
+              }
+            }}
+          />
             Text only (no voice)
           </label>
         </div>
