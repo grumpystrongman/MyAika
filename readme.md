@@ -93,3 +93,32 @@ Open: `http://localhost:3000/avatar-demo`
 - Expression mapping: `apps/web/src/avatar/Live2DWebEngine.ts` (mood -> expression)
 - Mouth/eyes params: `apps/web/src/avatar/Live2DWebEngine.ts` (`ParamMouthOpenY`, `ParamEyeBallX`)
 - Fallback styling: `apps/web/src/avatar/PngAvatarEngine.ts`
+## FAQ
+
+### Why does the UI show "GPT-SoVITS: offline"?
+The GPT-SoVITS service is not running or not reachable at `GPTSOVITS_URL`.
+- Start it with `npm run gptsovits`.
+- Verify `GPTSOVITS_PORT` and `GPTSOVITS_URL` match.
+
+### Why do I see 405 Method Not Allowed for /tts?
+This is normal for browser OPTIONS/GET requests. The service expects POST.
+
+### Why does it say "Reference audio is outside the 3-10 second range"?
+GPT-SoVITS requires a 3-10s reference clip. Use a clean short clip.
+The app auto-trims `fem_aika.wav` to 6 seconds on first load.
+
+### I hear no audio but text replies fine. What should I check?
+- Confirm the GPT-SoVITS service is running.
+- Check the browser devtools console for audio playback errors.
+- Verify your system output device and volume.
+
+### It is slow on the first run. Is that normal?
+Yes. GPT-SoVITS loads models and warms up on first use. Subsequent replies should be faster.
+
+### How do I change the voice?
+Replace or add a reference WAV in `apps/server/voices/` and use it in the UI.
+Keep the clip short and clean (3-10 seconds).
+
+### Where is the Live2D model configured?
+`apps/web/src/components/AikaAvatar.tsx` uses `LIVE2D_MODEL_URL`.
+Place Live2D exports in `apps/web/public/assets/aika/live2d/`.
