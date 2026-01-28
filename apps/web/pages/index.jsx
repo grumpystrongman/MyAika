@@ -108,7 +108,19 @@ function splitSpeechText(text, maxChars = 180) {
     }
   }
   if (current) chunks.push(current);
-  return chunks;
+  const merged = [];
+  for (const chunk of chunks) {
+    if (merged.length === 0) {
+      merged.push(chunk);
+      continue;
+    }
+    if (chunk.length < 40) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]} ${chunk}`.trim();
+    } else {
+      merged.push(chunk);
+    }
+  }
+  return merged;
 }
 
 function stripEmotionTags(text) {
@@ -213,7 +225,7 @@ export default function Home() {
 
     stopMic();
     if (voiceMode && autoSpeak && !textOnly) {
-      speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft", fast: true }, { restartMicOnEnd: false });
+      speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft", fast: true, use_raw_text: true }, { restartMicOnEnd: false });
     }
     setLog(l => [...l, { role: "user", text }]);
     setUserText("");
@@ -254,7 +266,7 @@ export default function Home() {
 
     if (autoSpeak && !textOnly && reply) {
       const spoken = stripEmotionTags(reply);
-      if (spoken) speakChunks(spoken);
+      if (spoken) speakChunks(spoken, { use_raw_text: true });
     }
   }
 
@@ -383,7 +395,7 @@ export default function Home() {
       setTtsError("");
       setTtsStatus("loading");
       const tuned = applyEmotionTuning(settingsOverride || ttsSettings, behavior);
-      const requestSettings = { ...tuned, fast: useFast };
+      const requestSettings = { ...tuned, fast: useFast, use_raw_text: true };
       const r = await fetch(`${SERVER_URL}/api/aika/voice/inline`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

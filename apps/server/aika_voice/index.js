@@ -40,10 +40,13 @@ export async function generateAikaVoice({ text, settings = {} }) {
   }
 
   const { settings: normalized, warnings } = normalizeSettings(settings);
-  const formatted = formatAikaVoice(text, {
-    style: normalized.style,
-    pause: normalized.pause
-  });
+  const useRawText = settings.use_raw_text === true;
+  const formatted = useRawText
+    ? String(text).trim()
+    : formatAikaVoice(text, {
+        style: normalized.style,
+        pause: normalized.pause
+      });
 
   if (normalized.pitch !== 0) warnings.push("pitch_ignored");
   if (normalized.energy !== 1.0) warnings.push("energy_ignored");
