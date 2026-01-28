@@ -195,6 +195,7 @@ export default function Home() {
   const rafRef = useRef(null);
   const silenceTimerRef = useRef(null);
   const latestTranscriptRef = useRef("");
+  const micStartingRef = useRef(false);
 
   async function send(overrideText) {
     const raw = typeof overrideText === "string" ? overrideText : userText;
@@ -578,12 +579,20 @@ export default function Home() {
   }
 
   async function startMic() {
+    if (micState === "listening" || micStartingRef.current) return;
     const r = ensureRecognizer();
     if (!r) return;
+    micStartingRef.current = true;
     await stopAudio(200);
     await sleep(120);
     await startLevelMeter();
-    r.start();
+    try {
+      r.start();
+    } catch (e) {
+      if (e?.name !== "InvalidStateError") throw e;
+    } finally {
+      micStartingRef.current = false;
+    }
   }
 
   function stopMic() {
@@ -607,6 +616,25 @@ export default function Home() {
     setPendingSpeak(null);
     speak(text, settings);
   }, [audioUnlocked, pendingSpeak]);
+
+  useEffect(() => {
+    if (audioUnlocked) return;
+    const tryUnlock = async () => {
+      const ok = await unlockAudio();
+      if (ok) setAudioUnlocked(true);
+    };
+    const onFirstGesture = () => {
+      tryUnlock();
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+    window.addEventListener("pointerdown", onFirstGesture);
+    window.addEventListener("keydown", onFirstGesture);
+    return () => {
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+  }, [audioUnlocked]);
 
   useEffect(() => {
     if (!voiceMode || micState !== "idle") return;
@@ -809,20 +837,20 @@ export default function Home() {
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
             <input
               type="checkbox"
-              checked={voiceMode}
+              checked={!textOnly}
               onChange={(e) => {
-                const v = e.target.checked;
-                setVoiceMode(v);
-                if (v) {
+                const enabled = e.target.checked;
+                setTextOnly(!enabled);
+                if (enabled) {
+                  setVoiceMode(true);
                   setAutoSpeak(true);
-                  setTextOnly(false);
                   startMic();
                 } else {
                   stopMic();
                 }
               }}
             />
-            Voice Mode (listen + auto speak)
+            Voice Enabled (speech in/out)
           </label>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
             <input
@@ -1015,16 +1043,9 @@ export default function Home() {
           Voice: {ttsStatus}
         </div>
         <div style={{ color: "#6b7280", fontSize: 12 }}>{ttsEngineOnline === true ? "GPT-SoVITS: online" : ttsEngineOnline === false ? "GPT-SoVITS: offline" : "GPT-SoVITS: unknown"}</div>
-        <button
-          onClick={async () => {
-            const ok = await unlockAudio();
-            setAudioUnlocked(Boolean(ok));
-            if (ok) setTtsError("");
-          }}
-          style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
-        >
-          {audioUnlocked ? "Audio Enabled" : "Enable Audio"}
-        </button>
+        <div style={{ color: "#6b7280", fontSize: 12 }}>
+          {audioUnlocked ? "Audio Enabled" : "Audio Locked (click once to enable)"} 
+        </div>
         {ttsError && (
           <div style={{ color: "#b91c1c", fontSize: 12 }}>
             TTS error: {ttsError}

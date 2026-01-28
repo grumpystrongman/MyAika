@@ -118,13 +118,17 @@ export async function generateAikaVoice({ text, settings = {} }) {
     throw err;
   }
 
+  const defaultPrompt =
+    process.env.GPTSOVITS_DEFAULT_PROMPT_TEXT ||
+    "Aika is a confident, playful, feminine assistant with a warm, witty tone.";
   let engineMeta;
   if (ENGINE === "gptsovits") {
+    const promptText = (normalized.voice?.prompt_text || "").trim() || defaultPrompt;
     engineMeta = await generateWithGptSovits({
       text: formatted,
       outputPath,
       refWavPath: voicePath,
-      promptText: normalized.voice?.prompt_text || "",
+      promptText,
       language: "en",
       rate: normalized.rate,
       fast: normalized.fast
