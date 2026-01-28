@@ -1,9 +1,0 @@
-{
-  "id": "3d0ce5c5274fbe8613d88dd754ab288066e09c80fec4750fc4115100b62a3806",
-  "format": "wav",
-  "sampleRate": 22050,
-  "duration": 96310.25024943311,
-  "model": "tts_models/multilingual/multi-dataset/xtts_v2",
-  "engine": "sapi",
-  "cacheHit": false
-}

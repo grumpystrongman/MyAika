@@ -5,23 +5,23 @@ import AikaAvatar from "../src/components/AikaAvatar";
 const SERVER_URL = "http://localhost:8790";
 
 const THINKING_CUES = [
-  "Hold on?I'm thinking.",
+  "Hold on, I'm thinking.",
   "Give me a second.",
-  "Hmm, let me think.",
-  "Okay, thinking?",
+  "Hmm... let me think.",
+  "Okay, thinking.",
   "One sec, love.",
   "Let me piece this together.",
-  "Mmm?processing that.",
+  "Mmm... processing that.",
   "Stay there, I'm on it.",
-  "Got it?thinking now.",
+  "Got it. Thinking now.",
   "Hang tight.",
   "Let me check that.",
   "Alright, give me a beat.",
-  "Thinking? don't rush me.",
+  "Thinking... don't rush me.",
   "Okay, okay, I'm thinking.",
   "One moment.",
   "Let me work this out.",
-  "Hold still?brain running.",
+  "Hold still, brain running.",
   "Give me a blink.",
   "Thinking, thinking.",
   "Let me get this right."
@@ -148,7 +148,12 @@ function sleep(ms) {
 
 export default function Home() {
   const [userText, setUserText] = useState("");
-  const [log, setLog] = useState([{ role: "assistant", text: "Hi. I???m Aika. Ready to become real? ????" }]);
+  const [log, setLog] = useState([
+    {
+      role: "assistant",
+      text: "Hello Master, Aika is here to serve. How may I assist you today."
+    }
+  ]);
   const [behavior, setBehavior] = useState({ emotion: Emotion.NEUTRAL, intensity: 0.35, speaking: false });
   const [micState, setMicState] = useState("idle"); // idle | listening | error | unsupported
   const [micError, setMicError] = useState("");
@@ -157,9 +162,10 @@ export default function Home() {
   const [chatError, setChatError] = useState("");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [textOnly, setTextOnly] = useState(false);
-  const [voiceMode, setVoiceMode] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(true);
   const [fastReplies, setFastReplies] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [ttsEngineOnline, setTtsEngineOnline] = useState(null);
   const [voicePromptText, setVoicePromptText] = useState("");
   const [ttsStatus, setTtsStatus] = useState("idle");
@@ -208,7 +214,7 @@ export default function Home() {
       r = await fetch(`${SERVER_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userText: text, maxOutputTokens: fastReplies ? 140 : 260 })
+        body: JSON.stringify({ userText: text, maxOutputTokens: fastReplies ? 200 : 320 })
       });
     } catch (err) {
       setChatError("chat_unreachable");
@@ -436,7 +442,7 @@ export default function Home() {
   }
 
   async function speakChunks(textToSpeak, settingsOverride) {
-    const chunks = splitSpeechText(textToSpeak, fastReplies ? 160 : 220);
+    const chunks = splitSpeechText(textToSpeak, fastReplies ? 200 : 280);
     if (!chunks.length) return;
     stopMic();
     await stopAudio();
@@ -603,6 +609,11 @@ export default function Home() {
   }, [audioUnlocked, pendingSpeak]);
 
   useEffect(() => {
+    if (!voiceMode || micState !== "idle") return;
+    startMic();
+  }, [voiceMode, micState]);
+
+  useEffect(() => {
     async function checkTtsEngine() {
       try {
         const r = await fetch(`${SERVER_URL}/api/aika/tts/health`);
@@ -718,7 +729,7 @@ export default function Home() {
             value={userText}
             onChange={(e) => setUserText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Say something???"
+            placeholder="Type your message..."
             style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px solid #ccc" }}
           />
           <div style={{
@@ -770,13 +781,84 @@ export default function Home() {
             }}
             title={micState === "listening" ? "Stop listening (Space)" : "Start listening (Space)"}
           >
-            {micState === "listening" ? "Listening???" : "Mic"}
+            {micState === "listening" ? "Listening" : "Mic"}
           </button>
           <button onClick={() => send()} style={{ padding: "12px 16px", borderRadius: 12 }}>
             Send
           </button>
+          <button
+            onClick={() => setShowSettings(v => !v)}
+            style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #ddd", background: "#f9fafb" }}
+          >
+            {showSettings ? "Close Settings" : "Settings"}
+          </button>
         </div>
-        {showAdvanced && (
+        {showSettings && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: 8,
+          padding: 10,
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          background: "#fafafa"
+        }}>
+          <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+            Voice + Input
+          </div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <input
+              type="checkbox"
+              checked={voiceMode}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setVoiceMode(v);
+                if (v) {
+                  setAutoSpeak(true);
+                  setTextOnly(false);
+                  startMic();
+                } else {
+                  stopMic();
+                }
+              }}
+            />
+            Voice Mode (listen + auto speak)
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <input
+              type="checkbox"
+              checked={autoSpeak}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setAutoSpeak(v);
+                if (v) setTextOnly(false);
+              }}
+            />
+            Auto Speak
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <input
+              type="checkbox"
+              checked={fastReplies}
+              onChange={(e) => setFastReplies(e.target.checked)}
+            />
+            Fast replies (shorter, quicker)
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <input
+              type="checkbox"
+              checked={textOnly}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setTextOnly(v);
+                if (v) setAutoSpeak(false);
+              }}
+            />
+            Text only (no voice)
+          </label>
+        </div>
+        )}
+        {showSettings && showAdvanced && (
         <div style={{
           display: "grid",
           gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -919,56 +1001,16 @@ export default function Home() {
         <div style={{ color: "#374151", fontSize: 12 }}>
           {micStatus}
         </div>
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-          <input
-            type="checkbox"
-            checked={voiceMode}
-            onChange={(e) => {
-              const v = e.target.checked;
-              setVoiceMode(v);
-              if (v) {
-                setAutoSpeak(true);
-                setTextOnly(false);
-                startMic();
-              } else {
-                stopMic();
-              }
-            }}
-          />
-          Voice Mode (listen + auto speak)
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-          <input
-            type="checkbox"
-            checked={autoSpeak}
-            onChange={(e) => {
-              const v = e.target.checked;
-              setAutoSpeak(v);
-              if (v) setTextOnly(false);
-            }}
-          />
-          Auto Speak
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-          <input
-            type="checkbox"
-            checked={fastReplies}
-            onChange={(e) => setFastReplies(e.target.checked)}
-          />
-          Fast replies (shorter, quicker)
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
-          <input
-            type="checkbox"
-            checked={textOnly}
-            onChange={(e) => {
-              const v = e.target.checked;
-              setTextOnly(v);
-              if (v) setAutoSpeak(false);
-            }}
-          />
-          Text only (no voice)
-        </label>
+        {showSettings && (
+        <>
+        <button
+          onClick={() => setShowAdvanced(v => !v)}
+          style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
+        >
+          {showAdvanced ? "Hide Advanced Voice" : "Advanced Voice"}
+        </button>
+        </>
+        )}
         <div style={{ color: "#6b7280", fontSize: 12 }}>
           Voice: {ttsStatus}
         </div>
@@ -998,7 +1040,7 @@ export default function Home() {
             TTS warnings: {ttsWarnings.join(", ")}
           </div>
         )}
-        {micState === "idle" && (
+        {micState === "idle" && voiceMode && (
           <div style={{ color: "#1f2937", fontSize: 12, fontWeight: 600 }}>
             Click Mic to continue
           </div>

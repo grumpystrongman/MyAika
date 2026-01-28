@@ -20,6 +20,10 @@ Open:
 - Web: http://localhost:3000
 - Server health: http://localhost:8787/health
 
+Default UI behavior:
+- Voice Mode is on by default (auto-listen + auto-speak).
+- Settings and advanced voice controls are behind the "Settings" button.
+
 ## Aika Voice (GPT-SoVITS only)
 Voice output is handled by a local GPT-SoVITS service. The app calls it and streams the WAV back.
 

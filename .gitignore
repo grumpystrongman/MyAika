@@ -8,6 +8,7 @@ tools/ffmpeg/
 dist
 .next
 out
+data/aika_tts_cache/
 *.sqlite
 .DS_Store
 apps/server/voices/*_trim_6s.wav
