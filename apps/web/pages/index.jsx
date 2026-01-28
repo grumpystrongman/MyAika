@@ -474,7 +474,14 @@ export default function Home() {
   }
 
   async function speakChunks(textToSpeak, settingsOverride) {
-    const chunks = splitSpeechText(textToSpeak, fastReplies ? 200 : 280);
+    const cleaned = String(textToSpeak || "").trim();
+    if (!cleaned) return;
+    const maxLen = fastReplies ? 200 : 280;
+    if (cleaned.length <= maxLen) {
+      await speak(cleaned, settingsOverride, { restartMicOnEnd: true });
+      return;
+    }
+    const chunks = splitSpeechText(cleaned, maxLen);
     if (!chunks.length) return;
     stopMic();
     await stopAudio();
