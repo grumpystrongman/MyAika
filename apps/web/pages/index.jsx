@@ -91,6 +91,26 @@ function applyEmotionTuning(settings, behavior) {
   };
 }
 
+function splitSpeechText(text, maxChars = 180) {
+  const cleaned = String(text || "").trim();
+  if (!cleaned) return [];
+  const sentences = cleaned.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [cleaned];
+  const chunks = [];
+  let current = "";
+  for (const sentence of sentences) {
+    const part = sentence.trim();
+    if (!part) continue;
+    if ((current + " " + part).trim().length <= maxChars) {
+      current = current ? `${current} ${part}` : part;
+    } else {
+      if (current) chunks.push(current);
+      current = part;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 async function unlockAudio() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx) return false;
@@ -177,7 +197,7 @@ export default function Home() {
 
     stopMic();
     if (voiceMode && autoSpeak && !textOnly) {
-      speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft" });
+      speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft", fast: true }, { restartMicOnEnd: false });
     }
     setLog(l => [...l, { role: "user", text }]);
     setUserText("");
@@ -217,7 +237,7 @@ export default function Home() {
     setLastAssistantText(reply);
 
     if (autoSpeak && !textOnly && reply) {
-      speak(reply);
+      speakChunks(reply);
     }
   }
 
@@ -325,7 +345,7 @@ export default function Home() {
     }
   }
 
-  async function speak(textToSpeak, settingsOverride) {
+  async function speak(textToSpeak, settingsOverride, options = {}) {
     if (textOnly) return;
     if (!audioUnlocked) {
       setPendingSpeak({ text: textToSpeak, settings: settingsOverride });
@@ -336,14 +356,20 @@ export default function Home() {
     if (!text) return;
 
     try {
-      stopMic();
-      await stopAudio();
+      const { skipStop = false, restartMicOnEnd = true } = options;
+      const useFast = settingsOverride?.fast ?? fastReplies;
+      if (!skipStop) {
+        stopMic();
+        await stopAudio();
+      }
       setTtsError("");
       setTtsStatus("loading");
+      const tuned = applyEmotionTuning(settingsOverride || ttsSettings, behavior);
+      const requestSettings = { ...tuned, fast: useFast };
       const r = await fetch(`${SERVER_URL}/api/aika/voice/inline`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, settings: applyEmotionTuning(settingsOverride || ttsSettings, behavior) })
+        body: JSON.stringify({ text, settings: requestSettings })
       });
       if (!r.ok) {
         let errText = "tts_failed";
@@ -364,48 +390,61 @@ export default function Home() {
       const blob = await r.blob();
       if (!blob || blob.size < 64) throw new Error("audio_blob_invalid");
 
-      const objectUrl = URL.createObjectURL(blob);
-      const audio = audioRef.current || new Audio();
-      audioRef.current = audio;
-      audio.src = objectUrl;
-      audio.preload = "auto";
-      audio.volume = 1;
-      audio.onended = () => {
-        URL.revokeObjectURL(objectUrl);
-        setTtsStatus("idle");
-        setBehavior(prev => ({ ...prev, speaking: false }));
-        if (voiceMode && !textOnly) {
-          setTimeout(() => startMic(), 200);
-        }
-      };
-      audio.onerror = async () => {
-        URL.revokeObjectURL(objectUrl);
-        try {
-          setTtsStatus("playing");
-          await playBlobWithAudioContext(blob);
+      return await new Promise(resolve => {
+        const objectUrl = URL.createObjectURL(blob);
+        const audio = audioRef.current || new Audio();
+        audioRef.current = audio;
+        audio.src = objectUrl;
+        audio.preload = "auto";
+        audio.volume = 1;
+        audio.onended = () => {
+          URL.revokeObjectURL(objectUrl);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
-          if (voiceMode && !textOnly) {
+          if (restartMicOnEnd && voiceMode && !textOnly) {
             setTimeout(() => startMic(), 200);
           }
-        } catch (e) {
-          setTtsStatus("error");
-          setTtsError(e?.message || "audio_play_failed");
-          setBehavior(prev => ({ ...prev, speaking: false }));
-        }
-      };
+          resolve();
+        };
+        audio.onerror = async () => {
+          URL.revokeObjectURL(objectUrl);
+          try {
+            setTtsStatus("playing");
+            await playBlobWithAudioContext(blob);
+            setTtsStatus("idle");
+            setBehavior(prev => ({ ...prev, speaking: false }));
+            if (restartMicOnEnd && voiceMode && !textOnly) {
+              setTimeout(() => startMic(), 200);
+            }
+          } catch (e) {
+            setTtsStatus("error");
+            setTtsError(e?.message || "audio_play_failed");
+            setBehavior(prev => ({ ...prev, speaking: false }));
+          }
+          resolve();
+        };
 
-      setBehavior(prev => ({ ...prev, speaking: true }));
-      setTtsStatus("playing");
-      try {
-        await audio.play();
-      } catch (e) {
-        await audio.onerror();
-      }
+        setBehavior(prev => ({ ...prev, speaking: true }));
+        setTtsStatus("playing");
+        audio.play().catch(() => audio.onerror());
+      });
     } catch (e) {
       setTtsStatus("error");
       setTtsError(e?.message || "tts_failed");
       setBehavior(prev => ({ ...prev, speaking: false }));
+    }
+  }
+
+  async function speakChunks(textToSpeak, settingsOverride) {
+    const chunks = splitSpeechText(textToSpeak, fastReplies ? 160 : 220);
+    if (!chunks.length) return;
+    stopMic();
+    await stopAudio();
+    for (const chunk of chunks) {
+      await speak(chunk, settingsOverride, { skipStop: true, restartMicOnEnd: false });
+    }
+    if (voiceMode && !textOnly) {
+      setTimeout(() => startMic(), 200);
     }
   }
 
@@ -771,7 +810,7 @@ export default function Home() {
               Test Voice
             </button>
             <button
-              onClick={() => speak(lastAssistantText)}
+              onClick={() => speakChunks(lastAssistantText)}
               style={{ padding: "8px 12px", borderRadius: 8 }}
               disabled={!lastAssistantText}
             >

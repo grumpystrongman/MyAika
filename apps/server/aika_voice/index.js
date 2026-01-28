@@ -47,7 +47,6 @@ export async function generateAikaVoice({ text, settings = {} }) {
 
   if (normalized.pitch !== 0) warnings.push("pitch_ignored");
   if (normalized.energy !== 1.0) warnings.push("energy_ignored");
-  if (normalized.rate !== 1.05) warnings.push("rate_ignored");
 
   let voicePath = resolveVoicePath(normalized.voice?.reference_wav_path);
   if (normalized.voice?.reference_wav_path && !voicePath) {
@@ -127,7 +126,8 @@ export async function generateAikaVoice({ text, settings = {} }) {
       refWavPath: voicePath,
       promptText: normalized.voice?.prompt_text || "",
       language: "en",
-      rate: normalized.rate
+      rate: normalized.rate,
+      fast: normalized.fast
     });
   }
 

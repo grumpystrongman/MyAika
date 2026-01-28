@@ -12,6 +12,7 @@ export function normalizeSettings(input = {}) {
   const pitch = clamp(input.pitch ?? 0, -5, 5);
   const energy = clamp(input.energy ?? 1.0, 0.5, 1.5);
   const pause = clamp(input.pause ?? 1.1, 0.8, 1.8);
+  const fast = Boolean(input.fast);
 
   const voice = {};
   if (input.voice && typeof input.voice.reference_wav_path === "string") {
@@ -29,7 +30,7 @@ export function normalizeSettings(input = {}) {
   }
 
   return {
-    settings: { style, format, rate, pitch, energy, pause, voice },
+    settings: { style, format, rate, pitch, energy, pause, fast, voice },
     warnings
   };
 }

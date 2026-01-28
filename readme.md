@@ -74,6 +74,21 @@ of the target voice.
 - 400 "Reference audio is outside 3-10 seconds": trim the WAV or let auto-trim run.
 - If you changed ports, update both `GPTSOVITS_PORT` and `GPTSOVITS_URL`.
 
+### Performance / latency tuning
+To get fast, natural responses (ChatGPT-like):
+- Ensure GPT-SoVITS is running on GPU:
+  - `apps/server/gptsovits_tts_infer_v3.yaml` is configured for `device: cuda` and `is_half: true`.
+  - If you do not have a compatible GPU, set `device: cpu` and `is_half: false` (slower).
+- Keep reference WAVs short and clean (3–10s).
+- Use the "Fast replies" toggle in the UI. It:
+  - reduces LLM output length
+  - uses faster GPT-SoVITS settings (smaller `sample_steps`, shorter text splits)
+
+You can fine-tune speed vs quality in `apps/server/.env`:
+- `GPTSOVITS_SAMPLE_STEPS` and `GPTSOVITS_FAST_SAMPLE_STEPS`
+- `GPTSOVITS_TEXT_SPLIT_METHOD` and `GPTSOVITS_FAST_SPLIT_METHOD`
+- `GPTSOVITS_PARALLEL_INFER`
+
 ## Aika Avatar (Live2D + PNG fallback)
 Avatar rendering is engine-based with Live2D Web + PNG fallback.
 
