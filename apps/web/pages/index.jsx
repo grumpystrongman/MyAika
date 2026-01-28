@@ -996,6 +996,7 @@ export default function Home() {
             {showSettings ? "Close Settings" : "Settings"}
           </button>
         </div>
+        )}
         {activeTab === "chat" && (
         <>
           {showSettings && (
