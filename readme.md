@@ -23,6 +23,19 @@ Open:
 Default UI behavior:
 - Voice Mode is on by default (auto-listen + auto-speak).
 - Settings and advanced voice controls are behind the "Settings" button.
+- Integrations are available under the "Integrations" tab.
+
+## Integrations (beta)
+The Integrations tab lets you connect external services so Aika can:
+- Post and respond on social channels (Facebook/Instagram)
+- Message you (WhatsApp, Telegram, Slack, Discord)
+- Access documents (Google Docs/Drive)
+- Monitor Plex
+- Use Fireflies.ai for meeting notes
+
+Notes:
+- Integrations are stubs until credentials are provided.
+- Add the credentials in `apps/server/.env` and restart the server.
 
 ## Aika Voice (GPT-SoVITS only)
 Voice output is handled by a local GPT-SoVITS service. The app calls it and streams the WAV back.
@@ -104,6 +117,18 @@ Avatar rendering is engine-based with Live2D Web + PNG fallback.
   - To change the entry file, update `LIVE2D_MODEL_URL` in
     `apps/web/src/components/AikaAvatar.tsx`.
   - See `apps/web/src/avatar/README.md` for expression naming and parameter mapping.
+
+### Free Live2D model options (licensed)
+Recommended starter model: Hiyori Momose (FREE) from Live2D Sample Data.
+These assets require accepting Live2D's Free Material License Agreement and have
+commercial-use limits depending on your organization size. Download and extract
+the model into `apps/web/public/assets/aika/live2d/`.
+
+Download links (read license first):
+```
+https://www.live2d.com/en/learn/sample/
+https://www.live2d.com/en/cubism/download/editor_dl/
+```
 
 ### Demo
 Open: `http://localhost:3000/avatar-demo`

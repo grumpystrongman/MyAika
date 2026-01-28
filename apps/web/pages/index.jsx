@@ -167,6 +167,8 @@ function sleep(ms) {
 }
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState("chat");
+  const [integrations, setIntegrations] = useState({});
   const [userText, setUserText] = useState("");
   const [log, setLog] = useState([
     {
@@ -719,6 +721,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    async function loadIntegrations() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/integrations`);
+        const data = await r.json();
+        setIntegrations(data.integrations || {});
+      } catch {
+        setIntegrations({});
+      }
+    }
+    loadIntegrations();
+  }, []);
+
+  useEffect(() => {
     async function loadConfig() {
       try {
         const r = await fetch(`${SERVER_URL}/api/aika/config`);
@@ -787,6 +802,36 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [micState]);
 
+  const integrationList = [
+    { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes." },
+    { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts." },
+    { key: "fireflies", label: "Fireflies.ai", detail: "Meeting transcription and summaries." },
+    { key: "facebook", label: "Facebook Pages", detail: "Post updates and monitor campaigns." },
+    { key: "instagram", label: "Instagram", detail: "Post updates and monitor campaigns." },
+    { key: "whatsapp", label: "WhatsApp", detail: "Message you directly." },
+    { key: "telegram", label: "Telegram", detail: "Message you directly." },
+    { key: "slack", label: "Slack", detail: "Team chat updates." },
+    { key: "discord", label: "Discord", detail: "Community updates." },
+    { key: "plex", label: "Plex", detail: "Check server status and library health." }
+  ];
+
+  async function toggleIntegration(provider, next) {
+    try {
+      const url = next ? "/api/integrations/connect" : "/api/integrations/disconnect";
+      await fetch(`${SERVER_URL}${url}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider })
+      });
+      setIntegrations(prev => ({
+        ...prev,
+        [provider]: { ...prev[provider], connected: next, connectedAt: next ? new Date().toISOString() : undefined }
+      }));
+    } catch {
+      // ignore
+    }
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
       <div style={{ position: "relative" }}>
@@ -799,6 +844,71 @@ export default function Home() {
       </div>
 
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => setActiveTab("chat")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: activeTab === "chat" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+              background: activeTab === "chat" ? "#e6f0ff" : "white"
+            }}
+          >
+            Chat
+          </button>
+          <button
+            onClick={() => setActiveTab("integrations")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: activeTab === "integrations" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+              background: activeTab === "integrations" ? "#e6f0ff" : "white"
+            }}
+          >
+            Integrations
+          </button>
+        </div>
+
+        {activeTab === "integrations" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              Connect services for Aika's agent mode
+            </div>
+            {integrationList.map(item => {
+              const status = integrations[item.key]?.connected ? "Connected" : "Not connected";
+              return (
+                <div key={item.key} style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 12,
+                  padding: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "white"
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{item.label}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>{item.detail}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>{status}</span>
+                    <button
+                      onClick={() => toggleIntegration(item.key, !integrations[item.key]?.connected)}
+                      style={{ padding: "6px 10px", borderRadius: 8 }}
+                    >
+                      {integrations[item.key]?.connected ? "Disconnect" : "Connect"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Note: Real connections require API keys and OAuth setup. Configure them in `apps/server/.env`.
+            </div>
+          </div>
+        )}
+
+        {activeTab === "chat" && (
         <div style={{ flex: 1, overflow: "auto", border: "1px solid #ddd", borderRadius: 14, padding: 12, background: "white" }}>
           {log.map((m, i) => (
             <div key={i} style={{ marginBottom: 10 }}>
@@ -806,7 +916,9 @@ export default function Home() {
             </div>
           ))}
         </div>
+        )}
 
+        {activeTab === "chat" && (
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
             ref={inputRef}
@@ -1113,6 +1225,7 @@ export default function Home() {
         <div style={{ color: "#6b7280", fontSize: 12 }}>
           Hotkey: Space (when not typing)
         </div>
+        )}
       </div>
     </div>
   );

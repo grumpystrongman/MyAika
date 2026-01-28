@@ -65,6 +65,19 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+const integrationsState = {
+  google_docs: { connected: false },
+  google_drive: { connected: false },
+  fireflies: { connected: false },
+  facebook: { connected: false },
+  instagram: { connected: false },
+  whatsapp: { connected: false },
+  telegram: { connected: false },
+  slack: { connected: false },
+  discord: { connected: false },
+  plex: { connected: false }
+};
+
 // Heuristic fallback behavior
 function inferBehaviorFromText(text) {
   const t = text.toLowerCase();
@@ -440,6 +453,30 @@ app.get("/api/aika/tts/health", async (_req, res) => {
 app.get("/api/aika/config", (_req, res) => {
   const cfg = readAikaConfig();
   res.json(cfg);
+});
+
+app.get("/api/integrations", (_req, res) => {
+  res.json({ integrations: integrationsState });
+});
+
+app.post("/api/integrations/connect", (req, res) => {
+  const { provider } = req.body || {};
+  if (!provider || !integrationsState[provider]) {
+    return res.status(400).json({ error: "invalid_provider" });
+  }
+  integrationsState[provider].connected = true;
+  integrationsState[provider].connectedAt = new Date().toISOString();
+  res.json({ ok: true, provider });
+});
+
+app.post("/api/integrations/disconnect", (req, res) => {
+  const { provider } = req.body || {};
+  if (!provider || !integrationsState[provider]) {
+    return res.status(400).json({ error: "invalid_provider" });
+  }
+  integrationsState[provider].connected = false;
+  delete integrationsState[provider].connectedAt;
+  res.json({ ok: true, provider });
 });
 
 app.post("/api/aika/voice/preference", (req, res) => {
