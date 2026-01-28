@@ -668,6 +668,8 @@ export default function Home() {
         startMic();
       } else {
         setVoiceMode(false);
+        setAutoSpeak(false);
+        setTextOnly(true);
         stopMic();
       }
       return next;
