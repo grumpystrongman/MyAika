@@ -654,6 +654,14 @@ export default function Home() {
     setMicEnabled(prev => {
       const next = !prev;
       if (next) {
+        unlockAudio().then(ok => {
+          if (ok) {
+            setAudioUnlocked(true);
+            setTtsError("");
+          } else {
+            setTtsError("audio_locked_click_enable");
+          }
+        });
         setVoiceMode(true);
         setAutoSpeak(true);
         setTextOnly(false);
