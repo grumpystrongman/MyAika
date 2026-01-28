@@ -181,13 +181,104 @@ app.post("/chat", async (req, res) => {
     }
 
     const lowerText = userText.toLowerCase();
-    if (lowerText.includes("fireflies") && lowerText.includes("meeting")) {
-      return res.json({
-        text:
-          "Fireflies can only record a meeting if it joins a live meeting or you upload an audio file. " +
-          "Send me a meeting link or an HTTPS audio URL and I will upload it to Fireflies and save notes to Google Docs.",
-        behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
-      });
+    if (lowerText.includes("fireflies")) {
+      if (!process.env.FIREFLIES_API_KEY) {
+        return res.json({
+          text:
+            "Fireflies is not configured yet. Please set FIREFLIES_API_KEY in apps/server/.env and restart the server.",
+          behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+        });
+      }
+
+      const urlMatch = userText.match(/https?:\\/\\/[^\\s]+/i);
+      const firefliesUrl = urlMatch ? urlMatch[0] : "";
+      let transcriptId = null;
+      if (firefliesUrl.includes("app.fireflies.ai/view/")) {
+        const idMatch = firefliesUrl.match(/::([A-Za-z0-9]+)/);
+        if (idMatch) transcriptId = idMatch[1];
+      }
+
+      try {
+        let transcript;
+        if (!transcriptId) {
+          const list = await fetchFirefliesTranscripts(1);
+          const latest = list?.data?.transcripts?.[0];
+          if (latest?.id) transcriptId = latest.id;
+        }
+        if (!transcriptId) {
+          return res.json({
+            text:
+              "I couldn't find a Fireflies transcript yet. Share a Fireflies view link or make sure Fireflies has transcripts in your account.",
+            behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+          });
+        }
+
+        const detail = await fetchFirefliesTranscript(transcriptId);
+        transcript = detail?.data?.transcript;
+        if (!transcript) {
+          return res.json({
+            text: "I couldn't access that transcript. Please confirm the link is valid and your API key has access.",
+            behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+          });
+        }
+
+        const summary = transcript.summary || {};
+        const summaryText =
+          summary.short_summary ||
+          summary.short_overview ||
+          summary.overview ||
+          summary.gist ||
+          summary.bullet_gist ||
+          "Summary not available yet.";
+        const actionItems = Array.isArray(summary.action_items) ? summary.action_items : [];
+        const topics = Array.isArray(summary.topics_discussed) ? summary.topics_discussed : [];
+        const transcriptUrl = transcript.transcript_url || firefliesUrl;
+        const title = transcript.title || "Fireflies Meeting";
+
+        let docLink = "";
+        try {
+          await getGoogleAccessToken();
+          const doc = await createGoogleDoc(`Aika Notes - ${title}`, [
+            `Title: ${title}`,
+            `Date: ${transcript.dateString || ""}`,
+            `Transcript: ${transcriptUrl}`,
+            "",
+            "Summary:",
+            summaryText,
+            "",
+            "Key Topics:",
+            topics.length ? topics.map(t => `- ${t}`).join("\n") : "- (none)",
+            "",
+            "Action Items:",
+            actionItems.length ? actionItems.map(t => `- ${t}`).join("\n") : "- (none)"
+          ].join("\n"));
+          if (doc?.documentId) {
+            docLink = `https://docs.google.com/document/d/${doc.documentId}/edit`;
+          }
+        } catch {
+          // Google not connected; skip doc creation
+        }
+
+        const responseText = [
+          `Here's your Fireflies summary for "${title}":`,
+          summaryText,
+          actionItems.length ? `Action items: ${actionItems.join("; ")}` : "Action items: (none)",
+          topics.length ? `Topics: ${topics.join(", ")}` : "Topics: (none)",
+          transcriptUrl ? `Transcript link: ${transcriptUrl}` : "",
+          docLink ? `Google Doc: ${docLink}` : "Google Doc: (connect Google Docs to enable)"
+        ].filter(Boolean).join("\n");
+
+        return res.json({
+          text: responseText,
+          behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 })
+        });
+      } catch (err) {
+        return res.json({
+          text:
+            "Fireflies request failed. Please check your FIREFLIES_API_KEY and ensure the transcript is accessible.",
+          behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+        });
+      }
     }
 
     // Save user message

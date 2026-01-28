@@ -34,7 +34,7 @@ export function markFirefliesConnected() {
 export async function fetchFirefliesTranscript(transcriptId) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("fireflies_api_key_missing");
-  const query = `query Transcript($transcriptId: String!) { transcript(id: $transcriptId) { id title dateString duration speakers { name } } }`;
+  const query = `query Transcript($transcriptId: String!) { transcript(id: $transcriptId) { id title dateString duration transcript_url summary { short_summary short_overview overview gist bullet_gist action_items topics_discussed } } }`;
   const r = await fetch(FIREFLIES_URL, {
     method: "POST",
     headers: {
