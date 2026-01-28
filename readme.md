@@ -53,6 +53,8 @@ Docs: Google Docs API and Drive API. citeturn0search0turn0search1
 ### Fireflies.ai
 Set `FIREFLIES_API_KEY` and restart the server, then call:
 - `GET /api/integrations/fireflies/transcripts?limit=5`
+- `GET /api/integrations/fireflies/transcripts/:id`
+- `POST /api/integrations/fireflies/upload` `{ url, title, webhook, language }`
 
 Fireflies GraphQL API docs. citeturn0search2
 
@@ -61,6 +63,10 @@ Set `SLACK_BOT_TOKEN`, then call:
 - `POST /api/integrations/slack/post` `{ channel, text }`
 
 Slack chat.postMessage API. citeturn0search3
+
+### Meta (Facebook/Instagram/WhatsApp)
+These require a Meta developer app, approved permissions, and valid access tokens.
+Once you have credentials, we can wire posting and messaging endpoints safely. citeturn0search4turn0search5
 
 ### Agent tasks (server)
 Use `POST /api/agent/task` with:

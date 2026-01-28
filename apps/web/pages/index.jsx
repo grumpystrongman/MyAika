@@ -817,6 +817,11 @@ export default function Home() {
 
   async function toggleIntegration(provider, next) {
     try {
+      const configured = integrations[provider]?.configured;
+      if (configured === false) {
+        setChatError(`${provider}_not_configured`);
+        return;
+      }
       if (provider === "google_docs" || provider === "google_drive") {
         window.open(`${SERVER_URL}/api/integrations/google/auth/start`, "_blank", "width=520,height=680");
         return;

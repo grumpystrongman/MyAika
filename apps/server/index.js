@@ -17,7 +17,12 @@ import {
   uploadDriveFile,
   getGoogleAccessToken
 } from "./integrations/google.js";
-import { fetchFirefliesTranscripts, markFirefliesConnected } from "./integrations/fireflies.js";
+import {
+  fetchFirefliesTranscripts,
+  fetchFirefliesTranscript,
+  uploadFirefliesAudio,
+  markFirefliesConnected
+} from "./integrations/fireflies.js";
 import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
 import { getProvider } from "./integrations/store.js";
@@ -173,6 +178,16 @@ app.post("/chat", async (req, res) => {
     }
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({ error: "missing_openai_api_key" });
+    }
+
+    const lowerText = userText.toLowerCase();
+    if (lowerText.includes("fireflies") && lowerText.includes("meeting")) {
+      return res.json({
+        text:
+          "Fireflies can only record a meeting if it joins a live meeting or you upload an audio file. " +
+          "Send me a meeting link or an HTTPS audio URL and I will upload it to Fireflies and save notes to Google Docs.",
+        behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+      });
     }
 
     // Save user message
@@ -512,6 +527,9 @@ app.post("/api/integrations/disconnect", (req, res) => {
 
 app.get("/api/integrations/google/auth/start", (_req, res) => {
   try {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      return res.status(400).send("google_oauth_not_configured");
+    }
     const state = Math.random().toString(36).slice(2);
     const url = getGoogleAuthUrl(state);
     res.redirect(url);
@@ -591,6 +609,27 @@ app.get("/api/integrations/fireflies/transcripts", async (req, res) => {
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message || "fireflies_failed" });
+  }
+});
+
+app.get("/api/integrations/fireflies/transcripts/:id", async (req, res) => {
+  try {
+    markFirefliesConnected();
+    const data = await fetchFirefliesTranscript(req.params.id);
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "fireflies_transcript_failed" });
+  }
+});
+
+app.post("/api/integrations/fireflies/upload", async (req, res) => {
+  try {
+    const { url, title, webhook, language } = req.body || {};
+    if (!url) return res.status(400).json({ error: "url_required" });
+    const data = await uploadFirefliesAudio({ url, title, webhook, language });
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "fireflies_upload_failed" });
   }
 });
 
