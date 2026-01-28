@@ -86,6 +86,7 @@ function inferBehaviorFromText(text) {
 
 
 
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini";
 
 async function fallbackChatCompletion({ systemPrompt, userText, maxOutputTokens }) {
@@ -184,7 +185,7 @@ INSTRUCTIONS:
     let response;
     try {
       response = await client.responses.create({
-      model: "gpt-5-mini",
+      model: OPENAI_MODEL,
       max_output_tokens: Math.min(600, Math.max(80, Number(maxOutputTokens) || Number(process.env.OPENAI_MAX_OUTPUT_TOKENS) || 220)),
       input: [
         {
@@ -237,11 +238,12 @@ INSTRUCTIONS:
     let behavior = inferBehaviorFromText(userText);
     let replyText = rawText;
 
-    // Attempt to parse final-line JSON
-    const lastLine = lines[lines.length - 1];
-    if (lastLine && lastLine.startsWith("{") && lastLine.endsWith("}")) {
+    // Attempt to parse JSON anywhere in the response (model doesn't always put it on its own line)
+    const jsonMatches = [...rawText.matchAll(/\{[^{}]*"emotion"[^{}]*\}/gi)];
+    if (jsonMatches.length) {
+      const lastMatch = jsonMatches[jsonMatches.length - 1][0];
       try {
-        const parsed = JSON.parse(lastLine);
+        const parsed = JSON.parse(lastMatch);
         behavior = makeBehavior({
           emotion: parsed.emotion || behavior.emotion,
           intensity:
@@ -250,9 +252,32 @@ INSTRUCTIONS:
               : behavior.intensity,
           speaking: false
         });
-        replyText = lines.slice(0, -1).join("\n");
+        replyText = rawText
+          .replace(lastMatch, "")
+          .replace(/```json/gi, "")
+          .replace(/```/g, "")
+          .trim();
       } catch {
         // fall back silently
+      }
+    } else {
+      // Attempt to parse final-line JSON
+      const lastLine = lines[lines.length - 1];
+      if (lastLine && lastLine.startsWith("{") && lastLine.endsWith("}")) {
+        try {
+          const parsed = JSON.parse(lastLine);
+          behavior = makeBehavior({
+            emotion: parsed.emotion || behavior.emotion,
+            intensity:
+              typeof parsed.intensity === "number"
+                ? parsed.intensity
+                : behavior.intensity,
+            speaking: false
+          });
+          replyText = lines.slice(0, -1).join("\n");
+        } catch {
+          // fall back silently
+        }
       }
     }
 

@@ -5,7 +5,7 @@ const DEFAULT_URL = process.env.GPTSOVITS_URL || "http://127.0.0.1:9880/tts";
 const DEFAULT_TEXT_LANG = process.env.GPTSOVITS_TEXT_LANG || "en";
 const DEFAULT_PROMPT_LANG = process.env.GPTSOVITS_PROMPT_LANG || "en";
 const DEFAULT_SPLIT_METHOD = process.env.GPTSOVITS_TEXT_SPLIT_METHOD || "cut5";
-const FAST_SPLIT_METHOD = process.env.GPTSOVITS_FAST_SPLIT_METHOD || "cut2";
+const FAST_SPLIT_METHOD = process.env.GPTSOVITS_FAST_SPLIT_METHOD || "cut5";
 const DEFAULT_SAMPLE_STEPS = Number(process.env.GPTSOVITS_SAMPLE_STEPS || 32);
 const FAST_SAMPLE_STEPS = Number(process.env.GPTSOVITS_FAST_SAMPLE_STEPS || 18);
 const DEFAULT_PARALLEL_INFER =
@@ -14,6 +14,9 @@ const DEFAULT_TOP_K = Number(process.env.GPTSOVITS_TOP_K || 5);
 const DEFAULT_TOP_P = Number(process.env.GPTSOVITS_TOP_P || 1);
 const DEFAULT_TEMPERATURE = Number(process.env.GPTSOVITS_TEMPERATURE || 1);
 const DEFAULT_STREAMING_MODE = process.env.GPTSOVITS_STREAMING_MODE || "0";
+const DEFAULT_MIN_CHUNK = Number(process.env.GPTSOVITS_MIN_CHUNK_LENGTH || 20);
+const DEFAULT_OVERLAP = Number(process.env.GPTSOVITS_OVERLAP_LENGTH || 2);
+const DEFAULT_REPETITION_PENALTY = Number(process.env.GPTSOVITS_REPETITION_PENALTY || 1.35);
 
 export async function generateWithGptSovits({
   text,
@@ -44,7 +47,10 @@ export async function generateWithGptSovits({
     top_p: DEFAULT_TOP_P,
     temperature: DEFAULT_TEMPERATURE,
     parallel_infer: DEFAULT_PARALLEL_INFER,
-    sample_steps: Number.isFinite(sampleSteps) ? sampleSteps : DEFAULT_SAMPLE_STEPS
+    sample_steps: Number.isFinite(sampleSteps) ? sampleSteps : DEFAULT_SAMPLE_STEPS,
+    min_chunk_length: DEFAULT_MIN_CHUNK,
+    overlap_length: DEFAULT_OVERLAP,
+    repetition_penalty: DEFAULT_REPETITION_PENALTY
   };
 
   const r = await fetch(DEFAULT_URL, {

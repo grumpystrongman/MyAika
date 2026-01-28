@@ -261,11 +261,12 @@ export default function Home() {
     const b = data.behavior || behavior;
 
     setBehavior({ ...b, speaking: false });
-    setLog(l => [...l, { role: "assistant", text: reply || "(no reply)" }]);
+    const displayReply = stripEmotionTags(reply);
+    setLog(l => [...l, { role: "assistant", text: displayReply || "(no reply)" }]);
     setLastAssistantText(reply);
 
-    if (autoSpeak && !textOnly && reply) {
-      const spoken = stripEmotionTags(reply);
+    if (autoSpeak && !textOnly && displayReply) {
+      const spoken = displayReply;
       if (spoken) speakChunks(spoken, { use_raw_text: true });
     }
   }
