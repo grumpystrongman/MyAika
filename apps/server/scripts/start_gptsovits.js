@@ -17,9 +17,12 @@ const pythonBin = process.env.GPTSOVITS_PYTHON_BIN || "python";
 const port = process.env.GPTSOVITS_PORT || "9882";
 const bindAddr = process.env.GPTSOVITS_BIND || "0.0.0.0";
 const defaultConfig = path.join(repoRoot, "apps", "server", "gptsovits_tts_infer_v3.yaml");
-const configPath =
+const rawConfigPath =
   process.env.GPTSOVITS_CONFIG ||
   (fs.existsSync(defaultConfig) ? defaultConfig : "GPT_SoVITS/configs/tts_infer.yaml");
+const configPath = path.isAbsolute(rawConfigPath)
+  ? rawConfigPath
+  : path.resolve(repoRoot, rawConfigPath);
 
 const scriptPath = path.join(repoPath, "api_v2.py");
 const args = [scriptPath, "-a", bindAddr, "-p", port, "-c", configPath];

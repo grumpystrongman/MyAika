@@ -172,6 +172,9 @@ export default function Home() {
   const [statusInfo, setStatusInfo] = useState(null);
   const [logLines, setLogLines] = useState([]);
   const [logFilter, setLogFilter] = useState("");
+  const [lastTtsMetrics, setLastTtsMetrics] = useState(null);
+  const [ttsDiagnostics, setTtsDiagnostics] = useState(null);
+  const [ttsDiagError, setTtsDiagError] = useState("");
   const [userText, setUserText] = useState("");
   const [log, setLog] = useState([
     {
@@ -266,15 +269,15 @@ export default function Home() {
     }
     const b = data.behavior || behavior;
 
-    setBehavior({ ...b, speaking: false });
-    const displayReply = stripEmotionTags(reply);
-    setLog(l => [...l, { role: "assistant", text: displayReply || "(no reply)" }]);
-    setLastAssistantText(reply);
+      setBehavior({ ...b, speaking: false });
+      const displayReply = stripEmotionTags(reply);
+      setLog(l => [...l, { role: "assistant", text: displayReply || "(no reply)" }]);
+      setLastAssistantText(displayReply);
 
-    if (autoSpeak && !textOnly && displayReply) {
-      const spoken = displayReply;
-      if (spoken) speakChunks(spoken, { use_raw_text: true });
-    }
+      if (autoSpeak && !textOnly && displayReply) {
+        const spoken = displayReply;
+        if (spoken) speakChunks(spoken, { use_raw_text: true });
+      }
   }
 
   async function stopAudio(fadeMs = 160) {
@@ -403,6 +406,7 @@ export default function Home() {
       setTtsStatus("loading");
       const tuned = applyEmotionTuning(settingsOverride || ttsSettings, behavior);
       const requestSettings = { ...tuned, fast: useFast, use_raw_text: true };
+      const t0 = performance.now();
       const r = await fetch(`${SERVER_URL}/api/aika/voice/inline`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -425,6 +429,12 @@ export default function Home() {
         setTtsWarnings(warningsHeader.split(",").map(s => s.trim()).filter(Boolean));
       }
       const blob = await r.blob();
+      const t1 = performance.now();
+      setLastTtsMetrics({
+        ms: Math.round(t1 - t0),
+        bytes: blob?.size || 0,
+        status: r.status
+      });
       if (!blob || blob.size < 64) throw new Error("audio_blob_invalid");
 
       return await new Promise(resolve => {
@@ -634,6 +644,14 @@ export default function Home() {
     await stopAudio(200);
     await sleep(120);
     await startLevelMeter();
+    if (!audioUnlocked) {
+      unlockAudio().then(ok => {
+        if (ok) {
+          setAudioUnlocked(true);
+          setTtsError("");
+        }
+      });
+    }
     try {
       r.start();
     } catch (e) {
@@ -767,6 +785,33 @@ export default function Home() {
     const id = setInterval(loadStatus, 4000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "debug") return;
+    let cancelled = false;
+    async function loadDiagnostics() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/aika/tts/diagnostics`);
+        if (!r.ok) throw new Error("diagnostics_failed");
+        const data = await r.json();
+        if (!cancelled) {
+          setTtsDiagnostics(data);
+          setTtsDiagError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setTtsDiagnostics(null);
+          setTtsDiagError(err?.message || "diagnostics_failed");
+        }
+      }
+    }
+    loadDiagnostics();
+    const id = setInterval(loadDiagnostics, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [activeTab]);
 
   useEffect(() => {
     async function loadConfig() {
@@ -917,9 +962,33 @@ export default function Home() {
             color: "#92400e",
             borderRadius: 12,
             padding: "10px 12px",
-            fontSize: 12
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10
           }}>
-            Audio is locked by the browser. Click anywhere (or the Mic button) once to enable voice.
+            <span>Audio is locked by the browser. Click once to enable voice.</span>
+            <button
+              onClick={async () => {
+                const ok = await unlockAudio();
+                if (ok) {
+                  setAudioUnlocked(true);
+                  setTtsError("");
+                } else {
+                  setTtsError("audio_locked_click_enable");
+                }
+              }}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid #f59e0b",
+                background: "#fffbeb",
+                fontWeight: 600
+              }}
+            >
+              Enable Audio
+            </button>
           </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
@@ -1011,11 +1080,11 @@ export default function Home() {
           </div>
         )}
 
-        {activeTab === "debug" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-              System Status
-            </div>
+          {activeTab === "debug" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                System Status
+              </div>
             <div style={{
               display: "grid",
               gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -1041,6 +1110,9 @@ export default function Home() {
                   {audioUnlocked ? "Enabled" : "Locked"}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Mic: {micEnabled ? "On" : "Off"}</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  TTS: {lastTtsMetrics ? `${lastTtsMetrics.ms}ms · ${lastTtsMetrics.bytes} bytes` : "—"}
+                </div>
               </div>
               <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Integrations</div>
@@ -1048,11 +1120,34 @@ export default function Home() {
                   {Object.keys(integrations || {}).length ? "Loaded" : "—"}
                 </div>
               </div>
-            </div>
+              </div>
 
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-              Client Logs
-            </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                TTS Diagnostics
+              </div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white", fontSize: 12, color: "#374151" }}>
+                {ttsDiagnostics ? (
+                  <>
+                    <div>Engine: <b>{ttsDiagnostics.engine}</b></div>
+                    <div>GPT-SoVITS URL: {ttsDiagnostics.gptsovits?.url || "—"}</div>
+                    <div>Docs URL: {ttsDiagnostics.gptsovits?.docsUrl || "—"}</div>
+                    <div>Status: {ttsDiagnostics.gptsovits?.online ? "online" : "offline"} {ttsDiagnostics.gptsovits?.status ? `(${ttsDiagnostics.gptsovits.status})` : ""}</div>
+                    <div>Config: {ttsDiagnostics.gptsovits?.configPath || "—"} {ttsDiagnostics.gptsovits?.configExists ? "(found)" : "(missing)"}</div>
+                    <div>Default reference: {ttsDiagnostics.reference?.default || "—"}</div>
+                    <div>Reference path: {ttsDiagnostics.reference?.resolved || "—"}</div>
+                    <div>Reference ok: {ttsDiagnostics.reference?.exists ? "yes" : "no"}{ttsDiagnostics.reference?.duration ? ` · ${ttsDiagnostics.reference.duration.toFixed(2)}s` : ""}</div>
+                  </>
+                ) : (
+                  <div>Diagnostics unavailable.</div>
+                )}
+                {ttsDiagError && (
+                  <div style={{ color: "#b91c1c", marginTop: 6 }}>Diagnostics error: {ttsDiagError}</div>
+                )}
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Client Logs
+              </div>
             <input
               placeholder="Filter logs..."
               value={logFilter}

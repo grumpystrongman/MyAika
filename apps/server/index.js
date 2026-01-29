@@ -9,6 +9,7 @@ import { Emotion, makeBehavior } from "@myaika/shared";
 import { generateAikaVoice, resolveAudioPath } from "./aika_voice/index.js";
 import { trimReferenceWavToFile } from "./aika_voice/voice_ref.js";
 import { voicesDir } from "./aika_voice/paths.js";
+import { readWavMeta } from "./aika_voice/wav_meta.js";
 import {
   getGoogleAuthUrl,
   exchangeGoogleCode,
@@ -574,6 +575,72 @@ app.get("/api/aika/tts/health", async (_req, res) => {
   } catch {
     return res.json({ engine, online: false });
   }
+});
+
+app.get("/api/aika/tts/diagnostics", async (_req, res) => {
+  const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+  const cfg = readAikaConfig();
+  const defaultRef = defaultRefOverride || cfg?.voice?.default_reference_wav || "";
+  const resolvedRef = defaultRef ? path.resolve(voicesDir, defaultRef) : "";
+  const refExists = resolvedRef ? fs.existsSync(resolvedRef) : false;
+  let refMeta = null;
+  if (refExists) {
+    try {
+      refMeta = readWavMeta(resolvedRef);
+    } catch {
+      refMeta = null;
+    }
+  }
+
+  const ttsUrl = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";
+  let healthUrl = ttsUrl;
+  try {
+    const u = new URL(ttsUrl);
+    if (u.pathname.endsWith("/tts")) {
+      u.pathname = u.pathname.replace(/\/tts$/, "/docs");
+    }
+    healthUrl = u.toString();
+  } catch {
+    healthUrl = ttsUrl.replace(/\/tts$/, "/docs");
+  }
+
+  let gptOnline = false;
+  let gptStatus = null;
+  if (engine === "gptsovits") {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
+      const r = await fetch(healthUrl, { method: "GET", signal: controller.signal });
+      clearTimeout(timeout);
+      gptOnline = r.ok;
+      gptStatus = r.status;
+    } catch {
+      gptOnline = false;
+    }
+  }
+
+  res.json({
+    engine,
+    gptsovits: {
+      url: ttsUrl,
+      docsUrl: healthUrl,
+      online: gptOnline,
+      status: gptStatus,
+      configPath: process.env.GPTSOVITS_CONFIG || "",
+      configExists: process.env.GPTSOVITS_CONFIG
+        ? fs.existsSync(path.resolve(process.env.GPTSOVITS_CONFIG))
+        : false,
+      repoPath: process.env.GPTSOVITS_REPO_PATH || "",
+      pythonBin: process.env.GPTSOVITS_PYTHON_BIN || ""
+    },
+    reference: {
+      default: defaultRef,
+      resolved: resolvedRef,
+      exists: refExists,
+      duration: refMeta?.duration ?? null,
+      sampleRate: refMeta?.sampleRate ?? null
+    }
+  });
 });
 
 app.get("/api/aika/config", (_req, res) => {

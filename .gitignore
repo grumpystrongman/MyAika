@@ -9,6 +9,7 @@ dist
 .next
 out
 data/aika_tts_cache/
+data/*.wav
 *.sqlite
 .DS_Store
 apps/server/voices/*_trim_6s.wav
