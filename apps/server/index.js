@@ -190,7 +190,7 @@ app.post("/chat", async (req, res) => {
         });
       }
 
-      const urlMatch = userText.match(/https?:\\/\\/[^\\s]+/i);
+      const urlMatch = userText.match(/https?:\/\/[^\s]+/i);
       const firefliesUrl = urlMatch ? urlMatch[0] : "";
       let transcriptId = null;
       if (firefliesUrl.includes("app.fireflies.ai/view/")) {
