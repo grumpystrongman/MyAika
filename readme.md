@@ -103,6 +103,7 @@ Optional allowlist: set `SKILLS_WEBHOOK_ALLOWLIST` to a comma-separated list of 
 
 ### Reminders
 Reminders create a local notification banner in the UI when due. Use “List reminders” to review.
+You can enable a beep and browser push notification in the Skills tab.
 
 ### Why GPT-SoVITS
 - Best quality for natural, non-robotic voice

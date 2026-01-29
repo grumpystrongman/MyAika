@@ -128,6 +128,10 @@ function stripEmotionTags(text) {
   cleaned = cleaned.replace(/```json[\s\S]*?```/gi, "");
   cleaned = cleaned.replace(/```[\s\S]*?"emotion"[\s\S]*?```/gi, "");
   cleaned = cleaned.replace(/\{[^}]*"emotion"[^}]*\}/gi, "");
+  cleaned = cleaned.replace(/<[^>]+>/g, "");
+  const ipaChars = /[ˈˌːˑæɑɔəɜʊʌɪʃʒθðŋɡ]/;
+  cleaned = cleaned.replace(/\/([^/]+)\//g, (m, inner) => (ipaChars.test(inner) ? "" : m));
+  cleaned = cleaned.replace(/\[([^\]]+)\]/g, (m, inner) => (ipaChars.test(inner) ? "" : m));
   return cleaned.replace(/\s+/g, " ").trim();
 }
 
@@ -183,6 +187,8 @@ export default function Home() {
   const [scenes, setScenes] = useState([]);
   const [sceneForm, setSceneForm] = useState({ name: "", hooks: "" });
   const [skillToasts, setSkillToasts] = useState([]);
+  const [reminderAudioCue, setReminderAudioCue] = useState(true);
+  const [reminderPush, setReminderPush] = useState(false);
   const [userText, setUserText] = useState("");
   const [log, setLog] = useState([
     {
@@ -851,6 +857,28 @@ export default function Home() {
                 const id = evt.reminderId || `${evt.time}-${evt.skill}`;
                 if (!existing.has(id)) {
                   next.push({ id, text: `Reminder: ${evt.input}` });
+                  if (reminderAudioCue) {
+                    try {
+                      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                      const osc = ctx.createOscillator();
+                      const gain = ctx.createGain();
+                      osc.type = "sine";
+                      osc.frequency.value = 740;
+                      gain.gain.value = 0.07;
+                      osc.connect(gain);
+                      gain.connect(ctx.destination);
+                      osc.start();
+                      osc.stop(ctx.currentTime + 0.2);
+                      setTimeout(() => ctx.close(), 300);
+                    } catch {
+                      // ignore
+                    }
+                  }
+                  if (reminderPush && "Notification" in window) {
+                    if (Notification.permission === "granted") {
+                      new Notification("Aika Reminder", { body: evt.input || "Reminder due" });
+                    }
+                  }
                 }
               }
               return next.slice(-3);
@@ -1388,6 +1416,35 @@ export default function Home() {
                 <button onClick={() => downloadExport("reminders")} style={{ padding: "6px 10px", borderRadius: 8 }}>
                   Download Reminders
                 </button>
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+                Reminders Notifications
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={reminderAudioCue}
+                    onChange={(e) => setReminderAudioCue(e.target.checked)}
+                  />
+                  Audio cue (beep)
+                </label>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={reminderPush}
+                    onChange={async (e) => {
+                      const next = e.target.checked;
+                      setReminderPush(next);
+                      if (next && "Notification" in window) {
+                        const perm = await Notification.requestPermission();
+                        if (perm !== "granted") setReminderPush(false);
+                      }
+                    }}
+                  />
+                  Push notification
+                </label>
               </div>
 
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
