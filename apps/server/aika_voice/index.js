@@ -7,6 +7,7 @@ import { cachePaths, ensureDir, hashFile, sha256 } from "./cache.js";
 import { readWavMeta } from "./wav_meta.js";
 import { generateWithGptSovits } from "./engine_gptsovits.js";
 import { normalizeReferenceWav } from "./voice_ref.js";
+import { generateWithPiper } from "./engine_piper.js";
 
 const ENGINE = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
 const MODEL_ID =
@@ -74,12 +75,16 @@ export async function generateAikaVoice({ text, settings = {} }) {
     }
   }
 
-  const voiceHash = voicePath ? hashFile(voicePath) : "";
+  const piperVoiceName = normalized.voice?.name || process.env.PIPER_DEFAULT_VOICE || "";
+  const voiceHash = voicePath ? hashFile(voicePath) : piperVoiceName;
   const hashInput = JSON.stringify({
     text: formatted,
     settings: {
       ...normalized,
-      voice: { reference_wav_path: voicePath ? path.basename(voicePath) : "" }
+      voice: {
+        reference_wav_path: voicePath ? path.basename(voicePath) : "",
+        name: piperVoiceName
+      }
     },
     model: MODEL_ID,
     voiceHash
@@ -115,12 +120,6 @@ export async function generateAikaVoice({ text, settings = {} }) {
     voice_path: voicePath
   };
 
-  if (ENGINE !== "gptsovits") {
-    const err = new Error("gptsovits_only");
-    err.status = 400;
-    throw err;
-  }
-
   const defaultPrompt =
     process.env.GPTSOVITS_DEFAULT_PROMPT_TEXT ||
     "Aika is a confident, playful, feminine assistant with a warm, witty tone.";
@@ -136,6 +135,28 @@ export async function generateAikaVoice({ text, settings = {} }) {
       rate: normalized.rate,
       fast: normalized.fast
     });
+  } else if (ENGINE === "piper") {
+    if (normalized.format !== "wav") {
+      const err = new Error("piper_wav_only");
+      err.status = 400;
+      throw err;
+    }
+    if (!piperVoiceName) {
+      const err = new Error("piper_voice_required");
+      err.status = 400;
+      throw err;
+    }
+    if (normalized.voice?.prompt_text) warnings.push("prompt_text_ignored");
+    engineMeta = await generateWithPiper({
+      text: formatted,
+      outputPath,
+      voiceName: piperVoiceName,
+      rate: normalized.rate
+    });
+  } else {
+    const err = new Error("unsupported_tts_engine");
+    err.status = 400;
+    throw err;
   }
 
   let wavMeta = {};

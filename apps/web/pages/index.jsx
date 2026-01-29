@@ -226,6 +226,7 @@ export default function Home() {
     pause: 1.1,
     voice: { reference_wav_path: "riko_sample.wav", name: "", prompt_text: "" }
   });
+  const [availableVoices, setAvailableVoices] = useState([]);
   const recognizerRef = useRef(null);
   const audioRef = useRef(null);
   const prefTimerRef = useRef(null);
@@ -938,24 +939,41 @@ export default function Home() {
     };
   }, [activeTab]);
 
-  useEffect(() => {
-    async function loadConfig() {
-      try {
-        const r = await fetch(`${SERVER_URL}/api/aika/config`);
-        const cfg = await r.json();
-        if (cfg?.voice?.default_reference_wav) {
-          setTtsSettings(s => ({ ...s, voice: { ...s.voice, reference_wav_path: cfg.voice.default_reference_wav } }));
+    useEffect(() => {
+      async function loadConfig() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/aika/config`);
+          const cfg = await r.json();
+          if (cfg?.voice?.default_reference_wav) {
+            setTtsSettings(s => ({ ...s, voice: { ...s.voice, reference_wav_path: cfg.voice.default_reference_wav } }));
+          }
+          if (cfg?.voice?.prompt_text) {
+            setVoicePromptText(cfg.voice.prompt_text);
+            setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: cfg.voice.prompt_text } }));
+          }
+        } catch {
+          // ignore
         }
-        if (cfg?.voice?.prompt_text) {
-          setVoicePromptText(cfg.voice.prompt_text);
-          setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: cfg.voice.prompt_text } }));
-        }
-      } catch {
-        // ignore
       }
-    }
-    loadConfig();
-  }, []);
+      loadConfig();
+    }, []);
+
+    useEffect(() => {
+      async function loadVoices() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/aika/voices`);
+          const data = await r.json();
+          const list = Array.isArray(data.voices) ? data.voices : [];
+          setAvailableVoices(list);
+          if (data.engine === "piper" && list.length && !ttsSettings.voice?.name) {
+            setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: list[0].id } }));
+          }
+        } catch {
+          setAvailableVoices([]);
+        }
+      }
+      loadVoices();
+    }, []);
 
 
   useEffect(() => {
@@ -1930,22 +1948,45 @@ export default function Home() {
                 style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-              Reference WAV (apps/server/voices)
-              <input
-                type="text"
-                placeholder="example.wav"
-                value={ttsSettings.voice.reference_wav_path}
-                onChange={(e) => setTtsSettings(s => ({ ...s, voice: { reference_wav_path: e.target.value } }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-              />
-            </label>
-            <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-              Reference file must be inside apps/server/voices. Leave blank for default voice.
-            </div>
-            <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-              For a more feminine voice, add a speaker WAV and set it above.
-            </div>
+              {statusInfo?.tts?.engine === "piper" ? (
+                <>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                    Piper Voice
+                    <select
+                      value={ttsSettings.voice.name || ""}
+                      onChange={(e) => setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: e.target.value } }))}
+                      style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                    >
+                      {availableVoices.length === 0 && <option value="">(no voices found)</option>}
+                      {availableVoices.map(v => (
+                        <option key={v.id} value={v.id}>{v.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
+                    Place Piper .onnx + .onnx.json files in `apps/server/piper_voices`.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                    Reference WAV (apps/server/voices)
+                    <input
+                      type="text"
+                      placeholder="example.wav"
+                      value={ttsSettings.voice.reference_wav_path}
+                      onChange={(e) => setTtsSettings(s => ({ ...s, voice: { reference_wav_path: e.target.value } }))}
+                      style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                    />
+                  </label>
+                  <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
+                    Reference file must be inside apps/server/voices. Leave blank for default voice.
+                  </div>
+                  <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
+                    For a more feminine voice, add a speaker WAV and set it above.
+                  </div>
+                </>
+              )}
           </div>
           )}
           {micState === "unsupported" && (

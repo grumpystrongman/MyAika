@@ -13,3 +13,4 @@ data/*.wav
 *.sqlite
 .DS_Store
 apps/server/voices/*_trim_6s.wav
+apps/server/piper_voices/

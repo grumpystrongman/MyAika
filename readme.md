@@ -80,6 +80,13 @@ Use `POST /api/agent/task` with:
 ## Aika Voice (GPT-SoVITS only)
 Voice output is handled by a local GPT-SoVITS service. The app calls it and streams the WAV back.
 
+### Optional: Piper multi-voice (fast switching)
+Piper is a lightweight local TTS engine with many downloadable voices. To use it:
+1) Install Piper (Python): `pip install piper-tts`
+2) Download voices into `apps/server/piper_voices/` (each voice requires `.onnx` + `.onnx.json`)
+3) Set `TTS_ENGINE=piper` and optionally `PIPER_DEFAULT_VOICE` in `apps/server/.env`
+4) Use the Voice dropdown in Settings to switch voices instantly.
+
 ## Skills (local-first)
 The Skills tab provides lightweight, local utilities that respond instantly without calling the LLM.
 

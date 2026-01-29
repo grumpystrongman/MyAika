@@ -19,6 +19,11 @@ export const voicesDir = resolveFromRepo(
   path.join(serverRoot, "voices")
 );
 
+export const piperVoicesDir = resolveFromRepo(
+  process.env.PIPER_VOICES_DIR,
+  path.join(serverRoot, "piper_voices")
+);
+
 export const ttsServiceDir = path.resolve(repoRoot, "tts_service");
 export const ttsScriptPath = path.join(ttsServiceDir, "generate_tts.py");
 export const pythonBin = process.env.TTS_PYTHON_BIN || "python";

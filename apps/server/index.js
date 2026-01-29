@@ -10,6 +10,7 @@ import { generateAikaVoice, resolveAudioPath } from "./aika_voice/index.js";
 import { trimReferenceWavToFile } from "./aika_voice/voice_ref.js";
 import { voicesDir } from "./aika_voice/paths.js";
 import { readWavMeta } from "./aika_voice/wav_meta.js";
+import { listPiperVoices } from "./aika_voice/engine_piper.js";
 import {
   getGoogleAuthUrl,
   exchangeGoogleCode,
@@ -550,7 +551,11 @@ app.get("/api/aika/voice/:id", (req, res) => {
 
 app.get("/api/aika/voices", async (_req, res) => {
   try {
-    return res.json({ engine: "gptsovits", voices: [] });
+    const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+    if (engine === "piper") {
+      return res.json({ engine, voices: listPiperVoices() });
+    }
+    return res.json({ engine, voices: [] });
   } catch (err) {
     console.error("Aika Voice list ERROR:", err);
     res.status(500).json({ error: "voice_list_failed" });
