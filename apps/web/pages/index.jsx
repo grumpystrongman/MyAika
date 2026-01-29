@@ -180,6 +180,9 @@ export default function Home() {
   const [skillsError, setSkillsError] = useState("");
   const [webhooks, setWebhooks] = useState([]);
   const [webhookForm, setWebhookForm] = useState({ name: "", url: "" });
+  const [scenes, setScenes] = useState([]);
+  const [sceneForm, setSceneForm] = useState({ name: "", hooks: "" });
+  const [skillToasts, setSkillToasts] = useState([]);
   const [userText, setUserText] = useState("");
   const [log, setLog] = useState([
     {
@@ -809,14 +812,61 @@ export default function Home() {
           if (!cancelled) setWebhooks([]);
         }
       }
+      async function loadScenes() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/skills/scenes`);
+          if (!r.ok) throw new Error("scenes_failed");
+          const data = await r.json();
+          if (!cancelled) setScenes(data.scenes || []);
+        } catch {
+          if (!cancelled) setScenes([]);
+        }
+      }
       loadSkills();
       loadWebhooks();
+      loadScenes();
       const id = setInterval(loadSkills, 6000);
       return () => {
         cancelled = true;
         clearInterval(id);
       };
     }, [activeTab]);
+
+    useEffect(() => {
+      let cancelled = false;
+      async function pollEvents() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/skills/events`);
+          if (!r.ok) throw new Error("skills_events_failed");
+          const data = await r.json();
+          if (cancelled) return;
+          const events = data.events || [];
+          setSkillEvents(events);
+          const due = events.filter(e => e.type === "reminder_due").slice(0, 3);
+          if (due.length) {
+            setSkillToasts(prev => {
+              const existing = new Set(prev.map(t => t.id));
+              const next = [...prev];
+              for (const evt of due) {
+                const id = evt.reminderId || `${evt.time}-${evt.skill}`;
+                if (!existing.has(id)) {
+                  next.push({ id, text: `Reminder: ${evt.input}` });
+                }
+              }
+              return next.slice(-3);
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+      pollEvents();
+      const id = setInterval(pollEvents, 5000);
+      return () => {
+        cancelled = true;
+        clearInterval(id);
+      };
+    }, []);
 
   useEffect(() => {
     async function loadStatus() {
@@ -1039,6 +1089,56 @@ export default function Home() {
     }
   }
 
+  async function addScene() {
+    try {
+      const name = sceneForm.name.trim();
+      if (!name) return;
+      const hooks = sceneForm.hooks
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+      const r = await fetch(`${SERVER_URL}/api/skills/scenes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, hooks })
+      });
+      if (!r.ok) throw new Error("scene_add_failed");
+      const data = await r.json();
+      setScenes(prev => {
+        const next = prev.filter(s => s.name !== data.scene.name && s.id !== data.scene.id);
+        return [...next, data.scene];
+      });
+      setSceneForm({ name: "", hooks: "" });
+    } catch (err) {
+      setSkillsError(err?.message || "scene_add_failed");
+    }
+  }
+
+  async function deleteScene(name) {
+    try {
+      const r = await fetch(`${SERVER_URL}/api/skills/scenes/${encodeURIComponent(name)}`, {
+        method: "DELETE"
+      });
+      if (!r.ok) throw new Error("scene_delete_failed");
+      setScenes(prev => prev.filter(s => s.name !== name));
+    } catch (err) {
+      setSkillsError(err?.message || "scene_delete_failed");
+    }
+  }
+
+  async function triggerScene(name) {
+    try {
+      const r = await fetch(`${SERVER_URL}/api/skills/scenes/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (!r.ok) throw new Error("scene_trigger_failed");
+    } catch (err) {
+      setSkillsError(err?.message || "scene_trigger_failed");
+    }
+  }
+
   function downloadExport(type) {
     const url = `${SERVER_URL}/api/skills/export/${type}`;
     const a = document.createElement("a");
@@ -1049,14 +1149,48 @@ export default function Home() {
     document.body.removeChild(a);
   }
 
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
-      <div style={{ position: "relative" }}>
-        <AikaAvatar
-          mood={behavior?.emotion || Emotion.NEUTRAL}
-          isTalking={behavior?.speaking}
-          talkIntensity={behavior?.intensity ?? 0.35}
-          isListening={micState === "listening"}
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
+        <div style={{ position: "relative" }}>
+          {skillToasts.length > 0 && (
+            <div style={{
+              position: "absolute",
+              top: 12,
+              left: 12,
+              right: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              zIndex: 5
+            }}>
+              {skillToasts.map(t => (
+                <div key={t.id} style={{
+                  border: "1px solid #d1d5db",
+                  background: "#fefce8",
+                  color: "#92400e",
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  fontSize: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center"
+                }}>
+                  <span>{t.text}</span>
+                  <button
+                    onClick={() => setSkillToasts(prev => prev.filter(x => x.id !== t.id))}
+                    style={{ padding: "2px 8px", borderRadius: 8 }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <AikaAvatar
+            mood={behavior?.emotion || Emotion.NEUTRAL}
+            isTalking={behavior?.speaking}
+            talkIntensity={behavior?.intensity ?? 0.35}
+            isListening={micState === "listening"}
         />
       </div>
 
@@ -1292,6 +1426,50 @@ export default function Home() {
                   </div>
                 )) : (
                   <div style={{ fontSize: 12, color: "#6b7280" }}>No webhooks yet.</div>
+                )}
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+                Scenes
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Scenes trigger multiple webhooks in sequence. Example: “Run scene morning”.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  placeholder="Scene name"
+                  value={sceneForm.name}
+                  onChange={(e) => setSceneForm(s => ({ ...s, name: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 160 }}
+                />
+                <input
+                  placeholder="Webhook names (comma-separated)"
+                  value={sceneForm.hooks}
+                  onChange={(e) => setSceneForm(s => ({ ...s, hooks: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 280 }}
+                />
+                <button onClick={addScene} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Save Scene
+                </button>
+              </div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10, background: "white" }}>
+                {scenes.length ? scenes.map(s => (
+                  <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{s.name}</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{(s.hooks || []).join(", ")}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => triggerScene(s.name)} style={{ padding: "4px 8px", borderRadius: 8 }}>
+                        Trigger
+                      </button>
+                      <button onClick={() => deleteScene(s.name)} style={{ padding: "4px 8px", borderRadius: 8 }}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                )) : (
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>No scenes yet.</div>
                 )}
               </div>
 

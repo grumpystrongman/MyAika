@@ -9,6 +9,7 @@ const todosFile = path.join(dataDir, "todos.json");
 const shoppingFile = path.join(dataDir, "shopping.json");
 const remindersFile = path.join(dataDir, "reminders.json");
 const webhooksFile = path.join(dataDir, "webhooks.json");
+const scenesFile = path.join(dataDir, "scenes.json");
 const configFile = path.join(dataDir, "config.json");
 
 function ensureDir() {
@@ -70,6 +71,12 @@ const skills = [
     key: "webhooks",
     label: "Webhooks",
     description: "Trigger configured webhooks for home/automation scenes.",
+    enabled: false
+  },
+  {
+    key: "scenes",
+    label: "Scenes",
+    description: "Trigger multiple webhooks as a scene.",
     enabled: false
   }
 ];
@@ -308,6 +315,66 @@ function removeWebhook(nameOrId) {
   return removed;
 }
 
+function loadScenes() {
+  return safeReadJson(scenesFile, []);
+}
+
+function saveScenes(items) {
+  ensureDir();
+  fs.writeFileSync(scenesFile, JSON.stringify(items, null, 2));
+}
+
+function addScene(name, hooks) {
+  const items = loadScenes();
+  const existing = items.find(i => i.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    existing.hooks = hooks;
+    saveScenes(items);
+    return existing;
+  }
+  const item = { id: Date.now().toString(36), name, hooks, createdAt: nowIso() };
+  items.push(item);
+  saveScenes(items);
+  return item;
+}
+
+function removeScene(nameOrId) {
+  const target = nameOrId.toLowerCase();
+  const items = loadScenes();
+  const next = items.filter(i => i.id.toLowerCase() !== target && i.name.toLowerCase() !== target);
+  const removed = next.length !== items.length;
+  if (removed) saveScenes(next);
+  return removed;
+}
+
+function listScenes() {
+  return loadScenes();
+}
+
+async function triggerWebhook(url, payload) {
+  if (!allowedWebhook(url)) {
+    throw new Error("webhook_not_allowed");
+  }
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+async function triggerScene(name, input) {
+  const scenes = listScenes();
+  const scene = scenes.find(s => s.name.toLowerCase() === name.toLowerCase());
+  if (!scene) return null;
+  const hooks = listWebhooks();
+  for (const hookName of scene.hooks) {
+    const hook = hooks.find(h => h.name.toLowerCase() === hookName.toLowerCase());
+    if (!hook) continue;
+    await triggerWebhook(hook.url, { source: "aika", name: hook.name, scene: scene.name, input, time: nowIso() });
+  }
+  return scene;
+}
+
 function allowedWebhook(url) {
   try {
     const u = new URL(url);
@@ -503,16 +570,33 @@ export async function handleSkillMessage(text) {
         return { text: "Webhook URL is not allowed. Check SKILLS_WEBHOOK_ALLOWLIST.", skill: "webhooks" };
       }
       try {
-        await fetch(hook.url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source: "aika", name: hook.name, input: raw, time: nowIso() })
-        });
+        await triggerWebhook(hook.url, { source: "aika", name: hook.name, input: raw, time: nowIso() });
         addEvent({ type: "skill", skill: "webhooks", input: raw });
         return { text: `Triggered "${hook.name}".`, skill: "webhooks" };
       } catch (err) {
         return { text: `Webhook failed: ${err?.message || "request_failed"}`, skill: "webhooks" };
       }
+    }
+  }
+
+  // Scenes
+  if (enabled.scenes) {
+    const sceneMatch = raw.match(/^(run|trigger|scene)\s+(.+)/i);
+    if (sceneMatch) {
+      const name = sceneMatch[2].trim();
+      try {
+        const scene = await triggerScene(name, raw);
+        if (!scene) return { text: `No scene named "${name}".`, skill: "scenes" };
+        addEvent({ type: "skill", skill: "scenes", input: raw });
+        return { text: `Scene "${scene.name}" triggered.`, skill: "scenes" };
+      } catch (err) {
+        return { text: `Scene failed: ${err?.message || "request_failed"}`, skill: "scenes" };
+      }
+    }
+    if (/^(list|show)\s+scenes/i.test(lower)) {
+      const scenes = listScenes();
+      addEvent({ type: "skill", skill: "scenes", input: raw });
+      return { text: scenes.length ? scenes.map(s => `- (${s.id}) ${s.name}: ${s.hooks.join(", ")}`).join("\n") : "No scenes yet.", skill: "scenes" };
     }
   }
 
@@ -539,4 +623,25 @@ export function exportRemindersText() {
   return items.map(r => `- (${r.id}) ${r.text} @ ${r.dueAt}`).join(os.EOL);
 }
 
-export { listWebhooks, addWebhook, removeWebhook };
+export { listWebhooks, addWebhook, removeWebhook, listScenes, addScene, removeScene, triggerScene };
+
+let reminderTimerStarted = false;
+export function startReminderScheduler() {
+  if (reminderTimerStarted) return;
+  reminderTimerStarted = true;
+  setInterval(() => {
+    const items = loadReminders();
+    let changed = false;
+    const now = Date.now();
+    for (const item of items) {
+      if (item.done || item.notifiedAt) continue;
+      const due = Date.parse(item.dueAt);
+      if (Number.isFinite(due) && due <= now) {
+        item.notifiedAt = nowIso();
+        addEvent({ type: "reminder_due", skill: "reminders", input: item.text, reminderId: item.id });
+        changed = true;
+      }
+    }
+    if (changed) saveReminders(items);
+  }, 15000);
+}

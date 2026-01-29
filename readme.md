@@ -91,6 +91,7 @@ Available skills:
 - **Shopping List**: “Add milk to shopping list.” “List shopping list.”
 - **Reminders**: “Remind me at 3pm to call mom.” “Remind me in 15 minutes to stretch.”
 - **Webhooks**: Configure in Skills tab, then say “Trigger lights_on.”
+- **Scenes**: Group multiple webhooks. “Run scene morning.”
 
 All skill toggles are stored locally. Skill activity is visible in the Debug tab.
 
@@ -99,6 +100,9 @@ Skills data is stored locally under `data/skills/`. You can download exports fro
 
 ### Webhook safety
 Optional allowlist: set `SKILLS_WEBHOOK_ALLOWLIST` to a comma-separated list of allowed hostnames.
+
+### Reminders
+Reminders create a local notification banner in the UI when due. Use “List reminders” to review.
 
 ### Why GPT-SoVITS
 - Best quality for natural, non-robotic voice

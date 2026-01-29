@@ -35,15 +35,21 @@ import {
   listWebhooks,
   addWebhook,
   removeWebhook,
+  listScenes,
+  addScene,
+  removeScene,
+  triggerScene,
   exportNotesText,
   exportTodosText,
   exportShoppingText,
-  exportRemindersText
+  exportRemindersText,
+  startReminderScheduler
 } from "./skills/index.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+startReminderScheduler();
 
 // Load persona
 const persona = JSON.parse(
@@ -692,6 +698,10 @@ app.get("/api/skills", (_req, res) => {
   });
 });
 
+app.get("/api/skills/events", (_req, res) => {
+  res.json({ events: getSkillEvents() });
+});
+
 app.post("/api/skills/toggle", (req, res) => {
   const { key, enabled } = req.body || {};
   if (!key || typeof enabled !== "boolean") {
@@ -717,6 +727,35 @@ app.delete("/api/skills/webhooks/:name", (req, res) => {
   const ok = removeWebhook(req.params.name);
   if (!ok) return res.status(404).json({ error: "webhook_not_found" });
   res.json({ ok: true });
+});
+
+app.get("/api/skills/scenes", (_req, res) => {
+  res.json({ scenes: listScenes() });
+});
+
+app.post("/api/skills/scenes", (req, res) => {
+  const { name, hooks } = req.body || {};
+  if (!name || !Array.isArray(hooks)) return res.status(400).json({ error: "name_and_hooks_required" });
+  const scene = addScene(name, hooks.map(h => String(h).trim()).filter(Boolean));
+  res.json({ ok: true, scene });
+});
+
+app.delete("/api/skills/scenes/:name", (req, res) => {
+  const ok = removeScene(req.params.name);
+  if (!ok) return res.status(404).json({ error: "scene_not_found" });
+  res.json({ ok: true });
+});
+
+app.post("/api/skills/scenes/trigger", async (req, res) => {
+  const { name } = req.body || {};
+  if (!name) return res.status(400).json({ error: "name_required" });
+  try {
+    const scene = await triggerScene(name, "manual");
+    if (!scene) return res.status(404).json({ error: "scene_not_found" });
+    res.json({ ok: true, scene });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "scene_trigger_failed" });
+  }
 });
 
 app.get("/api/skills/export/:type", (req, res) => {
