@@ -27,6 +27,7 @@ import {
 import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
 import { getProvider } from "./integrations/store.js";
+import { getSkillsState, toggleSkill, getSkillEvents, handleSkillMessage } from "./skills/index.js";
 
 const app = express();
 app.use(cors());
@@ -280,6 +281,15 @@ app.post("/chat", async (req, res) => {
           behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
         });
       }
+    }
+
+    const skillResult = handleSkillMessage(userText);
+    if (skillResult) {
+      return res.json({
+        text: skillResult.text,
+        behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
+        skill: skillResult.skill
+      });
     }
 
     // Save user message
@@ -663,6 +673,23 @@ app.get("/api/integrations", (_req, res) => {
   });
 });
 
+app.get("/api/skills", (_req, res) => {
+  res.json({
+    skills: getSkillsState(),
+    events: getSkillEvents()
+  });
+});
+
+app.post("/api/skills/toggle", (req, res) => {
+  const { key, enabled } = req.body || {};
+  if (!key || typeof enabled !== "boolean") {
+    return res.status(400).json({ error: "key_and_enabled_required" });
+  }
+  const ok = toggleSkill(key, enabled);
+  if (!ok) return res.status(404).json({ error: "unknown_skill" });
+  res.json({ ok: true, key, enabled });
+});
+
 app.get("/api/status", async (_req, res) => {
   const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
   let ttsOnline = false;
@@ -693,6 +720,11 @@ app.get("/api/status", async (_req, res) => {
     server: { ok: true, uptimeSec: Math.floor(process.uptime()) },
     tts: { engine, online: ttsOnline },
     integrations: integrationsState,
+    skills: {
+      enabled: getSkillsState().filter(s => s.enabled).length,
+      total: getSkillsState().length,
+      lastEvent: getSkillEvents()[0] || null
+    },
     openai: {
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 220)

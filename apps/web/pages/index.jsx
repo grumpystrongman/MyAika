@@ -175,6 +175,9 @@ export default function Home() {
   const [lastTtsMetrics, setLastTtsMetrics] = useState(null);
   const [ttsDiagnostics, setTtsDiagnostics] = useState(null);
   const [ttsDiagError, setTtsDiagError] = useState("");
+  const [skills, setSkills] = useState([]);
+  const [skillEvents, setSkillEvents] = useState([]);
+  const [skillsError, setSkillsError] = useState("");
   const [userText, setUserText] = useState("");
   const [log, setLog] = useState([
     {
@@ -758,18 +761,47 @@ export default function Home() {
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    async function loadIntegrations() {
-      try {
-        const r = await fetch(`${SERVER_URL}/api/integrations`);
-        const data = await r.json();
-        setIntegrations(data.integrations || {});
-      } catch {
-        setIntegrations({});
+    useEffect(() => {
+      async function loadIntegrations() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/integrations`);
+          const data = await r.json();
+          setIntegrations(data.integrations || {});
+        } catch {
+          setIntegrations({});
+        }
       }
-    }
-    loadIntegrations();
-  }, []);
+      loadIntegrations();
+    }, []);
+
+    useEffect(() => {
+      if (activeTab !== "skills") return;
+      let cancelled = false;
+      async function loadSkills() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/skills`);
+          if (!r.ok) throw new Error("skills_failed");
+          const data = await r.json();
+          if (!cancelled) {
+            setSkills(data.skills || []);
+            setSkillEvents(data.events || []);
+            setSkillsError("");
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setSkills([]);
+            setSkillEvents([]);
+            setSkillsError(err?.message || "skills_failed");
+          }
+        }
+      }
+      loadSkills();
+      const id = setInterval(loadSkills, 6000);
+      return () => {
+        cancelled = true;
+        clearInterval(id);
+      };
+    }, [activeTab]);
 
   useEffect(() => {
     async function loadStatus() {
@@ -943,6 +975,21 @@ export default function Home() {
     }
   }
 
+  async function toggleSkill(key, next) {
+    try {
+      const r = await fetch(`${SERVER_URL}/api/skills/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, enabled: next })
+      });
+      if (!r.ok) throw new Error("skills_toggle_failed");
+      setSkills(prev => prev.map(s => (s.key === key ? { ...s, enabled: next } : s)));
+      setSkillsError("");
+    } catch (err) {
+      setSkillsError(err?.message || "skills_toggle_failed");
+    }
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
       <div style={{ position: "relative" }}>
@@ -1003,22 +1050,33 @@ export default function Home() {
           >
             Chat
           </button>
-          <button
-            onClick={() => setActiveTab("integrations")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 10,
-              border: activeTab === "integrations" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-              background: activeTab === "integrations" ? "#e6f0ff" : "white"
-            }}
-          >
-            Integrations
-          </button>
-          <button
-            onClick={() => setActiveTab("debug")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 10,
+            <button
+              onClick={() => setActiveTab("integrations")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "integrations" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "integrations" ? "#e6f0ff" : "white"
+              }}
+            >
+              Integrations
+            </button>
+            <button
+              onClick={() => setActiveTab("skills")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "skills" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "skills" ? "#e6f0ff" : "white"
+              }}
+            >
+              Skills
+            </button>
+            <button
+              onClick={() => setActiveTab("debug")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
               border: activeTab === "debug" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
               background: activeTab === "debug" ? "#e6f0ff" : "white"
             }}
@@ -1038,11 +1096,11 @@ export default function Home() {
           </button>
         </div>
 
-        {activeTab === "integrations" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-              Connect services for Aika's agent mode
-            </div>
+          {activeTab === "integrations" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Connect services for Aika's agent mode
+              </div>
             {integrationList.map(item => {
               const status = integrations[item.key]?.connected ? "Connected" : "Not connected";
               const configured = integrations[item.key]?.configured;
@@ -1074,22 +1132,87 @@ export default function Home() {
                 </div>
               );
             })}
-            <div style={{ fontSize: 12, color: "#6b7280" }}>
-              Note: Real connections require API keys and OAuth setup. Configure them in `apps/server/.env`.
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Note: Real connections require API keys and OAuth setup. Configure them in `apps/server/.env`.
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {activeTab === "skills" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Everyday Skills (local-first)
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Toggle skills on/off. These run locally on your server and respond instantly when triggered.
+              </div>
+              {skills.map(skill => (
+                <div key={skill.key} style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 12,
+                  padding: 12,
+                  background: "white",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center"
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{skill.label}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>{skill.description}</div>
+                  </div>
+                  <button
+                    onClick={() => toggleSkill(skill.key, !skill.enabled)}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: skill.enabled ? "2px solid #10b981" : "1px solid #d1d5db",
+                      background: skill.enabled ? "#ecfdf3" : "white",
+                      color: skill.enabled ? "#047857" : "#6b7280",
+                      fontWeight: 600
+                    }}
+                  >
+                    {skill.enabled ? "Enabled" : "Disabled"}
+                  </button>
+                </div>
+              ))}
+              {skillsError && (
+                <div style={{ color: "#b91c1c", fontSize: 12 }}>Skills error: {skillsError}</div>
+              )}
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+                Recent Skill Activity
+              </div>
+              <div style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 12,
+                padding: 10,
+                background: "white",
+                fontSize: 12,
+                color: "#374151",
+                maxHeight: 180,
+                overflow: "auto"
+              }}>
+                {skillEvents.length ? skillEvents.map((evt, idx) => (
+                  <div key={`${evt.time}-${idx}`} style={{ marginBottom: 6 }}>
+                    <b>{evt.skill}</b> · {evt.type} · {evt.time}
+                  </div>
+                )) : (
+                  <div>No skill activity yet.</div>
+                )}
+              </div>
+            </div>
+          )}
 
           {activeTab === "debug" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 System Status
               </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: 10
-            }}>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 10
+              }}>
               <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Server</div>
                 <div style={{ fontWeight: 600, color: statusInfo?.server?.ok ? "#059669" : "#b91c1c" }}>
@@ -1114,12 +1237,21 @@ export default function Home() {
                   TTS: {lastTtsMetrics ? `${lastTtsMetrics.ms}ms · ${lastTtsMetrics.bytes} bytes` : "—"}
                 </div>
               </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>Integrations</div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  {Object.keys(integrations || {}).length ? "Loaded" : "—"}
+                <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>Integrations</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    {Object.keys(integrations || {}).length ? "Loaded" : "—"}
+                  </div>
                 </div>
-              </div>
+                <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>Skills</div>
+                  <div style={{ fontWeight: 600, color: statusInfo?.skills?.enabled ? "#059669" : "#6b7280" }}>
+                    {statusInfo?.skills?.enabled ?? 0}/{statusInfo?.skills?.total ?? 0} enabled
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    Last: {statusInfo?.skills?.lastEvent?.skill || "—"}
+                  </div>
+                </div>
               </div>
 
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
@@ -1177,13 +1309,20 @@ export default function Home() {
               <div>“Summarize this Fireflies meeting: [paste Fireflies link]”</div>
               <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Google Docs</div>
               <div>“Create a Google Doc titled ‘Weekly Notes’ and add a short summary.”</div>
-              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Plex</div>
-              <div>“Check Plex status and tell me if it’s up.”</div>
-              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
-                This guide will expand as new integrations are added.
+                <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Plex</div>
+                <div>“Check Plex status and tell me if it’s up.”</div>
+                <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Skills</div>
+                <div>“Note: call the dentist at 3pm.”</div>
+                <div>“List notes.”</div>
+                <div>“Add todo buy milk.”</div>
+                <div>“List todos.”</div>
+                <div>“What time is it?”</div>
+                <div>“System status.”</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
+                  This guide will expand as new integrations are added.
+                </div>
               </div>
             </div>
-          </div>
         )}
 
         {activeTab === "chat" && (

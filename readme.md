@@ -24,6 +24,7 @@ Default UI behavior:
 - Voice Mode is on by default (auto-listen + auto-speak).
 - Settings and advanced voice controls are behind the "Settings" button.
 - Integrations are available under the "Integrations" tab.
+- Skills are available under the "Skills" tab.
 
 ## Integrations (beta)
 The Integrations tab lets you connect external services so Aika can:
@@ -78,6 +79,17 @@ Use `POST /api/agent/task` with:
 
 ## Aika Voice (GPT-SoVITS only)
 Voice output is handled by a local GPT-SoVITS service. The app calls it and streams the WAV back.
+
+## Skills (local-first)
+The Skills tab provides lightweight, local utilities that respond instantly without calling the LLM.
+
+Available skills:
+- **Time & Date**: Ask “what time is it” or “what’s today’s date.”
+- **Quick Notes**: “Note: call the dentist at 3pm.” “List notes.” “Clear notes.”
+- **Tasks & Todos**: “Add todo buy milk.” “List todos.” “Complete todo <id>.”
+- **System Status**: “System status” to see CPU/memory/uptime.
+
+All skill toggles are stored locally. Skill activity is visible in the Debug tab.
 
 ### Why GPT-SoVITS
 - Best quality for natural, non-robotic voice
