@@ -6,6 +6,9 @@ const repoRoot = path.resolve(process.cwd(), "..", "..");
 const dataDir = path.join(repoRoot, "data", "skills");
 const notesFile = path.join(dataDir, "notes.jsonl");
 const todosFile = path.join(dataDir, "todos.json");
+const shoppingFile = path.join(dataDir, "shopping.json");
+const remindersFile = path.join(dataDir, "reminders.json");
+const webhooksFile = path.join(dataDir, "webhooks.json");
 const configFile = path.join(dataDir, "config.json");
 
 function ensureDir() {
@@ -50,6 +53,24 @@ const skills = [
     label: "System Status",
     description: "Report CPU, memory, uptime (local server).",
     enabled: true
+  },
+  {
+    key: "shopping",
+    label: "Shopping List",
+    description: "Add/remove items and list shopping needs.",
+    enabled: true
+  },
+  {
+    key: "reminders",
+    label: "Reminders",
+    description: "Create simple time-based reminders and list them.",
+    enabled: true
+  },
+  {
+    key: "webhooks",
+    label: "Webhooks",
+    description: "Trigger configured webhooks for home/automation scenes.",
+    enabled: false
   }
 ];
 
@@ -144,6 +165,164 @@ function listTodos(showAll = false) {
   return items.filter(t => (showAll ? true : !t.done)).slice(-10).reverse();
 }
 
+function loadShopping() {
+  return safeReadJson(shoppingFile, []);
+}
+
+function saveShopping(items) {
+  ensureDir();
+  fs.writeFileSync(shoppingFile, JSON.stringify(items, null, 2));
+}
+
+function addShoppingItem(text) {
+  const items = loadShopping();
+  const item = { id: Date.now().toString(36), text, createdAt: nowIso() };
+  items.push(item);
+  saveShopping(items);
+  return item;
+}
+
+function removeShoppingItem(text) {
+  const items = loadShopping();
+  const target = text.toLowerCase();
+  const next = items.filter(i => i.text.toLowerCase() !== target);
+  const removed = next.length !== items.length;
+  if (removed) saveShopping(next);
+  return removed;
+}
+
+function clearShopping() {
+  saveShopping([]);
+}
+
+function listShopping() {
+  return loadShopping().slice(-20).reverse();
+}
+
+function loadReminders() {
+  return safeReadJson(remindersFile, []);
+}
+
+function saveReminders(items) {
+  ensureDir();
+  fs.writeFileSync(remindersFile, JSON.stringify(items, null, 2));
+}
+
+function addReminder(text, dueAt) {
+  const items = loadReminders();
+  const item = {
+    id: Date.now().toString(36),
+    text,
+    dueAt,
+    createdAt: nowIso(),
+    done: false
+  };
+  items.push(item);
+  saveReminders(items);
+  return item;
+}
+
+function completeReminder(target) {
+  const items = loadReminders();
+  let updated = null;
+  for (const item of items) {
+    if (item.done) continue;
+    if (item.id.toLowerCase() === target || item.text.toLowerCase().includes(target)) {
+      item.done = true;
+      item.completedAt = nowIso();
+      updated = item;
+      break;
+    }
+  }
+  if (updated) saveReminders(items);
+  return updated;
+}
+
+function listReminders(showAll = false) {
+  const items = loadReminders();
+  return items.filter(r => (showAll ? true : !r.done)).slice(-10).reverse();
+}
+
+function parseReminderTime(raw) {
+  const lower = raw.toLowerCase();
+  const inMatch = lower.match(/in\s+(\d+)\s*(minute|minutes|hour|hours)/i);
+  if (inMatch) {
+    const amount = Number(inMatch[1]);
+    const unit = inMatch[2].startsWith("hour") ? 60 : 1;
+    const ms = amount * unit * 60 * 1000;
+    return new Date(Date.now() + ms).toISOString();
+  }
+  const atMatch = lower.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (atMatch) {
+    const now = new Date();
+    let hour = Number(atMatch[1]);
+    const minute = Number(atMatch[2] || 0);
+    const mer = atMatch[3];
+    if (mer) {
+      if (mer === "pm" && hour < 12) hour += 12;
+      if (mer === "am" && hour === 12) hour = 0;
+    }
+    const due = new Date(now);
+    due.setHours(hour, minute, 0, 0);
+    if (due.getTime() < now.getTime()) {
+      due.setDate(due.getDate() + 1);
+    }
+    return due.toISOString();
+  }
+  return null;
+}
+
+function loadWebhooks() {
+  return safeReadJson(webhooksFile, []);
+}
+
+function saveWebhooks(items) {
+  ensureDir();
+  fs.writeFileSync(webhooksFile, JSON.stringify(items, null, 2));
+}
+
+function listWebhooks() {
+  return loadWebhooks();
+}
+
+function addWebhook(name, url) {
+  const items = loadWebhooks();
+  const exists = items.find(i => i.name.toLowerCase() === name.toLowerCase());
+  if (exists) {
+    exists.url = url;
+    saveWebhooks(items);
+    return exists;
+  }
+  const item = { id: Date.now().toString(36), name, url, createdAt: nowIso() };
+  items.push(item);
+  saveWebhooks(items);
+  return item;
+}
+
+function removeWebhook(nameOrId) {
+  const target = nameOrId.toLowerCase();
+  const items = loadWebhooks();
+  const next = items.filter(i => i.id.toLowerCase() !== target && i.name.toLowerCase() !== target);
+  const removed = next.length !== items.length;
+  if (removed) saveWebhooks(next);
+  return removed;
+}
+
+function allowedWebhook(url) {
+  try {
+    const u = new URL(url);
+    if (!["http:", "https:"].includes(u.protocol)) return false;
+    const allowlist = process.env.SKILLS_WEBHOOK_ALLOWLIST || "";
+    if (allowlist) {
+      const allowed = allowlist.split(",").map(s => s.trim()).filter(Boolean);
+      return allowed.some(host => u.hostname.endsWith(host));
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function formatTodos(items) {
   if (!items.length) return "No tasks yet.";
   return items
@@ -172,7 +351,7 @@ export function getSkillEvents() {
   return events;
 }
 
-export function handleSkillMessage(text) {
+export async function handleSkillMessage(text) {
   const enabled = loadConfig();
   const raw = String(text || "").trim();
   if (!raw) return null;
@@ -249,5 +428,115 @@ export function handleSkillMessage(text) {
     }
   }
 
+  // Shopping list
+  if (enabled.shopping) {
+    const addMatch = raw.match(/^(add|buy|get)\s+(.+)\s+to\s+(shopping|grocery)\s+list/i) ||
+      raw.match(/^(shopping|grocery)\s+add\s+(.+)/i);
+    if (addMatch) {
+      const textValue = (addMatch[2] || addMatch[3]).trim();
+      const item = addShoppingItem(textValue);
+      addEvent({ type: "skill", skill: "shopping", input: raw });
+      return { text: `Added to shopping list (${item.id}): ${item.text}`, skill: "shopping" };
+    }
+    if (/^(list|show)\s+(shopping|grocery)\s+list/i.test(lower)) {
+      const items = listShopping();
+      addEvent({ type: "skill", skill: "shopping", input: raw });
+      return { text: items.length ? items.map(i => `- (${i.id}) ${i.text}`).join("\n") : "Shopping list is empty.", skill: "shopping" };
+    }
+    const removeMatch = raw.match(/^(remove|delete)\s+(.+)\s+from\s+(shopping|grocery)\s+list/i);
+    if (removeMatch) {
+      const target = removeMatch[2].trim();
+      const removed = removeShoppingItem(target);
+      addEvent({ type: "skill", skill: "shopping", input: raw });
+      return { text: removed ? `Removed "${target}" from shopping list.` : "Item not found.", skill: "shopping" };
+    }
+    if (/^clear\s+(shopping|grocery)\s+list/i.test(lower)) {
+      clearShopping();
+      addEvent({ type: "skill", skill: "shopping", input: raw });
+      return { text: "Shopping list cleared.", skill: "shopping" };
+    }
+  }
+
+  // Reminders
+  if (enabled.reminders) {
+    const remindMatch = raw.match(/remind me (.+)/i);
+    if (remindMatch) {
+      const dueAt = parseReminderTime(raw);
+      const cleanText = raw.replace(/remind me/i, "").trim();
+      if (!dueAt) {
+        return { text: "I couldn't find a time. Try: 'remind me at 3pm to call mom' or 'remind me in 15 minutes to stretch'.", skill: "reminders" };
+      }
+      const item = addReminder(cleanText, dueAt);
+      addEvent({ type: "skill", skill: "reminders", input: raw });
+      return { text: `Reminder set (${item.id}) for ${new Date(dueAt).toLocaleString()}: ${item.text}`, skill: "reminders" };
+    }
+    if (/^(list|show)\s+reminders/i.test(lower)) {
+      const items = listReminders(false);
+      addEvent({ type: "skill", skill: "reminders", input: raw });
+      return {
+        text: items.length
+          ? items.map(r => `- (${r.id}) ${r.text} @ ${new Date(r.dueAt).toLocaleString()}`).join("\n")
+          : "No reminders yet.",
+        skill: "reminders"
+      };
+    }
+    const doneMatch = raw.match(/^(done|complete)\s+reminder\s+(.+)/i);
+    if (doneMatch) {
+      const target = doneMatch[2].trim().toLowerCase();
+      const item = completeReminder(target);
+      addEvent({ type: "skill", skill: "reminders", input: raw });
+      return { text: item ? `Completed reminder: ${item.text}` : "Reminder not found.", skill: "reminders" };
+    }
+  }
+
+  // Webhooks
+  if (enabled.webhooks) {
+    const triggerMatch = raw.match(/^(trigger|run|activate)\s+(.+)/i);
+    if (triggerMatch) {
+      const name = triggerMatch[2].trim();
+      const hooks = listWebhooks();
+      const hook = hooks.find(h => h.name.toLowerCase() === name.toLowerCase());
+      if (!hook) {
+        return { text: `No webhook named "${name}". Add it in the Skills tab.`, skill: "webhooks" };
+      }
+      if (!allowedWebhook(hook.url)) {
+        return { text: "Webhook URL is not allowed. Check SKILLS_WEBHOOK_ALLOWLIST.", skill: "webhooks" };
+      }
+      try {
+        await fetch(hook.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: "aika", name: hook.name, input: raw, time: nowIso() })
+        });
+        addEvent({ type: "skill", skill: "webhooks", input: raw });
+        return { text: `Triggered "${hook.name}".`, skill: "webhooks" };
+      } catch (err) {
+        return { text: `Webhook failed: ${err?.message || "request_failed"}`, skill: "webhooks" };
+      }
+    }
+  }
+
   return null;
 }
+
+export function exportNotesText() {
+  const notes = listNotes(200);
+  return notes.map(n => `- (${n.id}) ${n.text}`).join(os.EOL);
+}
+
+export function exportTodosText() {
+  const items = loadTodos();
+  return items.map(t => `- [${t.done ? "x" : " "}] (${t.id}) ${t.text}`).join(os.EOL);
+}
+
+export function exportShoppingText() {
+  const items = loadShopping();
+  return items.map(i => `- (${i.id}) ${i.text}`).join(os.EOL);
+}
+
+export function exportRemindersText() {
+  const items = loadReminders();
+  return items.map(r => `- (${r.id}) ${r.text} @ ${r.dueAt}`).join(os.EOL);
+}
+
+export { listWebhooks, addWebhook, removeWebhook };

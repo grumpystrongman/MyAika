@@ -178,6 +178,8 @@ export default function Home() {
   const [skills, setSkills] = useState([]);
   const [skillEvents, setSkillEvents] = useState([]);
   const [skillsError, setSkillsError] = useState("");
+  const [webhooks, setWebhooks] = useState([]);
+  const [webhookForm, setWebhookForm] = useState({ name: "", url: "" });
   const [userText, setUserText] = useState("");
   const [log, setLog] = useState([
     {
@@ -795,7 +797,20 @@ export default function Home() {
           }
         }
       }
+      async function loadWebhooks() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/skills/webhooks`);
+          if (!r.ok) throw new Error("webhooks_failed");
+          const data = await r.json();
+          if (!cancelled) {
+            setWebhooks(data.webhooks || []);
+          }
+        } catch {
+          if (!cancelled) setWebhooks([]);
+        }
+      }
       loadSkills();
+      loadWebhooks();
       const id = setInterval(loadSkills, 6000);
       return () => {
         cancelled = true;
@@ -990,6 +1005,50 @@ export default function Home() {
     }
   }
 
+  async function addWebhook() {
+    try {
+      const name = webhookForm.name.trim();
+      const url = webhookForm.url.trim();
+      if (!name || !url) return;
+      const r = await fetch(`${SERVER_URL}/api/skills/webhooks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, url })
+      });
+      if (!r.ok) throw new Error("webhook_add_failed");
+      const data = await r.json();
+      setWebhooks(prev => {
+        const next = prev.filter(w => w.id !== data.webhook.id && w.name !== data.webhook.name);
+        return [...next, data.webhook];
+      });
+      setWebhookForm({ name: "", url: "" });
+    } catch (err) {
+      setSkillsError(err?.message || "webhook_add_failed");
+    }
+  }
+
+  async function deleteWebhook(name) {
+    try {
+      const r = await fetch(`${SERVER_URL}/api/skills/webhooks/${encodeURIComponent(name)}`, {
+        method: "DELETE"
+      });
+      if (!r.ok) throw new Error("webhook_delete_failed");
+      setWebhooks(prev => prev.filter(w => w.name !== name));
+    } catch (err) {
+      setSkillsError(err?.message || "webhook_delete_failed");
+    }
+  }
+
+  function downloadExport(type) {
+    const url = `${SERVER_URL}/api/skills/export/${type}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `aika_${type}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
       <div style={{ position: "relative" }}>
@@ -1180,6 +1239,63 @@ export default function Home() {
               )}
 
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+                Exports
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => downloadExport("notes")} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Download Notes
+                </button>
+                <button onClick={() => downloadExport("todos")} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Download Todos
+                </button>
+                <button onClick={() => downloadExport("shopping")} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Download Shopping
+                </button>
+                <button onClick={() => downloadExport("reminders")} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Download Reminders
+                </button>
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+                Webhooks (automation)
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Add a webhook and say: “Trigger &lt;name&gt;” or “Run &lt;name&gt;”.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  placeholder="Name (e.g., lights_on)"
+                  value={webhookForm.name}
+                  onChange={(e) => setWebhookForm(s => ({ ...s, name: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 160 }}
+                />
+                <input
+                  placeholder="Webhook URL"
+                  value={webhookForm.url}
+                  onChange={(e) => setWebhookForm(s => ({ ...s, url: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 280 }}
+                />
+                <button onClick={addWebhook} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Add Webhook
+                </button>
+              </div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10, background: "white" }}>
+                {webhooks.length ? webhooks.map(h => (
+                  <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{h.name}</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{h.url}</div>
+                    </div>
+                    <button onClick={() => deleteWebhook(h.name)} style={{ padding: "4px 8px", borderRadius: 8 }}>
+                      Remove
+                    </button>
+                  </div>
+                )) : (
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>No webhooks yet.</div>
+                )}
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
                 Recent Skill Activity
               </div>
               <div style={{
@@ -1316,6 +1432,11 @@ export default function Home() {
                 <div>“List notes.”</div>
                 <div>“Add todo buy milk.”</div>
                 <div>“List todos.”</div>
+                <div>“Add milk to shopping list.”</div>
+                <div>“List shopping list.”</div>
+                <div>“Remind me at 3pm to call mom.”</div>
+                <div>“Remind me in 15 minutes to stretch.”</div>
+                <div>“Trigger lights_on.”</div>
                 <div>“What time is it?”</div>
                 <div>“System status.”</div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>

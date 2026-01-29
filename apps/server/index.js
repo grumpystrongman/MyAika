@@ -27,7 +27,19 @@ import {
 import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
 import { getProvider } from "./integrations/store.js";
-import { getSkillsState, toggleSkill, getSkillEvents, handleSkillMessage } from "./skills/index.js";
+import {
+  getSkillsState,
+  toggleSkill,
+  getSkillEvents,
+  handleSkillMessage,
+  listWebhooks,
+  addWebhook,
+  removeWebhook,
+  exportNotesText,
+  exportTodosText,
+  exportShoppingText,
+  exportRemindersText
+} from "./skills/index.js";
 
 const app = express();
 app.use(cors());
@@ -283,7 +295,7 @@ app.post("/chat", async (req, res) => {
       }
     }
 
-    const skillResult = handleSkillMessage(userText);
+    const skillResult = await handleSkillMessage(userText);
     if (skillResult) {
       return res.json({
         text: skillResult.text,
@@ -688,6 +700,45 @@ app.post("/api/skills/toggle", (req, res) => {
   const ok = toggleSkill(key, enabled);
   if (!ok) return res.status(404).json({ error: "unknown_skill" });
   res.json({ ok: true, key, enabled });
+});
+
+app.get("/api/skills/webhooks", (_req, res) => {
+  res.json({ webhooks: listWebhooks() });
+});
+
+app.post("/api/skills/webhooks", (req, res) => {
+  const { name, url } = req.body || {};
+  if (!name || !url) return res.status(400).json({ error: "name_and_url_required" });
+  const webhook = addWebhook(name, url);
+  res.json({ ok: true, webhook });
+});
+
+app.delete("/api/skills/webhooks/:name", (req, res) => {
+  const ok = removeWebhook(req.params.name);
+  if (!ok) return res.status(404).json({ error: "webhook_not_found" });
+  res.json({ ok: true });
+});
+
+app.get("/api/skills/export/:type", (req, res) => {
+  const { type } = req.params;
+  let text = "";
+  switch (type) {
+    case "notes":
+      text = exportNotesText();
+      break;
+    case "todos":
+      text = exportTodosText();
+      break;
+    case "shopping":
+      text = exportShoppingText();
+      break;
+    case "reminders":
+      text = exportRemindersText();
+      break;
+    default:
+      return res.status(404).json({ error: "unknown_export_type" });
+  }
+  res.type("text/plain").send(text || "");
 });
 
 app.get("/api/status", async (_req, res) => {

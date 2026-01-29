@@ -88,8 +88,17 @@ Available skills:
 - **Quick Notes**: “Note: call the dentist at 3pm.” “List notes.” “Clear notes.”
 - **Tasks & Todos**: “Add todo buy milk.” “List todos.” “Complete todo <id>.”
 - **System Status**: “System status” to see CPU/memory/uptime.
+- **Shopping List**: “Add milk to shopping list.” “List shopping list.”
+- **Reminders**: “Remind me at 3pm to call mom.” “Remind me in 15 minutes to stretch.”
+- **Webhooks**: Configure in Skills tab, then say “Trigger lights_on.”
 
 All skill toggles are stored locally. Skill activity is visible in the Debug tab.
+
+### Skills data & exports
+Skills data is stored locally under `data/skills/`. You can download exports from the Skills tab.
+
+### Webhook safety
+Optional allowlist: set `SKILLS_WEBHOOK_ALLOWLIST` to a comma-separated list of allowed hostnames.
 
 ### Why GPT-SoVITS
 - Best quality for natural, non-robotic voice
