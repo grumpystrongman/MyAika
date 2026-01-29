@@ -596,6 +596,47 @@ app.get("/api/integrations", (_req, res) => {
   });
 });
 
+app.get("/api/status", async (_req, res) => {
+  const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+  let ttsOnline = false;
+  if (engine === "gptsovits") {
+    const ttsUrl = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";
+    let healthUrl = ttsUrl;
+    try {
+      const u = new URL(ttsUrl);
+      if (u.pathname.endsWith("/tts")) {
+        u.pathname = u.pathname.replace(/\/tts$/, "/docs");
+      }
+      healthUrl = u.toString();
+    } catch {
+      healthUrl = ttsUrl.replace(/\/tts$/, "/docs");
+    }
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1200);
+      const r = await fetch(healthUrl, { method: "GET", signal: controller.signal });
+      clearTimeout(timeout);
+      ttsOnline = r.ok;
+    } catch {
+      ttsOnline = false;
+    }
+  }
+
+  res.json({
+    server: { ok: true, uptimeSec: Math.floor(process.uptime()) },
+    tts: { engine, online: ttsOnline },
+    integrations: integrationsState,
+    openai: {
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 220)
+    },
+    system: {
+      platform: process.platform,
+      node: process.version
+    }
+  });
+});
+
 app.post("/api/integrations/connect", (req, res) => {
   const { provider } = req.body || {};
   if (!provider || !integrationsState[provider]) {

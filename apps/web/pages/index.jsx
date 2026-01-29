@@ -169,6 +169,9 @@ function sleep(ms) {
 export default function Home() {
   const [activeTab, setActiveTab] = useState("chat");
   const [integrations, setIntegrations] = useState({});
+  const [statusInfo, setStatusInfo] = useState(null);
+  const [logLines, setLogLines] = useState([]);
+  const [logFilter, setLogFilter] = useState("");
   const [userText, setUserText] = useState("");
   const [log, setLog] = useState([
     {
@@ -751,6 +754,21 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    async function loadStatus() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/status`);
+        const data = await r.json();
+        setStatusInfo(data);
+      } catch {
+        setStatusInfo(null);
+      }
+    }
+    loadStatus();
+    const id = setInterval(loadStatus, 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
     async function loadConfig() {
       try {
         const r = await fetch(`${SERVER_URL}/api/aika/config`);
@@ -819,6 +837,28 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [micState]);
 
+  useEffect(() => {
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origErr = console.error;
+    const push = (level, args) => {
+      const line = {
+        level,
+        text: args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" "),
+        time: new Date().toLocaleTimeString()
+      };
+      setLogLines(prev => [...prev.slice(-399), line]);
+    };
+    console.log = (...args) => { push("info", args); origLog(...args); };
+    console.warn = (...args) => { push("warn", args); origWarn(...args); };
+    console.error = (...args) => { push("error", args); origErr(...args); };
+    return () => {
+      console.log = origLog;
+      console.warn = origWarn;
+      console.error = origErr;
+    };
+  }, []);
+
   const integrationList = [
     { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes." },
     { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts." },
@@ -870,6 +910,18 @@ export default function Home() {
       </div>
 
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        {!audioUnlocked && (
+          <div style={{
+            border: "1px solid #f59e0b",
+            background: "#fff7ed",
+            color: "#92400e",
+            borderRadius: 12,
+            padding: "10px 12px",
+            fontSize: 12
+          }}>
+            Audio is locked by the browser. Click anywhere (or the Mic button) once to enable voice.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8 }}>
           <button
             onClick={() => setActiveTab("chat")}
@@ -892,6 +944,28 @@ export default function Home() {
             }}
           >
             Integrations
+          </button>
+          <button
+            onClick={() => setActiveTab("debug")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: activeTab === "debug" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+              background: activeTab === "debug" ? "#e6f0ff" : "white"
+            }}
+          >
+            Debug
+          </button>
+          <button
+            onClick={() => setActiveTab("guide")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: activeTab === "guide" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+              background: activeTab === "guide" ? "#e6f0ff" : "white"
+            }}
+          >
+            Guide
           </button>
         </div>
 
@@ -933,6 +1007,86 @@ export default function Home() {
             })}
             <div style={{ fontSize: 12, color: "#6b7280" }}>
               Note: Real connections require API keys and OAuth setup. Configure them in `apps/server/.env`.
+            </div>
+          </div>
+        )}
+
+        {activeTab === "debug" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              System Status
+            </div>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 10
+            }}>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Server</div>
+                <div style={{ fontWeight: 600, color: statusInfo?.server?.ok ? "#059669" : "#b91c1c" }}>
+                  {statusInfo?.server?.ok ? "Online" : "Offline"}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Uptime: {statusInfo?.server?.uptimeSec ?? "—"}s</div>
+              </div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>TTS</div>
+                <div style={{ fontWeight: 600, color: statusInfo?.tts?.online ? "#059669" : "#b91c1c" }}>
+                  {statusInfo?.tts?.engine || "tts"}: {statusInfo?.tts?.online ? "Online" : "Offline"}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Model: {statusInfo?.openai?.model || "—"}</div>
+              </div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Audio</div>
+                <div style={{ fontWeight: 600, color: audioUnlocked ? "#059669" : "#b45309" }}>
+                  {audioUnlocked ? "Enabled" : "Locked"}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Mic: {micEnabled ? "On" : "Off"}</div>
+              </div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Integrations</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  {Object.keys(integrations || {}).length ? "Loaded" : "—"}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              Client Logs
+            </div>
+            <input
+              placeholder="Filter logs..."
+              value={logFilter}
+              onChange={(e) => setLogFilter(e.target.value)}
+              style={{ padding: 8, borderRadius: 10, border: "1px solid #e5e7eb" }}
+            />
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 8, height: 220, overflow: "auto", background: "#0b1220", color: "#e5e7eb", fontFamily: "monospace", fontSize: 11 }}>
+              {logLines.filter(l => !logFilter || l.text.toLowerCase().includes(logFilter.toLowerCase())).map((l, idx) => (
+                <div key={idx} style={{ color: l.level === "error" ? "#fca5a5" : l.level === "warn" ? "#facc15" : "#e5e7eb" }}>
+                  [{l.time}] {l.level.toUpperCase()}: {l.text}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "guide" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              Quickstart Guide + Demo Prompts
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white", fontSize: 13, color: "#374151" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Voice chat</div>
+              <div>1) Click Mic On</div>
+              <div>2) Speak a prompt like: “Tell me a spooky story in 3 sentences.”</div>
+              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Fireflies</div>
+              <div>“Summarize this Fireflies meeting: [paste Fireflies link]”</div>
+              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Google Docs</div>
+              <div>“Create a Google Doc titled ‘Weekly Notes’ and add a short summary.”</div>
+              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Plex</div>
+              <div>“Check Plex status and tell me if it’s up.”</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
+                This guide will expand as new integrations are added.
+              </div>
             </div>
           </div>
         )}
