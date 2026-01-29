@@ -5,6 +5,10 @@ function clamp(n, min, max) {
 
 export function normalizeSettings(input = {}) {
   const warnings = [];
+  const engine =
+    typeof input.engine === "string"
+      ? input.engine.toLowerCase()
+      : "";
   const style = typeof input.style === "string" ? input.style : "brat_baddy";
   const format = input.format === "mp3" ? "mp3" : "wav";
 
@@ -28,9 +32,12 @@ export function normalizeSettings(input = {}) {
   if (input.format && input.format !== "wav" && input.format !== "mp3") {
     warnings.push(`Unsupported format "${input.format}", using wav.`);
   }
+  if (engine && engine !== "gptsovits" && engine !== "piper") {
+    warnings.push(`Unsupported engine "${engine}", using default.`);
+  }
 
   return {
-    settings: { style, format, rate, pitch, energy, pause, fast, voice },
+    settings: { style, format, rate, pitch, energy, pause, fast, voice, engine },
     warnings
   };
 }

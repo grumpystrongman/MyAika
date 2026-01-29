@@ -224,6 +224,7 @@ export default function Home() {
     pitch: 0,
     energy: 1.0,
     pause: 1.1,
+    engine: "",
     voice: { reference_wav_path: "riko_sample.wav", name: "", prompt_text: "" }
   });
   const [availableVoices, setAvailableVoices] = useState([]);
@@ -963,10 +964,17 @@ export default function Home() {
         try {
           const r = await fetch(`${SERVER_URL}/api/aika/voices`);
           const data = await r.json();
-          const list = Array.isArray(data.voices) ? data.voices : [];
+          const list = Array.isArray(data.piperVoices)
+            ? data.piperVoices
+            : Array.isArray(data.voices)
+              ? data.voices
+              : [];
           setAvailableVoices(list);
-          if (data.engine === "piper" && list.length && !ttsSettings.voice?.name) {
+          if (list.length && !ttsSettings.voice?.name) {
             setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: list[0].id } }));
+          }
+          if (!ttsSettings.engine && data.engine) {
+            setTtsSettings(s => ({ ...s, engine: data.engine }));
           }
         } catch {
           setAvailableVoices([]);
@@ -1877,18 +1885,30 @@ export default function Home() {
                 Manual Speak
               </button>
             </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-              Style
-              <select
-                value={ttsSettings.style}
-                onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-              >
-                <option value="brat_baddy">brat_baddy</option>
-                <option value="brat_soft">brat_soft</option>
-                <option value="brat_firm">brat_firm</option>
-              </select>
-            </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                Style
+                <select
+                  value={ttsSettings.style}
+                  onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                >
+                  <option value="brat_baddy">brat_baddy</option>
+                  <option value="brat_soft">brat_soft</option>
+                  <option value="brat_firm">brat_firm</option>
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                Engine
+                <select
+                  value={ttsSettings.engine || statusInfo?.tts?.engine || ""}
+                  onChange={(e) => setTtsSettings(s => ({ ...s, engine: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                >
+                  <option value="">default</option>
+                  <option value="gptsovits">gptsovits</option>
+                  <option value="piper">piper</option>
+                </select>
+              </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
               Format
               <select
@@ -1948,7 +1968,7 @@ export default function Home() {
                 style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
               />
             </label>
-              {statusInfo?.tts?.engine === "piper" ? (
+              {(ttsSettings.engine || statusInfo?.tts?.engine) === "piper" ? (
                 <>
                   <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
                     Piper Voice

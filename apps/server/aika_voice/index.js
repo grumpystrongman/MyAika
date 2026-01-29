@@ -41,6 +41,10 @@ export async function generateAikaVoice({ text, settings = {} }) {
   }
 
   const { settings: normalized, warnings } = normalizeSettings(settings);
+  const selectedEngine =
+    normalized.engine && (normalized.engine === "piper" || normalized.engine === "gptsovits")
+      ? normalized.engine
+      : ENGINE;
   const useRawText = settings.use_raw_text === true;
   const formatted = useRawText
     ? String(text).trim()
@@ -84,7 +88,8 @@ export async function generateAikaVoice({ text, settings = {} }) {
       voice: {
         reference_wav_path: voicePath ? path.basename(voicePath) : "",
         name: piperVoiceName
-      }
+      },
+      engine: selectedEngine
     },
     model: MODEL_ID,
     voiceHash
@@ -124,7 +129,7 @@ export async function generateAikaVoice({ text, settings = {} }) {
     process.env.GPTSOVITS_DEFAULT_PROMPT_TEXT ||
     "Aika is a confident, playful, feminine assistant with a warm, witty tone.";
   let engineMeta;
-  if (ENGINE === "gptsovits") {
+  if (selectedEngine === "gptsovits") {
     const promptText = (normalized.voice?.prompt_text || "").trim() || defaultPrompt;
     engineMeta = await generateWithGptSovits({
       text: formatted,
@@ -135,7 +140,7 @@ export async function generateAikaVoice({ text, settings = {} }) {
       rate: normalized.rate,
       fast: normalized.fast
     });
-  } else if (ENGINE === "piper") {
+  } else if (selectedEngine === "piper") {
     if (normalized.format !== "wav") {
       const err = new Error("piper_wav_only");
       err.status = 400;

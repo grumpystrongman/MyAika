@@ -84,8 +84,10 @@ Voice output is handled by a local GPT-SoVITS service. The app calls it and stre
 Piper is a lightweight local TTS engine with many downloadable voices. To use it:
 1) Install Piper (Python): `pip install piper-tts`
 2) Download voices into `apps/server/piper_voices/` (each voice requires `.onnx` + `.onnx.json`)
-3) Set `TTS_ENGINE=piper` and optionally `PIPER_DEFAULT_VOICE` in `apps/server/.env`
-4) Use the Voice dropdown in Settings to switch voices instantly.
+   - Windows: `npm run piper:voices`
+   - macOS/Linux: `bash scripts/install_piper_voices.sh`
+3) (Optional) Set `PIPER_DEFAULT_VOICE` in `apps/server/.env`
+4) In Settings, choose **Engine = piper** and select a voice from the dropdown.
 
 ## Skills (local-first)
 The Skills tab provides lightweight, local utilities that respond instantly without calling the LLM.

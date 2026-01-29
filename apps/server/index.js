@@ -553,9 +553,10 @@ app.get("/api/aika/voices", async (_req, res) => {
   try {
     const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
     if (engine === "piper") {
-      return res.json({ engine, voices: listPiperVoices() });
+      const piperVoices = listPiperVoices();
+      return res.json({ engine, voices: piperVoices, piperVoices });
     }
-    return res.json({ engine, voices: [] });
+    return res.json({ engine, voices: [], piperVoices: listPiperVoices() });
   } catch (err) {
     console.error("Aika Voice list ERROR:", err);
     res.status(500).json({ error: "voice_list_failed" });

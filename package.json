@@ -11,7 +11,8 @@
     "dev:web": "npm run dev -w apps/web",
     "tts": "node apps/server/scripts/tts_sample.js",
     "test": "node --test apps/server/tests",
-    "gptsovits": "node apps/server/scripts/start_gptsovits.js"
+    "gptsovits": "node apps/server/scripts/start_gptsovits.js",
+    "piper:voices": "powershell -ExecutionPolicy Bypass -File scripts/install_piper_voices.ps1"
   },
   "dependencies": {
     "tts": "^0.1.0"
