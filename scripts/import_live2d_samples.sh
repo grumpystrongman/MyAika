@@ -26,6 +26,11 @@ detect_model_id () {
   if [[ "$lower" == *tororo* ]]; then echo "tororo_hijiki"; return; fi
   if [[ "$lower" == *shizuku* ]]; then echo "shizuku"; return; fi
   if [[ "$lower" == *hibiki* ]]; then echo "hibiki"; return; fi
+  if [[ "$lower" == *miku* ]]; then echo "miku"; return; fi
+  if [[ "$lower" == *kei* ]]; then echo "kei"; return; fi
+  if [[ "$lower" == *mark* ]]; then echo "mark"; return; fi
+  if [[ "$lower" == *epsilon* ]]; then echo "epsilon"; return; fi
+  if [[ "$lower" == *simple* ]]; then echo "simple"; return; fi
   echo ""
 }
 

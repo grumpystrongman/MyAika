@@ -27,6 +27,11 @@ function Detect-ModelId($path) {
   if ($lower -match "tororo") { return "tororo_hijiki" }
   if ($lower -match "shizuku") { return "shizuku" }
   if ($lower -match "hibiki") { return "hibiki" }
+  if ($lower -match "miku") { return "miku" }
+  if ($lower -match "kei") { return "kei" }
+  if ($lower -match "mark") { return "mark" }
+  if ($lower -match "epsilon") { return "epsilon" }
+  if ($lower -match "simple") { return "simple" }
   return $null
 }
 
