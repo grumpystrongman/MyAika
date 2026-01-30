@@ -94,6 +94,8 @@ We support multiple Live2D models with a dropdown. Free sample models from Live2
 - Hiyori Momose (anime girl)
 - Niziiro Mao (anime girl)
 - Tororo & Hijiki (creatures/monster-like)
+- Shizuku (anime girl)
+- Hibiki (anime girl)
 
 Download the Live2D Sample Data (free) and place the runtime folders into:
 `apps/web/public/assets/aika/live2d/hiyori/`,
@@ -101,6 +103,12 @@ Download the Live2D Sample Data (free) and place the runtime folders into:
 `apps/web/public/assets/aika/live2d/tororo_hijiki/`
 
 Then restart the web app. The models will appear in the Avatar Model dropdown.
+
+### Auto-import sample zips
+1) Download the Live2D sample zip(s) from the official page.
+2) Place the zip(s) into `data/live2d_import/`
+3) Run: `npm run live2d:import`
+4) Restart the web app.
 
 ## Skills (local-first)
 The Skills tab provides lightweight, local utilities that respond instantly without calling the LLM.

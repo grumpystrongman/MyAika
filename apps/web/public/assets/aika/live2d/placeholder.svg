@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160" viewBox="0 0 120 160">
+  <rect width="120" height="160" fill="#f3f4f6"/>
+  <rect x="8" y="8" width="104" height="144" fill="none" stroke="#d1d5db" stroke-width="2"/>
+  <circle cx="60" cy="56" r="20" fill="#e5e7eb"/>
+  <rect x="30" y="90" width="60" height="10" fill="#e5e7eb"/>
+  <rect x="24" y="106" width="72" height="10" fill="#e5e7eb"/>
+  <text x="60" y="140" text-anchor="middle" font-size="10" fill="#9ca3af">No Preview</text>
+</svg>

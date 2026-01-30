@@ -692,9 +692,14 @@ app.get("/api/aika/avatar/models", (_req, res) => {
       const localPath = modelUrl.startsWith("/")
         ? path.join(webPublicDir, modelUrl.replace(/^\//, ""))
         : path.join(webPublicDir, modelUrl);
+      const thumbUrl = model.thumbnail || "";
+      const thumbPath = thumbUrl
+        ? path.join(webPublicDir, thumbUrl.replace(/^\//, ""))
+        : "";
       return {
         ...model,
-        available: Boolean(modelUrl) && fs.existsSync(localPath)
+        available: Boolean(modelUrl) && fs.existsSync(localPath),
+        thumbnailAvailable: Boolean(thumbUrl) && fs.existsSync(thumbPath)
       };
     });
     res.json({ models: withStatus });

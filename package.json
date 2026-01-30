@@ -12,7 +12,8 @@
     "tts": "node apps/server/scripts/tts_sample.js",
     "test": "node --test apps/server/tests",
     "gptsovits": "node apps/server/scripts/start_gptsovits.js",
-    "piper:voices": "powershell -ExecutionPolicy Bypass -File scripts/install_piper_voices.ps1"
+    "piper:voices": "powershell -ExecutionPolicy Bypass -File scripts/install_piper_voices.ps1",
+    "live2d:import": "powershell -ExecutionPolicy Bypass -File scripts/import_live2d_samples.ps1"
   },
   "dependencies": {
     "tts": "^0.1.0"

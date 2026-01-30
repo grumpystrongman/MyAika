@@ -5,6 +5,7 @@
       "label": "Hiyori Momose (Live2D Sample)",
       "modelUrl": "/assets/aika/live2d/hiyori/hiyori.model3.json",
       "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "thumbnail": "/assets/aika/live2d/hiyori/thumb.png",
       "source": "https://www.live2d.com/en/learn/sample/"
     },
     {
@@ -12,6 +13,7 @@
       "label": "Niziiro Mao (Live2D Sample)",
       "modelUrl": "/assets/aika/live2d/mao/mao.model3.json",
       "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "thumbnail": "/assets/aika/live2d/mao/thumb.png",
       "source": "https://www.live2d.com/en/learn/sample/"
     },
     {
@@ -19,6 +21,23 @@
       "label": "Tororo & Hijiki (Live2D Sample)",
       "modelUrl": "/assets/aika/live2d/tororo_hijiki/tororo.model3.json",
       "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "thumbnail": "/assets/aika/live2d/tororo_hijiki/thumb.png",
+      "source": "https://www.live2d.com/en/learn/sample/"
+    },
+    {
+      "id": "shizuku",
+      "label": "Shizuku (Live2D Sample)",
+      "modelUrl": "/assets/aika/live2d/shizuku/shizuku.model3.json",
+      "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "thumbnail": "/assets/aika/live2d/shizuku/thumb.png",
+      "source": "https://www.live2d.com/en/learn/sample/"
+    },
+    {
+      "id": "hibiki",
+      "label": "Hibiki (Live2D Sample)",
+      "modelUrl": "/assets/aika/live2d/hibiki/hibiki.model3.json",
+      "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "thumbnail": "/assets/aika/live2d/hibiki/thumb.png",
       "source": "https://www.live2d.com/en/learn/sample/"
     }
   ]

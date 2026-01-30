@@ -192,6 +192,7 @@ export default function Home() {
   const [userText, setUserText] = useState("");
   const [avatarModels, setAvatarModels] = useState([]);
   const [avatarModelId, setAvatarModelId] = useState("");
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [log, setLog] = useState([
     {
       role: "assistant",
@@ -1930,27 +1931,86 @@ export default function Home() {
                   <option value="piper">piper</option>
                 </select>
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-                Avatar Model
-                <select
-                  value={avatarModelId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setAvatarModelId(id);
-                    if (typeof window !== "undefined") {
-                      window.localStorage.setItem("aika_avatar_model", id);
-                    }
-                  }}
-                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
-                >
-                  {avatarModels.length === 0 && <option value="">(no models installed)</option>}
-                  {avatarModels.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.available ? "OK " : "Missing "} {m.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontSize: 12, color: "#374151" }}>Avatar Model</div>
+                {(() => {
+                  const current = avatarModels.find(m => m.id === avatarModelId);
+                  const thumb = current?.thumbnailAvailable ? current.thumbnail : "/assets/aika/live2d/placeholder.svg";
+                  return (
+                    <button
+                      onClick={() => setShowAvatarPicker(v => !v)}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #d1d5db",
+                        textAlign: "left",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8
+                      }}
+                    >
+                      <img
+                        src={thumb}
+                        alt={current?.label || "avatar"}
+                        style={{ width: 28, height: 38, objectFit: "cover", borderRadius: 6 }}
+                      />
+                      <span>{current?.label || "(no model selected)"}</span>
+                    </button>
+                  );
+                })()}
+                {showAvatarPicker && (
+                  <div style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: 8,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 8,
+                    background: "#fafafa"
+                  }}>
+                    {avatarModels.length === 0 && (
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>(no models installed)</div>
+                    )}
+                    {avatarModels.map(m => {
+                      const thumb = m.thumbnailAvailable ? m.thumbnail : "/assets/aika/live2d/placeholder.svg";
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            setAvatarModelId(m.id);
+                            if (typeof window !== "undefined") {
+                              window.localStorage.setItem("aika_avatar_model", m.id);
+                            }
+                            setShowAvatarPicker(false);
+                          }}
+                          style={{
+                            border: m.id === avatarModelId ? "2px solid #2563eb" : "1px solid #d1d5db",
+                            borderRadius: 10,
+                            padding: 6,
+                            background: "white",
+                            textAlign: "left",
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center"
+                          }}
+                        >
+                          <img
+                            src={thumb}
+                            alt={m.label}
+                            style={{ width: 46, height: 62, objectFit: "cover", borderRadius: 6 }}
+                          />
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>{m.label}</div>
+                            <div style={{ fontSize: 11, color: m.available ? "#059669" : "#b45309" }}>
+                              {m.available ? "Ready" : "Missing files"}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
               Format
               <select
