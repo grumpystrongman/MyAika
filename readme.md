@@ -102,7 +102,7 @@ Download the Live2D Sample Data (free) and place the runtime folders into:
 `apps/web/public/assets/aika/live2d/mao/`,
 `apps/web/public/assets/aika/live2d/tororo_hijiki/`
 
-Then restart the web app. The models will appear in the Avatar Model dropdown.
+Then restart the web app (or click Refresh Models in Settings). The models will appear in the Avatar Model dropdown.
 
 ### Auto-import sample zips
 1) Download the Live2D sample zip(s) from the official page.

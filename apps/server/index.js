@@ -76,6 +76,25 @@ function readAikaConfig() {
   }
 }
 
+function withAvatarStatus(models) {
+  const list = Array.isArray(models) ? models : [];
+  return list.map(model => {
+    const modelUrl = model.modelUrl || "";
+    const localPath = modelUrl.startsWith("/")
+      ? path.join(webPublicDir, modelUrl.replace(/^\//, ""))
+      : path.join(webPublicDir, modelUrl);
+    const thumbUrl = model.thumbnail || "";
+    const thumbPath = thumbUrl
+      ? path.join(webPublicDir, thumbUrl.replace(/^\//, ""))
+      : "";
+    return {
+      ...model,
+      available: Boolean(modelUrl) && fs.existsSync(localPath),
+      thumbnailAvailable: Boolean(thumbUrl) && fs.existsSync(thumbPath)
+    };
+  });
+}
+
 let defaultRefOverride = null;
 function prepareDefaultReference() {
   const cfg = readAikaConfig();
@@ -694,22 +713,7 @@ app.get("/api/aika/avatar/models", (_req, res) => {
     if (!fs.existsSync(manifestPath)) return res.json({ models: [] });
     const data = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
     const models = Array.isArray(data.models) ? data.models : [];
-    const withStatus = models.map(model => {
-      const modelUrl = model.modelUrl || "";
-      const localPath = modelUrl.startsWith("/")
-        ? path.join(webPublicDir, modelUrl.replace(/^\//, ""))
-        : path.join(webPublicDir, modelUrl);
-      const thumbUrl = model.thumbnail || "";
-      const thumbPath = thumbUrl
-        ? path.join(webPublicDir, thumbUrl.replace(/^\//, ""))
-        : "";
-      return {
-        ...model,
-        available: Boolean(modelUrl) && fs.existsSync(localPath),
-        thumbnailAvailable: Boolean(thumbUrl) && fs.existsSync(thumbPath)
-      };
-    });
-    res.json({ models: withStatus });
+    res.json({ models: withAvatarStatus(models) });
   } catch (err) {
     res.status(500).json({ error: err.message || "avatar_models_failed" });
   }
@@ -720,7 +724,7 @@ app.post("/api/aika/avatar/import", upload.single("file"), (req, res) => {
     if (!req.file?.path) return res.status(400).json({ error: "file_required" });
     const models = importLive2DZip({ zipPath: req.file.path, webPublicDir });
     fs.unlinkSync(req.file.path);
-    res.json({ ok: true, models });
+    res.json({ ok: true, models: withAvatarStatus(models) });
   } catch (err) {
     res.status(500).json({ error: err.message || "avatar_import_failed" });
   }
@@ -732,7 +736,10 @@ app.post("/api/aika/avatar/refresh", (_req, res) => {
     const manifestPath = path.join(live2dDir, "models.json");
     if (!fs.existsSync(live2dDir)) return res.json({ models: [] });
     const models = [];
-    const dirs = fs.readdirSync(live2dDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    const ignored = new Set(["runtime", "__macosx"]);
+    const dirs = fs
+      .readdirSync(live2dDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && !ignored.has(d.name.toLowerCase()));
     for (const dir of dirs) {
       const folder = path.join(live2dDir, dir.name);
       const modelFiles = fs.readdirSync(folder).filter(f => f.endsWith(".model3.json"));
@@ -747,13 +754,13 @@ app.post("/api/aika/avatar/refresh", (_req, res) => {
         id: dir.name,
         label: `${dir.name.replace(/_/g, " ")} (Local)`,
         modelUrl: `/assets/aika/live2d/${dir.name}/${modelFile}`,
-        fallbackPng: "/assets/aika/AikaPregnant.png",
+        fallbackPng: "/assets/aika/live2d/placeholder.svg",
         thumbnail: `/assets/aika/live2d/${dir.name}/thumb.png`,
         source: "local_scan"
       });
     }
     fs.writeFileSync(manifestPath, JSON.stringify({ models }, null, 2));
-    res.json({ models });
+    res.json({ models: withAvatarStatus(models) });
   } catch (err) {
     res.status(500).json({ error: err.message || "avatar_refresh_failed" });
   }

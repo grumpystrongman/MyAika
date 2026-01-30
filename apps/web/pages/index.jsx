@@ -191,10 +191,11 @@ export default function Home() {
   const [reminderPush, setReminderPush] = useState(false);
   const [userText, setUserText] = useState("");
   const [avatarModels, setAvatarModels] = useState([]);
-  const [avatarModelId, setAvatarModelId] = useState("");
+  const [avatarModelId, setAvatarModelId] = useState("miku");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarImporting, setAvatarImporting] = useState(false);
   const [avatarImportError, setAvatarImportError] = useState("");
+  const [avatarImportNotice, setAvatarImportNotice] = useState("");
   const meetingRecRef = useRef(null);
   const [meetingRecording, setMeetingRecording] = useState(false);
   const [meetingTranscript, setMeetingTranscript] = useState("");
@@ -1002,14 +1003,17 @@ export default function Home() {
           const list = Array.isArray(data.models) ? data.models : [];
           setAvatarModels(list);
           const stored = window.localStorage.getItem("aika_avatar_model") || "";
+          const storedOk = stored && list.some(m => m.id === stored && m.available);
           const preferred =
-            stored ||
-            (list.find(m => m.id.toLowerCase() === "miku")?.id ||
-              list.find(m => m.id.toLowerCase() === "hiyori")?.id ||
+            (storedOk && stored) ||
+            (list.find(m => m.id.toLowerCase() === "miku" && m.available)?.id ||
               list.find(m => m.available)?.id ||
               list[0]?.id ||
               "");
-          if (preferred) setAvatarModelId(preferred);
+          if (preferred) {
+            setAvatarModelId(preferred);
+            window.localStorage.setItem("aika_avatar_model", preferred);
+          }
           if (!list.length || !list.some(m => m.available)) {
             refreshAvatarModels();
           }
@@ -1024,6 +1028,7 @@ export default function Home() {
       if (!file) return;
       setAvatarImporting(true);
       setAvatarImportError("");
+      setAvatarImportNotice("");
       try {
         const form = new FormData();
         form.append("file", file);
@@ -1035,12 +1040,11 @@ export default function Home() {
           const data = await r.json().catch(() => ({}));
           throw new Error(data.error || "avatar_import_failed");
         }
-        const data = await r.json();
-        const list = Array.isArray(data.models) ? data.models : [];
-        setAvatarModels(list);
-        if (list.length) {
-          setAvatarModelId(prev => prev || list[0].id);
-        }
+        await r.json();
+        await refreshAvatarModels();
+        setAvatarImportNotice(
+          "Import complete. If the model doesn't appear, click Refresh Models or hard reload (Ctrl+Shift+R)."
+        );
       } catch (err) {
         setAvatarImportError(err?.message || "avatar_import_failed");
       } finally {
@@ -1050,6 +1054,7 @@ export default function Home() {
 
     async function refreshAvatarModels() {
       setAvatarImportError("");
+      setAvatarImportNotice("");
       try {
         const r = await fetch(`${SERVER_URL}/api/aika/avatar/refresh`, {
           method: "POST"
@@ -1058,8 +1063,14 @@ export default function Home() {
         const data = await r.json();
         const list = Array.isArray(data.models) ? data.models : [];
         setAvatarModels(list);
-        if (list.length && !avatarModelId) {
-          setAvatarModelId(list[0].id);
+        const preferred =
+          list.find(m => m.id.toLowerCase() === "miku" && m.available)?.id ||
+          list.find(m => m.available)?.id ||
+          list[0]?.id ||
+          "";
+        if (preferred) {
+          setAvatarModelId(preferred);
+          window.localStorage.setItem("aika_avatar_model", preferred);
         }
       } catch (err) {
         setAvatarImportError(err?.message || "avatar_refresh_failed");
@@ -1903,6 +1914,12 @@ export default function Home() {
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Voice chat</div>
               <div>1) Click Mic On</div>
               <div>2) Speak a prompt like: “Tell me a spooky story in 3 sentences.”</div>
+
+              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Live2D avatar</div>
+              <div>1) Miku loads by default when available.</div>
+              <div>2) Use Avatar Model to switch.</div>
+              <div>3) Import a Live2D zip and then click Refresh Models.</div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>If it doesn???t appear, hard reload (Ctrl+Shift+R).</div>
               <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Fireflies</div>
               <div>“Summarize this Fireflies meeting: [paste Fireflies link]”</div>
               <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Google Docs</div>
@@ -2221,6 +2238,9 @@ export default function Home() {
                   </button>
                   {avatarImporting && (
                     <div style={{ fontSize: 12, color: "#6b7280" }}>Importing...</div>
+                  )}
+                  {avatarImportNotice && (
+                    <div style={{ fontSize: 12, color: "#2563eb" }}>{avatarImportNotice}</div>
                   )}
                   {avatarImportError && (
                     <div style={{ fontSize: 12, color: "#b91c1c" }}>{avatarImportError}</div>

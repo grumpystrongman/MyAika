@@ -21,6 +21,11 @@ function guessModelId(filePath) {
   if (lower.includes("tororo")) return "tororo_hijiki";
   if (lower.includes("shizuku")) return "shizuku";
   if (lower.includes("hibiki")) return "hibiki";
+  if (lower.includes("miku")) return "miku";
+  if (lower.includes("kei")) return "kei";
+  if (lower.includes("mark")) return "mark";
+  if (lower.includes("epsilon")) return "epsilon";
+  if (lower.includes("simple")) return "simple";
   return null;
 }
 
@@ -91,7 +96,7 @@ export function importLive2DZip({
     }
 
     const modelUrl = `/assets/aika/live2d/${modelId}/${modelFileName}`;
-    const fallbackPng = "/assets/aika/AikaPregnant.png";
+    const fallbackPng = "/assets/aika/live2d/placeholder.svg";
     const existing = models.find(m => m.id === modelId);
     if (existing) {
       existing.modelUrl = modelUrl;

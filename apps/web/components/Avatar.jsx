@@ -40,7 +40,7 @@ export default function Avatar({ mood = "neutral", isTalking = false, intensity 
           }}
         />
         <img
-          src="/assets/aika/AikaPregnant.png"
+          src="/assets/aika/live2d/placeholder.svg"
           alt="Aika avatar"
           style={{
             width: "100%",

@@ -14,8 +14,7 @@ type Props = {
   fallbackPng?: string;
 };
 
-const FALLBACK_PNG = "/assets/aika/AikaPregnant.png";
-const LIVE2D_MODEL_URL = "/assets/aika/live2d/model3.json";
+const FALLBACK_PNG = "/assets/aika/live2d/placeholder.svg";
 
 export default function AikaAvatar({
   mood,
@@ -39,12 +38,12 @@ export default function AikaAvatar({
       if (!hostRef.current || !canvasRef.current) return;
       if (typeof window === "undefined") return;
 
-      const targetModel = modelUrl || LIVE2D_MODEL_URL;
+      const targetModel = modelUrl || "";
       const targetPng = fallbackPng || FALLBACK_PNG;
 
       const canUseWebGL = !!canvasRef.current.getContext("webgl");
       let useLive2D = false;
-      if (canUseWebGL) {
+      if (canUseWebGL && targetModel) {
         try {
           const r = await fetch(targetModel, { method: "HEAD" });
           useLive2D = r.ok;

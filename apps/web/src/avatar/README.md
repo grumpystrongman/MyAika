@@ -1,17 +1,15 @@
 # Aika Avatar Engine (Live2D + PNG fallback)
 
 ## Assets
-- PNG fallback:
-  - `/public/assets/aika/AikaPregnant.png`
-- Live2D model (Cubism 4):
-  - `/public/assets/aika/live2d/model3.json`
+- PNG fallback (only used if WebGL is unavailable):
+  - `/public/assets/aika/live2d/placeholder.svg`
+- Live2D models (Cubism 4):
+  - `/public/assets/aika/live2d/models.json` (generated via Refresh or Import)
+  - Model files live under `/public/assets/aika/live2d/<model-id>/`
 
-If your entry file name differs, update:
-- `LIVE2D_MODEL_URL` in `apps/web/src/components/AikaAvatar.tsx`
-
-## Runtime (Cubism SDK for Web)
-Include the Cubism runtime on the client so `window.Live2DCubismFramework` is available.
-Place the runtime JS under `/public/assets/aika/live2d/` and include it via a script tag (e.g., in `pages/_document.js` or `pages/_app.js`).
+## Runtime (Pixi Live2D)
+The web app uses `pixi.js` + `pixi-live2d-display` to render models client-side.
+No global Cubism runtime is required.
 
 ## Expression mapping
 Suggested expression files:
