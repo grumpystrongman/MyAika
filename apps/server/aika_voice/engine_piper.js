@@ -42,6 +42,18 @@ function lengthScaleFromRate(rate) {
 
 export async function generateWithPiper({ text, outputPath, voiceName, rate = 1.0 }) {
   let warnings = [];
+  const originalText = String(text || "");
+  const safeText = originalText
+    .normalize("NFKC")
+    .replace(/[\uD800-\uDFFF]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  if (safeText !== originalText) warnings.push("piper_text_sanitized");
+  if (!safeText.trim()) {
+    const err = new Error("piper_text_empty_after_sanitize");
+    err.status = 400;
+    throw err;
+  }
+
   let resolvedName = voiceName;
   let voice = resolveVoicePath(resolvedName);
   if (!voice) {
@@ -85,7 +97,7 @@ export async function generateWithPiper({ text, outputPath, voiceName, rate = 1.
       if (code === 0) resolve();
       else reject(new Error(errText || `piper_failed_${code}`));
     });
-    child.stdin.write(String(text || ""));
+    child.stdin.write(safeText);
     child.stdin.end();
   });
 
