@@ -195,6 +195,12 @@ export default function Home() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarImporting, setAvatarImporting] = useState(false);
   const [avatarImportError, setAvatarImportError] = useState("");
+  const meetingRecRef = useRef(null);
+  const [meetingRecording, setMeetingRecording] = useState(false);
+  const [meetingTranscript, setMeetingTranscript] = useState("");
+  const [meetingTitle, setMeetingTitle] = useState("Meeting Notes");
+  const [meetingDocUrl, setMeetingDocUrl] = useState("");
+  const [meetingStatus, setMeetingStatus] = useState("");
   const [log, setLog] = useState([
     {
       role: "assistant",
@@ -996,8 +1002,17 @@ export default function Home() {
           const list = Array.isArray(data.models) ? data.models : [];
           setAvatarModels(list);
           const stored = window.localStorage.getItem("aika_avatar_model") || "";
-          const preferred = stored || (list.find(m => m.available)?.id || list[0]?.id || "");
+          const preferred =
+            stored ||
+            (list.find(m => m.id.toLowerCase() === "miku")?.id ||
+              list.find(m => m.id.toLowerCase() === "hiyori")?.id ||
+              list.find(m => m.available)?.id ||
+              list[0]?.id ||
+              "");
           if (preferred) setAvatarModelId(preferred);
+          if (!list.length || !list.some(m => m.available)) {
+            refreshAvatarModels();
+          }
         } catch {
           setAvatarModels([]);
         }
@@ -1030,6 +1045,24 @@ export default function Home() {
         setAvatarImportError(err?.message || "avatar_import_failed");
       } finally {
         setAvatarImporting(false);
+      }
+    }
+
+    async function refreshAvatarModels() {
+      setAvatarImportError("");
+      try {
+        const r = await fetch(`${SERVER_URL}/api/aika/avatar/refresh`, {
+          method: "POST"
+        });
+        if (!r.ok) throw new Error("avatar_refresh_failed");
+        const data = await r.json();
+        const list = Array.isArray(data.models) ? data.models : [];
+        setAvatarModels(list);
+        if (list.length && !avatarModelId) {
+          setAvatarModelId(list[0].id);
+        }
+      } catch (err) {
+        setAvatarImportError(err?.message || "avatar_refresh_failed");
       }
     }
 
@@ -1109,6 +1142,8 @@ export default function Home() {
     { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes." },
     { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts." },
     { key: "fireflies", label: "Fireflies.ai", detail: "Meeting transcription and summaries." },
+    { key: "amazon", label: "Amazon", detail: "Sync shopping list (OAuth required)." },
+    { key: "walmart", label: "Walmart+", detail: "Sync shopping list (OAuth required)." },
     { key: "facebook", label: "Facebook Pages", detail: "Post updates and monitor campaigns." },
     { key: "instagram", label: "Instagram", detail: "Post updates and monitor campaigns." },
     { key: "whatsapp", label: "WhatsApp", detail: "Message you directly." },
@@ -1125,10 +1160,18 @@ export default function Home() {
         setChatError(`${provider}_not_configured`);
         return;
       }
-      if (provider === "google_docs" || provider === "google_drive") {
-        window.open(`${SERVER_URL}/api/integrations/google/auth/start`, "_blank", "width=520,height=680");
-        return;
-      }
+        if (provider === "google_docs" || provider === "google_drive") {
+          window.open(`${SERVER_URL}/api/integrations/google/auth/start`, "_blank", "width=520,height=680");
+          return;
+        }
+        if (provider === "amazon") {
+          window.open(`${SERVER_URL}/api/integrations/amazon/auth/start`, "_blank", "width=520,height=680");
+          return;
+        }
+        if (provider === "walmart") {
+          window.open(`${SERVER_URL}/api/integrations/walmart/auth/start`, "_blank", "width=520,height=680");
+          return;
+        }
       const url = next ? "/api/integrations/connect" : "/api/integrations/disconnect";
       await fetch(`${SERVER_URL}${url}`, {
         method: "POST",
@@ -1156,6 +1199,79 @@ export default function Home() {
       setSkillsError("");
     } catch (err) {
       setSkillsError(err?.message || "skills_toggle_failed");
+    }
+  }
+
+  function ensureMeetingRecognizer() {
+    if (meetingRecRef.current) return meetingRecRef.current;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setMeetingStatus("Meeting recorder not supported in this browser.");
+      return null;
+    }
+    const r = new SpeechRecognition();
+    r.lang = "en-US";
+    r.continuous = true;
+    r.interimResults = true;
+    r.onresult = (e) => {
+      let finalText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) finalText += res[0].transcript;
+      }
+      if (finalText) {
+        setMeetingTranscript(prev => `${prev} ${finalText}`.trim());
+      }
+    };
+    r.onerror = (e) => {
+      setMeetingStatus(e?.error || "Meeting recorder error");
+      setMeetingRecording(false);
+    };
+    r.onend = () => {
+      setMeetingRecording(false);
+    };
+    meetingRecRef.current = r;
+    return r;
+  }
+
+  function startMeetingRecorder() {
+    const r = ensureMeetingRecognizer();
+    if (!r) return;
+    setMeetingStatus("Recording...");
+    setMeetingRecording(true);
+    stopMic();
+    try {
+      r.start();
+    } catch {
+      setMeetingRecording(false);
+    }
+  }
+
+  function stopMeetingRecorder() {
+    const r = meetingRecRef.current;
+    if (r) r.stop();
+    setMeetingRecording(false);
+    setMeetingStatus("Recording stopped");
+  }
+
+  async function generateMeetingSummary() {
+    if (!meetingTranscript.trim()) {
+      setMeetingStatus("No transcript captured yet.");
+      return;
+    }
+    setMeetingStatus("Generating summary...");
+    try {
+      const r = await fetch(`${SERVER_URL}/api/meetings/summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: meetingTitle, transcript: meetingTranscript })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "meeting_summary_failed");
+      setMeetingDocUrl(data.docUrl || "");
+      setMeetingStatus("Summary ready.");
+    } catch (err) {
+      setMeetingStatus(err?.message || "meeting_summary_failed");
     }
   }
 
@@ -1629,6 +1745,47 @@ export default function Home() {
                   <div>No skill activity yet.</div>
                 )}
               </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+                Meeting Recorder (local)
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <input
+                  value={meetingTitle}
+                  onChange={(e) => setMeetingTitle(e.target.value)}
+                  placeholder="Meeting title"
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  {!meetingRecording ? (
+                    <button onClick={startMeetingRecorder} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                      Start Recording
+                    </button>
+                  ) : (
+                    <button onClick={stopMeetingRecorder} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                      Stop Recording
+                    </button>
+                  )}
+                  <button onClick={generateMeetingSummary} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                    Generate Summary
+                  </button>
+                </div>
+                <textarea
+                  value={meetingTranscript}
+                  readOnly
+                  rows={4}
+                  placeholder="Transcript appears here..."
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #e5e7eb" }}
+                />
+                {meetingStatus && (
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{meetingStatus}</div>
+                )}
+                {meetingDocUrl && (
+                  <a href={meetingDocUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                    Open Meeting Summary
+                  </a>
+                )}
+              </div>
             </div>
           )}
 
@@ -1650,12 +1807,18 @@ export default function Home() {
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Uptime: {statusInfo?.server?.uptimeSec ?? "—"}s</div>
               </div>
               <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>TTS</div>
-                <div style={{ fontWeight: 600, color: statusInfo?.tts?.online ? "#059669" : "#b91c1c" }}>
-                  {statusInfo?.tts?.engine || "tts"}: {statusInfo?.tts?.online ? "Online" : "Offline"}
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>TTS</div>
+                  <div style={{ fontWeight: 600, color: "#111827" }}>
+                    Active: {statusInfo?.tts?.selected || "default"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    GPT-SoVITS: {statusInfo?.tts?.engines?.gptsovits?.enabled ? (statusInfo?.tts?.engines?.gptsovits?.online ? "Online" : "Offline") : "Inactive"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    Piper: {statusInfo?.tts?.engines?.piper?.enabled ? (statusInfo?.tts?.engines?.piper?.ready ? "Ready" : "Missing voices") : "Inactive"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>Model: {statusInfo?.openai?.model || "—"}</div>
                 </div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>Model: {statusInfo?.openai?.model || "—"}</div>
-              </div>
               <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Audio</div>
                 <div style={{ fontWeight: 600, color: audioUnlocked ? "#059669" : "#b45309" }}>
@@ -1670,6 +1833,12 @@ export default function Home() {
                   <div style={{ fontSize: 12, color: "#6b7280" }}>Integrations</div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
                     {Object.keys(integrations || {}).length ? "Loaded" : "—"}
+                  </div>
+                </div>
+                <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>Live2D</div>
+                  <div style={{ fontWeight: 600, color: "#111827" }}>
+                    {avatarModels.filter(m => m.available).length}/{avatarModels.length || 0} available
                   </div>
                 </div>
                 <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
@@ -1922,21 +2091,14 @@ export default function Home() {
                 style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
               />
             </label>
-            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-              <button
-                onClick={testVoice}
-                style={{ padding: "8px 12px", borderRadius: 8 }}
-              >
-                Test Voice
-              </button>
-              <button
-                onClick={() => speakChunks(lastAssistantText)}
-                style={{ padding: "8px 12px", borderRadius: 8 }}
-                disabled={!lastAssistantText}
-              >
-                Manual Speak
-              </button>
-            </div>
+              <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
+                <button
+                  onClick={testVoice}
+                  style={{ padding: "8px 12px", borderRadius: 8 }}
+                >
+                  Test Voice
+                </button>
+              </div>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
                 Style
                 <select
@@ -2051,6 +2213,12 @@ export default function Home() {
                       style={{ display: "block", marginTop: 4 }}
                     />
                   </label>
+                  <button
+                    onClick={refreshAvatarModels}
+                    style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
+                  >
+                    Refresh Models
+                  </button>
                   {avatarImporting && (
                     <div style={{ fontSize: 12, color: "#6b7280" }}>Importing...</div>
                   )}

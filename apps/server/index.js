@@ -116,6 +116,8 @@ const integrationsState = {
   google_docs: { connected: false },
   google_drive: { connected: false },
   fireflies: { connected: false },
+  amazon: { connected: false },
+  walmart: { connected: false },
   facebook: { connected: false },
   instagram: { connected: false },
   whatsapp: { connected: false },
@@ -724,6 +726,74 @@ app.post("/api/aika/avatar/import", upload.single("file"), (req, res) => {
   }
 });
 
+app.post("/api/aika/avatar/refresh", (_req, res) => {
+  try {
+    const live2dDir = path.join(webPublicDir, "assets", "aika", "live2d");
+    const manifestPath = path.join(live2dDir, "models.json");
+    if (!fs.existsSync(live2dDir)) return res.json({ models: [] });
+    const models = [];
+    const dirs = fs.readdirSync(live2dDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    for (const dir of dirs) {
+      const folder = path.join(live2dDir, dir.name);
+      const modelFiles = fs.readdirSync(folder).filter(f => f.endsWith(".model3.json"));
+      if (!modelFiles.length) continue;
+      const modelFile = modelFiles[0];
+      const thumb = path.join(folder, "thumb.png");
+      if (!fs.existsSync(thumb)) {
+        const png = fs.readdirSync(folder).find(f => f.toLowerCase().endsWith(".png"));
+        if (png) fs.copyFileSync(path.join(folder, png), thumb);
+      }
+      models.push({
+        id: dir.name,
+        label: `${dir.name.replace(/_/g, " ")} (Local)`,
+        modelUrl: `/assets/aika/live2d/${dir.name}/${modelFile}`,
+        fallbackPng: "/assets/aika/AikaPregnant.png",
+        thumbnail: `/assets/aika/live2d/${dir.name}/thumb.png`,
+        source: "local_scan"
+      });
+    }
+    fs.writeFileSync(manifestPath, JSON.stringify({ models }, null, 2));
+    res.json({ models });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "avatar_refresh_failed" });
+  }
+});
+
+app.post("/api/meetings/summary", async (req, res) => {
+  try {
+    const { title, transcript } = req.body || {};
+    if (!transcript || typeof transcript !== "string") {
+      return res.status(400).json({ error: "transcript_required" });
+    }
+    const meetingId = Date.now().toString(36);
+    const safeTitle = typeof title === "string" && title.trim() ? title.trim() : `Meeting ${meetingId}`;
+    const prompt = `You are a meeting assistant. Create a polished, shareable meeting summary from the transcript.\n\nTranscript:\n${transcript}\n\nReturn markdown with sections: Summary, Decisions, Action Items (with owners if possible), Key Details, Next Steps. Keep concise.`;
+    const response = await client.responses.create({
+      model: OPENAI_MODEL,
+      max_output_tokens: 500,
+      input: [
+        { role: "user", content: [{ type: "input_text", text: prompt }] }
+      ]
+    });
+    const summaryText = extractResponseText(response) || "Summary unavailable.";
+    const meetingDir = path.join(path.resolve(serverRoot, "..", "..", "data", "meetings"));
+    if (!fs.existsSync(meetingDir)) fs.mkdirSync(meetingDir, { recursive: true });
+    const filePath = path.join(meetingDir, `${meetingId}.md`);
+    const doc = `# ${safeTitle}\n\n${summaryText}\n\n## Raw Transcript\n\n${transcript}`;
+    fs.writeFileSync(filePath, doc);
+    res.json({ ok: true, id: meetingId, title: safeTitle, docUrl: `/api/meetings/${meetingId}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "meeting_summary_failed" });
+  }
+});
+
+app.get("/api/meetings/:id", (req, res) => {
+  const meetingDir = path.join(path.resolve(serverRoot, "..", "..", "data", "meetings"));
+  const filePath = path.join(meetingDir, `${req.params.id}.md`);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not_found" });
+  res.type("text/markdown").send(fs.readFileSync(filePath, "utf-8"));
+});
+
 app.get("/api/aika/config", (_req, res) => {
   const cfg = readAikaConfig();
   res.json(cfg);
@@ -733,12 +803,16 @@ app.get("/api/integrations", (_req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const firefliesConfigured = Boolean(process.env.FIREFLIES_API_KEY);
   const plexConfigured = Boolean(process.env.PLEX_URL && process.env.PLEX_TOKEN);
+  const amazonConfigured = Boolean(process.env.AMAZON_CLIENT_ID && process.env.AMAZON_CLIENT_SECRET);
+  const walmartConfigured = Boolean(process.env.WALMART_CLIENT_ID && process.env.WALMART_CLIENT_SECRET);
   res.json({
     integrations: {
       ...integrationsState,
       google_docs: { ...integrationsState.google_docs, configured: googleConfigured },
       google_drive: { ...integrationsState.google_drive, configured: googleConfigured },
       fireflies: { ...integrationsState.fireflies, configured: firefliesConfigured },
+      amazon: { ...integrationsState.amazon, configured: amazonConfigured },
+      walmart: { ...integrationsState.walmart, configured: walmartConfigured },
       plex: { ...integrationsState.plex, configured: plexConfigured }
     }
   });
@@ -835,33 +909,52 @@ app.get("/api/skills/export/:type", (req, res) => {
 
 app.get("/api/status", async (_req, res) => {
   const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
-  let ttsOnline = false;
-  if (engine === "gptsovits") {
-    const ttsUrl = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";
-    let healthUrl = ttsUrl;
-    try {
-      const u = new URL(ttsUrl);
-      if (u.pathname.endsWith("/tts")) {
-        u.pathname = u.pathname.replace(/\/tts$/, "/docs");
-      }
-      healthUrl = u.toString();
-    } catch {
-      healthUrl = ttsUrl.replace(/\/tts$/, "/docs");
+  let gptsovitsOnline = false;
+  let gptsovitsStatus = null;
+  const ttsUrl = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";
+  let healthUrl = ttsUrl;
+  try {
+    const u = new URL(ttsUrl);
+    if (u.pathname.endsWith("/tts")) {
+      u.pathname = u.pathname.replace(/\/tts$/, "/docs");
     }
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1200);
-      const r = await fetch(healthUrl, { method: "GET", signal: controller.signal });
-      clearTimeout(timeout);
-      ttsOnline = r.ok;
-    } catch {
-      ttsOnline = false;
+    healthUrl = u.toString();
+  } catch {
+    healthUrl = ttsUrl.replace(/\/tts$/, "/docs");
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    const r = await fetch(healthUrl, { method: "GET", signal: controller.signal });
+    clearTimeout(timeout);
+    gptsovitsOnline = r.ok;
+    gptsovitsStatus = r.status;
+  } catch {
+    gptsovitsOnline = false;
+  }
+  const piperBin = process.env.PIPER_PYTHON_BIN;
+  const piperVoicesDir = process.env.PIPER_VOICES_DIR
+    ? path.resolve(process.env.PIPER_VOICES_DIR)
+    : path.resolve(serverRoot, "piper_voices");
+  let piperVoices = 0;
+  try {
+    if (fs.existsSync(piperVoicesDir)) {
+      piperVoices = fs.readdirSync(piperVoicesDir).filter(f => f.endsWith(".onnx")).length;
     }
+  } catch {
+    piperVoices = 0;
   }
 
   res.json({
     server: { ok: true, uptimeSec: Math.floor(process.uptime()) },
-    tts: { engine, online: ttsOnline },
+    tts: {
+      engine,
+      selected: engine,
+      engines: {
+        gptsovits: { enabled: engine === "gptsovits", online: gptsovitsOnline, status: gptsovitsStatus },
+        piper: { enabled: engine === "piper", ready: Boolean(piperBin) && piperVoices > 0, voices: piperVoices }
+      }
+    },
     integrations: integrationsState,
     skills: {
       enabled: getSkillsState().filter(s => s.enabled).length,
@@ -910,6 +1003,20 @@ app.get("/api/integrations/google/auth/start", (_req, res) => {
   } catch (err) {
     res.status(500).send(err.message || "google_auth_failed");
   }
+});
+
+app.get("/api/integrations/amazon/auth/start", (_req, res) => {
+  if (!process.env.AMAZON_CLIENT_ID || !process.env.AMAZON_CLIENT_SECRET) {
+    return res.status(400).send("amazon_oauth_not_configured");
+  }
+  res.send("amazon_oauth_placeholder");
+});
+
+app.get("/api/integrations/walmart/auth/start", (_req, res) => {
+  if (!process.env.WALMART_CLIENT_ID || !process.env.WALMART_CLIENT_SECRET) {
+    return res.status(400).send("walmart_oauth_not_configured");
+  }
+  res.send("walmart_oauth_placeholder");
 });
 
 app.get("/api/integrations/google/callback", async (req, res) => {

@@ -10,8 +10,16 @@ dist
 .next
 out
 data/aika_tts_cache/
+data/skills/
+data/_live2d_tmp/
+data/_live2d_uploads/
+data/tts_diag.wav
 data/*.wav
 *.sqlite
 .DS_Store
 apps/server/voices/*_trim_6s.wav
 apps/server/piper_voices/
+apps/web/public/assets/aika/live2d/*/
+!apps/web/public/assets/aika/live2d/models.json
+!apps/web/public/assets/aika/live2d/placeholder.svg
+data/live2d_import/

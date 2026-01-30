@@ -600,6 +600,15 @@ export async function handleSkillMessage(text) {
     }
   }
 
+  // Meeting recorder helper
+  if (lower.includes("record meeting") || lower.includes("start meeting")) {
+    addEvent({ type: "skill", skill: "meeting", input: raw });
+    return {
+      text: "Meeting recorder is ready. Open the Skills tab → Meeting Recorder and click Start Recording. When done, click Generate Summary to create a shareable document.",
+      skill: "meeting"
+    };
+  }
+
   return null;
 }
 
