@@ -17,6 +17,16 @@ function resolveVoicePath(voiceName) {
   return { modelPath: resolved, configPath };
 }
 
+function findClosestVoice(voiceName) {
+  if (!fs.existsSync(piperVoicesDir)) return null;
+  const files = fs.readdirSync(piperVoicesDir).filter(f => f.endsWith(".onnx"));
+  if (!files.length) return null;
+  if (!voiceName) return files[0];
+  const cleaned = voiceName.replace(/\.onnx(\.json)?$/i, "").toLowerCase();
+  const match = files.find(f => f.replace(/\.onnx$/i, "").toLowerCase() === cleaned);
+  return match || files[0];
+}
+
 function getPiperCommand() {
   const bin = process.env.PIPER_BIN;
   if (bin && bin.trim()) return { cmd: bin.trim(), args: [] };
@@ -31,7 +41,17 @@ function lengthScaleFromRate(rate) {
 }
 
 export async function generateWithPiper({ text, outputPath, voiceName, rate = 1.0 }) {
-  const voice = resolveVoicePath(voiceName);
+  let warnings = [];
+  let resolvedName = voiceName;
+  let voice = resolveVoicePath(resolvedName);
+  if (!voice) {
+    const fallback = findClosestVoice(resolvedName);
+    if (fallback) {
+      resolvedName = fallback.replace(/\.onnx$/i, "");
+      voice = resolveVoicePath(resolvedName);
+      warnings.push("piper_voice_fallback");
+    }
+  }
   if (!voice) {
     const err = new Error("piper_voice_not_found");
     err.status = 400;
@@ -78,7 +98,7 @@ export async function generateWithPiper({ text, outputPath, voiceName, rate = 1.
     engine: "piper",
     sampleRate: meta.sampleRate,
     duration: meta.duration,
-    warnings: []
+    warnings
   };
 }
 

@@ -361,7 +361,7 @@ export default function Home() {
         ttsSourceRef.current.connect(analyser);
         analyser.connect(ctx.destination);
       }
-      audio.muted = true;
+      audio.muted = false;
       audio.volume = 1;
       const analyser = ttsAnalyserRef.current;
       const data = new Uint8Array(analyser.fftSize);
