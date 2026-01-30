@@ -12,6 +12,7 @@ VOICES=(
   "en_US-amy-medium"
   "en_US-kristin-medium"
   "en_GB-southern_english_female-low"
+  "en_GB-semaine-medium"
   "en_US-ryan-high"
   "en_US-joe-medium"
   "en_US-john-medium"
