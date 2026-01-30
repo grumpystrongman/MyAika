@@ -89,6 +89,19 @@ Piper is a lightweight local TTS engine with many downloadable voices. To use it
 3) (Optional) Set `PIPER_DEFAULT_VOICE` in `apps/server/.env`
 4) In Settings, choose **Engine = piper** and select a voice from the dropdown.
 
+## Live2D Models (free-only)
+We support multiple Live2D models with a dropdown. Free sample models from Live2D can be used:
+- Hiyori Momose (anime girl)
+- Niziiro Mao (anime girl)
+- Tororo & Hijiki (creatures/monster-like)
+
+Download the Live2D Sample Data (free) and place the runtime folders into:
+`apps/web/public/assets/aika/live2d/hiyori/`,
+`apps/web/public/assets/aika/live2d/mao/`,
+`apps/web/public/assets/aika/live2d/tororo_hijiki/`
+
+Then restart the web app. The models will appear in the Avatar Model dropdown.
+
 ## Skills (local-first)
 The Skills tab provides lightweight, local utilities that respond instantly without calling the LLM.
 

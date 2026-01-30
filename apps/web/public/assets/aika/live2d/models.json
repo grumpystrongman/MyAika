@@ -1,0 +1,25 @@
+{
+  "models": [
+    {
+      "id": "hiyori",
+      "label": "Hiyori Momose (Live2D Sample)",
+      "modelUrl": "/assets/aika/live2d/hiyori/hiyori.model3.json",
+      "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "source": "https://www.live2d.com/en/learn/sample/"
+    },
+    {
+      "id": "mao",
+      "label": "Niziiro Mao (Live2D Sample)",
+      "modelUrl": "/assets/aika/live2d/mao/mao.model3.json",
+      "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "source": "https://www.live2d.com/en/learn/sample/"
+    },
+    {
+      "id": "tororo_hijiki",
+      "label": "Tororo & Hijiki (Live2D Sample)",
+      "modelUrl": "/assets/aika/live2d/tororo_hijiki/tororo.model3.json",
+      "fallbackPng": "/assets/aika/AikaPregnant.png",
+      "source": "https://www.live2d.com/en/learn/sample/"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import { trimReferenceWavToFile } from "./aika_voice/voice_ref.js";
 import { voicesDir } from "./aika_voice/paths.js";
 import { readWavMeta } from "./aika_voice/wav_meta.js";
 import { listPiperVoices } from "./aika_voice/engine_piper.js";
+import { fileURLToPath } from "node:url";
 import {
   getGoogleAuthUrl,
   exchangeGoogleCode,
@@ -51,6 +52,9 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 startReminderScheduler();
+
+const serverRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
+const webPublicDir = path.resolve(serverRoot, "..", "web", "public");
 
 // Load persona
 const persona = JSON.parse(
@@ -675,6 +679,28 @@ app.get("/api/aika/tts/diagnostics", async (_req, res) => {
       sampleRate: refMeta?.sampleRate ?? null
     }
   });
+});
+
+app.get("/api/aika/avatar/models", (_req, res) => {
+  try {
+    const manifestPath = path.join(webPublicDir, "assets", "aika", "live2d", "models.json");
+    if (!fs.existsSync(manifestPath)) return res.json({ models: [] });
+    const data = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    const models = Array.isArray(data.models) ? data.models : [];
+    const withStatus = models.map(model => {
+      const modelUrl = model.modelUrl || "";
+      const localPath = modelUrl.startsWith("/")
+        ? path.join(webPublicDir, modelUrl.replace(/^\//, ""))
+        : path.join(webPublicDir, modelUrl);
+      return {
+        ...model,
+        available: Boolean(modelUrl) && fs.existsSync(localPath)
+      };
+    });
+    res.json({ models: withStatus });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "avatar_models_failed" });
+  }
 });
 
 app.get("/api/aika/config", (_req, res) => {

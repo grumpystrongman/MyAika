@@ -190,6 +190,8 @@ export default function Home() {
   const [reminderAudioCue, setReminderAudioCue] = useState(true);
   const [reminderPush, setReminderPush] = useState(false);
   const [userText, setUserText] = useState("");
+  const [avatarModels, setAvatarModels] = useState([]);
+  const [avatarModelId, setAvatarModelId] = useState("");
   const [log, setLog] = useState([
     {
       role: "assistant",
@@ -983,6 +985,23 @@ export default function Home() {
       loadVoices();
     }, []);
 
+    useEffect(() => {
+      async function loadAvatarModels() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/aika/avatar/models`);
+          const data = await r.json();
+          const list = Array.isArray(data.models) ? data.models : [];
+          setAvatarModels(list);
+          const stored = window.localStorage.getItem("aika_avatar_model") || "";
+          const preferred = stored || (list.find(m => m.available)?.id || list[0]?.id || "");
+          if (preferred) setAvatarModelId(preferred);
+        } catch {
+          setAvatarModels([]);
+        }
+      }
+      loadAvatarModels();
+    }, []);
+
 
   useEffect(() => {
     const ref = ttsSettings.voice?.reference_wav_path || "";
@@ -1245,7 +1264,9 @@ export default function Home() {
             isTalking={behavior?.speaking}
             talkIntensity={behavior?.intensity ?? 0.35}
             isListening={micState === "listening"}
-        />
+            modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
+            fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
+          />
       </div>
 
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1909,6 +1930,27 @@ export default function Home() {
                   <option value="piper">piper</option>
                 </select>
               </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                Avatar Model
+                <select
+                  value={avatarModelId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setAvatarModelId(id);
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("aika_avatar_model", id);
+                    }
+                  }}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                >
+                  {avatarModels.length === 0 && <option value="">(no models installed)</option>}
+                  {avatarModels.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.available ? "OK " : "Missing "} {m.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
               Format
               <select
@@ -1987,10 +2029,10 @@ export default function Home() {
                     Place Piper .onnx + .onnx.json files in `apps/server/piper_voices`.
                   </div>
                 </>
-              ) : (
-                <>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
-                    Reference WAV (apps/server/voices)
+                ) : (
+                  <>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                      Reference WAV (apps/server/voices)
                     <input
                       type="text"
                       placeholder="example.wav"
@@ -2002,11 +2044,15 @@ export default function Home() {
                   <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
                     Reference file must be inside apps/server/voices. Leave blank for default voice.
                   </div>
-                  <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-                    For a more feminine voice, add a speaker WAV and set it above.
-                  </div>
-                </>
-              )}
+                    <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
+                      For a more feminine voice, add a speaker WAV and set it above.
+                    </div>
+                  </>
+                )}
+                <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
+                  Live2D models load from `apps/web/public/assets/aika/live2d/`. Drop free sample runtime folders into
+                  `hiyori/`, `mao/`, or `tororo_hijiki/` to enable them.
+                </div>
           </div>
           )}
           {micState === "unsupported" && (

@@ -10,6 +10,8 @@ type Props = {
   talkIntensity?: number;
   isListening: boolean;
   className?: string;
+  modelUrl?: string;
+  fallbackPng?: string;
 };
 
 const FALLBACK_PNG = "/assets/aika/AikaPregnant.png";
@@ -20,7 +22,9 @@ export default function AikaAvatar({
   isTalking,
   talkIntensity = 0.5,
   isListening,
-  className
+  className,
+  modelUrl,
+  fallbackPng
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -35,11 +39,14 @@ export default function AikaAvatar({
       if (!hostRef.current || !canvasRef.current) return;
       if (typeof window === "undefined") return;
 
+      const targetModel = modelUrl || LIVE2D_MODEL_URL;
+      const targetPng = fallbackPng || FALLBACK_PNG;
+
       const canUseWebGL = !!canvasRef.current.getContext("webgl");
       let useLive2D = false;
       if (canUseWebGL) {
         try {
-          const r = await fetch(LIVE2D_MODEL_URL, { method: "HEAD" });
+          const r = await fetch(targetModel, { method: "HEAD" });
           useLive2D = r.ok;
         } catch {
           useLive2D = false;
@@ -51,7 +58,7 @@ export default function AikaAvatar({
       if (useLive2D) {
         try {
           const live = new Live2DWebEngine(canvasRef.current);
-          await live.load(LIVE2D_MODEL_URL);
+          await live.load(targetModel);
           engineRef.current = live;
           setEngineType("live2d");
           return;
@@ -61,8 +68,8 @@ export default function AikaAvatar({
       }
 
       if (!pngRef.current) return;
-      const png = new PngAvatarEngine(pngRef.current, FALLBACK_PNG);
-      await png.load(LIVE2D_MODEL_URL);
+      const png = new PngAvatarEngine(pngRef.current, targetPng);
+      await png.load(targetModel);
       engineRef.current = png;
       setEngineType("png");
     }
@@ -73,7 +80,7 @@ export default function AikaAvatar({
       engineRef.current?.destroy();
       engineRef.current = null;
     };
-  }, []);
+  }, [modelUrl, fallbackPng]);
 
   useEffect(() => {
     const engine = engineRef.current;
