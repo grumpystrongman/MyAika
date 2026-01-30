@@ -8,8 +8,8 @@
   - Model files live under `/public/assets/aika/live2d/<model-id>/`
 
 ## Runtime (Pixi Live2D)
-The web app uses `pixi.js` + `pixi-live2d-display` to render models client-side.
-No global Cubism runtime is required.
+The web app uses `pixi.js` (v6) + `pixi-live2d-display` (Cubism 4) to render models client-side.
+No global Cubism runtime is required; the Cubism 4 runtime is bundled by pixi-live2d-display.
 
 ## Expression mapping
 Suggested expression files:

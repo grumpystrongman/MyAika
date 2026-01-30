@@ -32,7 +32,7 @@ export class Live2DWebEngine implements AvatarEngine {
 
     const [{ Application }, { Live2DModel }] = await Promise.all([
       import("pixi.js"),
-      import("pixi-live2d-display")
+      import("pixi-live2d-display/cubism4")
     ]);
 
     this.app = new Application({
