@@ -33,3 +33,7 @@ Update parameter IDs in:
 - If the model fails to render, open the browser console and check for Live2D load errors.
 - Ensure the model's `.model3.json` and referenced textures are inside `/public/assets/aika/live2d/<model-id>/`.
 - Try hard reload (Ctrl+Shift+R).
+
+## Live2D core runtime
+Place `live2dcubismcore.js` (and `live2dcubismcore.wasm` if provided) under `/public/assets/aika/live2d/`.
+You can also upload them from the Settings ? Avatar Model panel.

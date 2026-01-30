@@ -57,6 +57,9 @@ startReminderScheduler();
 
 const serverRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
 const webPublicDir = path.resolve(serverRoot, "..", "web", "public");
+const live2dDir = path.join(webPublicDir, "assets", "aika", "live2d");
+const live2dCoreJs = path.join(live2dDir, "live2dcubismcore.js");
+const live2dCoreWasm = path.join(live2dDir, "live2dcubismcore.wasm");
 const uploadDir = path.resolve(serverRoot, "..", "..", "data", "_live2d_uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
@@ -93,6 +96,16 @@ function withAvatarStatus(models) {
       thumbnailAvailable: Boolean(thumbUrl) && fs.existsSync(thumbPath)
     };
   });
+}
+
+function getDefaultTtsEngine() {
+  if (process.env.TTS_ENGINE && process.env.TTS_ENGINE.trim()) {
+    return process.env.TTS_ENGINE.trim().toLowerCase();
+  }
+  const piperBin = process.env.PIPER_BIN || process.env.PIPER_PYTHON_BIN;
+  const piperVoices = listPiperVoices();
+  if (piperBin && piperVoices.length) return "piper";
+  return "gptsovits";
 }
 
 let defaultRefOverride = null;
@@ -581,7 +594,7 @@ app.get("/api/aika/voice/:id", (req, res) => {
 
 app.get("/api/aika/voices", async (_req, res) => {
   try {
-    const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+    const engine = getDefaultTtsEngine();
     if (engine === "piper") {
       const piperVoices = listPiperVoices();
       return res.json({ engine, voices: piperVoices, piperVoices });
@@ -615,7 +628,7 @@ app.post("/api/aika/voice/test", async (req, res) => {
 });
 
 app.get("/api/aika/tts/health", async (_req, res) => {
-  const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+  const engine = getDefaultTtsEngine();
   if (engine !== "gptsovits") {
     return res.json({ engine, online: engine === "sapi" || engine === "coqui" });
   }
@@ -642,7 +655,7 @@ app.get("/api/aika/tts/health", async (_req, res) => {
 });
 
 app.get("/api/aika/tts/diagnostics", async (_req, res) => {
-  const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+  const engine = getDefaultTtsEngine();
   const cfg = readAikaConfig();
   const defaultRef = defaultRefOverride || cfg?.voice?.default_reference_wav || "";
   const resolvedRef = defaultRef ? path.resolve(voicesDir, defaultRef) : "";
@@ -709,7 +722,7 @@ app.get("/api/aika/tts/diagnostics", async (_req, res) => {
 
 app.get("/api/aika/avatar/models", (_req, res) => {
   try {
-    const manifestPath = path.join(webPublicDir, "assets", "aika", "live2d", "models.json");
+    const manifestPath = path.join(live2dDir, "models.json");
     if (!fs.existsSync(manifestPath)) return res.json({ models: [] });
     const data = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
     const models = Array.isArray(data.models) ? data.models : [];
@@ -732,7 +745,6 @@ app.post("/api/aika/avatar/import", upload.single("file"), (req, res) => {
 
 app.post("/api/aika/avatar/refresh", (_req, res) => {
   try {
-    const live2dDir = path.join(webPublicDir, "assets", "aika", "live2d");
     const manifestPath = path.join(live2dDir, "models.json");
     if (!fs.existsSync(live2dDir)) return res.json({ models: [] });
     const models = [];
@@ -763,6 +775,33 @@ app.post("/api/aika/avatar/refresh", (_req, res) => {
     res.json({ models: withAvatarStatus(models) });
   } catch (err) {
     res.status(500).json({ error: err.message || "avatar_refresh_failed" });
+  }
+});
+
+app.get("/api/aika/avatar/core", (_req, res) => {
+  res.json({
+    coreJs: fs.existsSync(live2dCoreJs),
+    coreWasm: fs.existsSync(live2dCoreWasm),
+    path: "/assets/aika/live2d/live2dcubismcore.js"
+  });
+});
+
+app.post("/api/aika/avatar/core", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file?.path) return res.status(400).json({ error: "file_required" });
+    if (!fs.existsSync(live2dDir)) fs.mkdirSync(live2dDir, { recursive: true });
+    const name = (req.file.originalname || "").toLowerCase();
+    if (name.endsWith(".js")) {
+      fs.copyFileSync(req.file.path, live2dCoreJs);
+    } else if (name.endsWith(".wasm")) {
+      fs.copyFileSync(req.file.path, live2dCoreWasm);
+    } else {
+      return res.status(400).json({ error: "core_file_must_be_js_or_wasm" });
+    }
+    fs.unlinkSync(req.file.path);
+    res.json({ ok: true, coreJs: fs.existsSync(live2dCoreJs), coreWasm: fs.existsSync(live2dCoreWasm) });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "avatar_core_upload_failed" });
   }
 });
 
@@ -915,7 +954,7 @@ app.get("/api/skills/export/:type", (req, res) => {
 });
 
 app.get("/api/status", async (_req, res) => {
-  const engine = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+  const engine = getDefaultTtsEngine();
   let gptsovitsOnline = false;
   let gptsovitsStatus = null;
   const ttsUrl = process.env.GPTSOVITS_URL || "http://localhost:9881/tts";

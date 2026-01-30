@@ -30,6 +30,7 @@ export class Live2DWebEngine implements AvatarEngine {
     }
     if (!this.canvas.getContext("webgl")) throw new Error("webgl_not_supported");
 
+    await ensureCubismCore();
     const PIXI = await import("pixi.js");
     (window as any).PIXI = PIXI;
     const { Live2DModel } = await import("pixi-live2d-display/cubism4");
@@ -112,5 +113,21 @@ export class Live2DWebEngine implements AvatarEngine {
     this.model.x = width * 0.5;
     this.model.y = height * 0.98;
     this.model.pivot.set(bounds.width / 2, bounds.height);
+  }
+}
+
+async function ensureCubismCore() {
+  const w = window as any;
+  if (w.Live2DCubismCore) return;
+  await new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/assets/aika/live2d/live2dcubismcore.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("live2d_core_missing"));
+    document.head.appendChild(script);
+  });
+  if (!w.Live2DCubismCore) {
+    throw new Error("live2d_core_missing");
   }
 }

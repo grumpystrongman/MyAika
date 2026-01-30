@@ -196,6 +196,8 @@ export default function Home() {
   const [avatarImporting, setAvatarImporting] = useState(false);
   const [avatarImportError, setAvatarImportError] = useState("");
   const [avatarImportNotice, setAvatarImportNotice] = useState("");
+  const [avatarCoreInfo, setAvatarCoreInfo] = useState({ coreJs: false, coreWasm: false });
+  const [avatarCoreError, setAvatarCoreError] = useState("");
   const meetingRecRef = useRef(null);
   const [meetingRecording, setMeetingRecording] = useState(false);
   const [meetingTranscript, setMeetingTranscript] = useState("");
@@ -236,7 +238,7 @@ export default function Home() {
     pitch: 0,
     energy: 1.0,
     pause: 1.1,
-    engine: "",
+    engine: "piper",
     voice: { reference_wav_path: "riko_sample.wav", name: "", prompt_text: "" }
   });
   const [availableVoices, setAvailableVoices] = useState([]);
@@ -1017,6 +1019,7 @@ export default function Home() {
           if (!list.length || !list.some(m => m.available)) {
             refreshAvatarModels();
           }
+          loadAvatarCore();
         } catch {
           setAvatarModels([]);
         }
@@ -1074,6 +1077,44 @@ export default function Home() {
         }
       } catch (err) {
         setAvatarImportError(err?.message || "avatar_refresh_failed");
+      }
+    }
+
+    async function loadAvatarCore() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/aika/avatar/core`);
+        const data = await r.json();
+        setAvatarCoreInfo({
+          coreJs: Boolean(data.coreJs),
+          coreWasm: Boolean(data.coreWasm)
+        });
+      } catch {
+        setAvatarCoreError("avatar_core_status_failed");
+      }
+    }
+
+    async function uploadAvatarCore(file) {
+      if (!file) return;
+      setAvatarCoreError("");
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await fetch(`${SERVER_URL}/api/aika/avatar/core`, {
+          method: "POST",
+          body: form
+        });
+        if (!r.ok) {
+          const data = await r.json().catch(() => ({}));
+          throw new Error(data.error || "avatar_core_upload_failed");
+        }
+        const data = await r.json();
+        setAvatarCoreInfo({
+          coreJs: Boolean(data.coreJs),
+          coreWasm: Boolean(data.coreWasm)
+        });
+        setAvatarImportNotice("Live2D core installed. Hard reload the page (Ctrl+Shift+R).");
+      } catch (err) {
+        setAvatarCoreError(err?.message || "avatar_core_upload_failed");
       }
     }
 
@@ -1919,6 +1960,7 @@ export default function Home() {
               <div>1) Miku loads by default when available.</div>
               <div>2) Use Avatar Model to switch.</div>
               <div>3) Import a Live2D zip and then click Refresh Models.</div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>If you see a Live2D core error, upload live2dcubismcore.js (and .wasm if provided) from the Cubism SDK.</div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>If it doesn???t appear, hard reload (Ctrl+Shift+R).</div>
               <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Fireflies</div>
               <div>“Summarize this Fireflies meeting: [paste Fireflies link]”</div>
@@ -2230,6 +2272,18 @@ export default function Home() {
                       style={{ display: "block", marginTop: 4 }}
                     />
                   </label>
+                  <div style={{ fontSize: 12, color: "#374151" }}>
+                    Live2D core: {avatarCoreInfo.coreJs ? "Ready" : "Missing"}{avatarCoreInfo.coreWasm ? " + WASM" : ""}
+                  </div>
+                  <label style={{ fontSize: 12, color: "#374151" }}>
+                    Upload live2dcubismcore.js / .wasm
+                    <input
+                      type="file"
+                      accept=".js,.wasm"
+                      onChange={(e) => uploadAvatarCore(e.target.files?.[0])}
+                      style={{ display: "block", marginTop: 4 }}
+                    />
+                  </label>
                   <button
                     onClick={refreshAvatarModels}
                     style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
@@ -2244,6 +2298,9 @@ export default function Home() {
                   )}
                   {avatarImportError && (
                     <div style={{ fontSize: 12, color: "#b91c1c" }}>{avatarImportError}</div>
+                  )}
+                  {avatarCoreError && (
+                    <div style={{ fontSize: 12, color: "#b91c1c" }}>{avatarCoreError}</div>
                   )}
                 </div>
               </div>

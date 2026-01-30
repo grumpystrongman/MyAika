@@ -41,6 +41,8 @@ export function importLive2DZip({
   webPublicDir
 }) {
   const live2dDir = path.join(webPublicDir, "assets", "aika", "live2d");
+  const coreJsPath = path.join(live2dDir, "live2dcubismcore.js");
+  const coreWasmPath = path.join(live2dDir, "live2dcubismcore.wasm");
   const manifestPath = path.join(live2dDir, "models.json");
   ensureDir(live2dDir);
 
@@ -51,6 +53,7 @@ export function importLive2DZip({
   zip.extractAllTo(tempDir, true);
 
   const modelFiles = [];
+  const coreCandidates = [];
   function walk(dir) {
     const items = fs.readdirSync(dir);
     for (const item of items) {
@@ -58,9 +61,20 @@ export function importLive2DZip({
       const stat = fs.statSync(full);
       if (stat.isDirectory()) walk(full);
       else if (item.endsWith(".model3.json")) modelFiles.push(full);
+      else if (item.toLowerCase() === "live2dcubismcore.js") coreCandidates.push(full);
+      else if (item.toLowerCase() === "live2dcubismcore.wasm") coreCandidates.push(full);
     }
   }
   walk(tempDir);
+
+  for (const file of coreCandidates) {
+    const lower = path.basename(file).toLowerCase();
+    if (lower.endsWith(".js")) {
+      fs.copyFileSync(file, coreJsPath);
+    } else if (lower.endsWith(".wasm")) {
+      fs.copyFileSync(file, coreWasmPath);
+    }
+  }
 
   let manifest = { models: [] };
   if (fs.existsSync(manifestPath)) {

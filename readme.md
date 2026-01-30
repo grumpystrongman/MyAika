@@ -78,7 +78,7 @@ Use `POST /api/agent/task` with:
 - `discord_send` (payload `{ text }`)
 
 ## Aika Voice (GPT-SoVITS only)
-Voice output is handled by a local GPT-SoVITS service. The app calls it and streams the WAV back.
+Voice output defaults to Piper for fast local speech (configurable). GPT-SoVITS is still supported for higher quality.
 
 ### Optional: Piper multi-voice (fast switching)
 Piper is a lightweight local TTS engine with many downloadable voices. To use it:
@@ -109,6 +109,12 @@ Then restart the web app (or click Refresh Models in Settings). The models will 
 2) Place the zip(s) into `data/live2d_import/`
 3) Run: `npm run live2d:import`
 4) Restart the web app.
+
+### Live2D core runtime
+Live2D requires the Cubism core runtime files:
+- `live2dcubismcore.js` (required)
+- `live2dcubismcore.wasm` (if provided)
+Place them in `apps/web/public/assets/aika/live2d/` or upload them in Settings ? Avatar Model.
 
 ### In-app import (no restart)
 Use Settings → Avatar Model → Import Live2D zip to upload a zip. The server will unpack it, add it to the model list,

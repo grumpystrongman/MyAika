@@ -7,9 +7,19 @@ import { cachePaths, ensureDir, hashFile, sha256 } from "./cache.js";
 import { readWavMeta } from "./wav_meta.js";
 import { generateWithGptSovits } from "./engine_gptsovits.js";
 import { normalizeReferenceWav } from "./voice_ref.js";
-import { generateWithPiper } from "./engine_piper.js";
+import { generateWithPiper, listPiperVoices } from "./engine_piper.js";
 
-const ENGINE = process.env.TTS_ENGINE || (process.platform === "win32" ? "sapi" : "coqui");
+function getDefaultEngine() {
+  if (process.env.TTS_ENGINE && process.env.TTS_ENGINE.trim()) {
+    return process.env.TTS_ENGINE.trim().toLowerCase();
+  }
+  const piperBin = process.env.PIPER_BIN || process.env.PIPER_PYTHON_BIN;
+  const piperVoices = listPiperVoices();
+  if (piperBin && piperVoices.length) return "piper";
+  return "gptsovits";
+}
+
+const ENGINE = getDefaultEngine();
 const MODEL_ID =
   process.env.TTS_MODEL_ID || "tts_models/multilingual/multi-dataset/xtts_v2";
 
