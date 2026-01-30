@@ -12,6 +12,8 @@ import { voicesDir } from "./aika_voice/paths.js";
 import { readWavMeta } from "./aika_voice/wav_meta.js";
 import { listPiperVoices } from "./aika_voice/engine_piper.js";
 import { fileURLToPath } from "node:url";
+import multer from "multer";
+import { importLive2DZip } from "./avatar_import.js";
 import {
   getGoogleAuthUrl,
   exchangeGoogleCode,
@@ -55,6 +57,9 @@ startReminderScheduler();
 
 const serverRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
 const webPublicDir = path.resolve(serverRoot, "..", "web", "public");
+const uploadDir = path.resolve(serverRoot, "..", "..", "data", "_live2d_uploads");
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+const upload = multer({ dest: uploadDir });
 
 // Load persona
 const persona = JSON.parse(
@@ -705,6 +710,17 @@ app.get("/api/aika/avatar/models", (_req, res) => {
     res.json({ models: withStatus });
   } catch (err) {
     res.status(500).json({ error: err.message || "avatar_models_failed" });
+  }
+});
+
+app.post("/api/aika/avatar/import", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file?.path) return res.status(400).json({ error: "file_required" });
+    const models = importLive2DZip({ zipPath: req.file.path, webPublicDir });
+    fs.unlinkSync(req.file.path);
+    res.json({ ok: true, models });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "avatar_import_failed" });
   }
 });
 

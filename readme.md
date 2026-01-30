@@ -110,6 +110,10 @@ Then restart the web app. The models will appear in the Avatar Model dropdown.
 3) Run: `npm run live2d:import`
 4) Restart the web app.
 
+### In-app import (no restart)
+Use Settings → Avatar Model → Import Live2D zip to upload a zip. The server will unpack it, add it to the model list,
+and the picker updates immediately without restarting.
+
 ## Skills (local-first)
 The Skills tab provides lightweight, local utilities that respond instantly without calling the LLM.
 

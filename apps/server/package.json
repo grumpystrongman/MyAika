@@ -8,10 +8,12 @@
   },
   "dependencies": {
     "@myaika/shared": "0.0.1",
+    "adm-zip": "^0.5.12",
     "better-sqlite3": "^11.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
     "openai": "^4.0.0"
   }
 }

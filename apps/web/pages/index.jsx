@@ -193,6 +193,8 @@ export default function Home() {
   const [avatarModels, setAvatarModels] = useState([]);
   const [avatarModelId, setAvatarModelId] = useState("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [avatarImporting, setAvatarImporting] = useState(false);
+  const [avatarImportError, setAvatarImportError] = useState("");
   const [log, setLog] = useState([
     {
       role: "assistant",
@@ -1002,6 +1004,34 @@ export default function Home() {
       }
       loadAvatarModels();
     }, []);
+
+    async function importAvatarZip(file) {
+      if (!file) return;
+      setAvatarImporting(true);
+      setAvatarImportError("");
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await fetch(`${SERVER_URL}/api/aika/avatar/import`, {
+          method: "POST",
+          body: form
+        });
+        if (!r.ok) {
+          const data = await r.json().catch(() => ({}));
+          throw new Error(data.error || "avatar_import_failed");
+        }
+        const data = await r.json();
+        const list = Array.isArray(data.models) ? data.models : [];
+        setAvatarModels(list);
+        if (list.length) {
+          setAvatarModelId(prev => prev || list[0].id);
+        }
+      } catch (err) {
+        setAvatarImportError(err?.message || "avatar_import_failed");
+      } finally {
+        setAvatarImporting(false);
+      }
+    }
 
 
   useEffect(() => {
@@ -1958,16 +1988,16 @@ export default function Home() {
                     </button>
                   );
                 })()}
-                {showAvatarPicker && (
-                  <div style={{
-                    border: "1px solid #e5e7eb",
-                    borderRadius: 10,
-                    padding: 8,
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 8,
-                    background: "#fafafa"
-                  }}>
+                  {showAvatarPicker && (
+                    <div style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 10,
+                      padding: 8,
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: 8,
+                      background: "#fafafa"
+                    }}>
                     {avatarModels.length === 0 && (
                       <div style={{ fontSize: 12, color: "#6b7280" }}>(no models installed)</div>
                     )}
@@ -2010,6 +2040,24 @@ export default function Home() {
                     })}
                   </div>
                 )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                  <label style={{ fontSize: 12, color: "#374151" }}>
+                    Import Live2D zip
+                    <input
+                      type="file"
+                      accept=".zip"
+                      onChange={(e) => importAvatarZip(e.target.files?.[0])}
+                      disabled={avatarImporting}
+                      style={{ display: "block", marginTop: 4 }}
+                    />
+                  </label>
+                  {avatarImporting && (
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>Importing...</div>
+                  )}
+                  {avatarImportError && (
+                    <div style={{ fontSize: 12, color: "#b91c1c" }}>{avatarImportError}</div>
+                  )}
+                </div>
               </div>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
               Format
