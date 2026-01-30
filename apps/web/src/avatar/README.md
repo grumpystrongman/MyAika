@@ -37,3 +37,7 @@ Update parameter IDs in:
 ## Live2D core runtime
 Place `live2dcubismcore.js` (and `live2dcubismcore.wasm` if provided) under `/public/assets/aika/live2d/`.
 You can also upload them from the Settings ? Avatar Model panel.
+
+## Motion + lip-sync
+- Random motions are triggered periodically when available.
+- Lip-sync uses the actual audio output level and drives `ParamMouthOpenY`.

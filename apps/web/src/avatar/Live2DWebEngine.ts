@@ -11,6 +11,8 @@ export class Live2DWebEngine implements AvatarEngine {
   private talkIntensity = 0.5;
   private isListening = false;
   private idleEnabled = true;
+  private motionList: Array<{ group: string; index: number }> = [];
+  private motionTimer: number | null = null;
 
   constructor(canvas: HTMLCanvasElement, moodMap?: Partial<MoodMap>) {
     this.canvas = canvas;
@@ -44,6 +46,8 @@ export class Live2DWebEngine implements AvatarEngine {
     this.model = await Live2DModel.from(modelUrl);
     this.app.stage.addChild(this.model);
     this.layoutModel();
+    this.motionList = this.buildMotionList();
+    this.scheduleRandomMotion();
 
     this.app.ticker.add((delta: number) => {
       if (!this.model) return;
@@ -101,18 +105,51 @@ export class Live2DWebEngine implements AvatarEngine {
     this.model = null;
     if (this.app?.destroy) this.app.destroy(true, { children: true });
     this.app = null;
+    if (this.motionTimer) window.clearTimeout(this.motionTimer);
+    this.motionTimer = null;
   }
 
   private layoutModel() {
     if (!this.app || !this.model) return;
     const width = this.app.renderer?.width || this.canvas.clientWidth || 1;
     const height = this.app.renderer?.height || this.canvas.clientHeight || 1;
-    const bounds = this.model.getBounds();
-    const scale = Math.min(width / (bounds.width || 1), height / (bounds.height || 1)) * 0.95;
+    const modelWidth = this.model.width || this.model.getBounds?.().width || 1;
+    const modelHeight = this.model.height || this.model.getBounds?.().height || 1;
+    const scale = Math.min(width / modelWidth, height / modelHeight) * 0.95;
     this.model.scale.set(scale);
+    if (this.model.anchor?.set) {
+      this.model.anchor.set(0.5, 1);
+    } else if (this.model.pivot?.set) {
+      this.model.pivot.set(modelWidth / 2, modelHeight);
+    }
     this.model.x = width * 0.5;
     this.model.y = height * 0.98;
-    this.model.pivot.set(bounds.width / 2, bounds.height);
+  }
+
+  private buildMotionList() {
+    const list: Array<{ group: string; index: number }> = [];
+    const defs = this.model?.internalModel?.motionManager?.definitions;
+    if (defs && typeof defs === "object") {
+      for (const [group, motions] of Object.entries(defs)) {
+        if (Array.isArray(motions)) {
+          motions.forEach((_, index) => list.push({ group, index }));
+        }
+      }
+    }
+    return list;
+  }
+
+  private scheduleRandomMotion() {
+    if (!this.model || !this.motionList.length) return;
+    const play = () => {
+      if (!this.model || !this.motionList.length) return;
+      const pick = this.motionList[Math.floor(Math.random() * this.motionList.length)];
+      this.model.motion(pick.group, pick.index).catch(() => {});
+      const delay = 6000 + Math.random() * 7000;
+      this.motionTimer = window.setTimeout(play, delay);
+    };
+    const firstDelay = 1500 + Math.random() * 2000;
+    this.motionTimer = window.setTimeout(play, firstDelay);
   }
 }
 

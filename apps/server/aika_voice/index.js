@@ -89,7 +89,8 @@ export async function generateAikaVoice({ text, settings = {} }) {
     }
   }
 
-  const piperVoiceName = normalized.voice?.name || process.env.PIPER_DEFAULT_VOICE || "";
+  const piperVoiceName =
+    normalized.voice?.name || process.env.PIPER_DEFAULT_VOICE || "en_GB-semaine-medium";
   const voiceHash = voicePath ? hashFile(voicePath) : piperVoiceName;
   const hashInput = JSON.stringify({
     text: formatted,

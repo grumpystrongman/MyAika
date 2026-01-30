@@ -78,7 +78,7 @@ Use `POST /api/agent/task` with:
 - `discord_send` (payload `{ text }`)
 
 ## Aika Voice (GPT-SoVITS only)
-Voice output defaults to Piper for fast local speech (configurable). GPT-SoVITS is still supported for higher quality.
+Voice output defaults to Piper for fast local speech (configurable). Default voice is `en_GB-semaine-medium`. GPT-SoVITS is still supported for higher quality.
 
 ### Optional: Piper multi-voice (fast switching)
 Piper is a lightweight local TTS engine with many downloadable voices. To use it:

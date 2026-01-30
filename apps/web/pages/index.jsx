@@ -228,6 +228,7 @@ export default function Home() {
   const [ttsStatus, setTtsStatus] = useState("idle");
   const [ttsError, setTtsError] = useState("");
   const [ttsWarnings, setTtsWarnings] = useState([]);
+  const [ttsLevel, setTtsLevel] = useState(0);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [pendingSpeak, setPendingSpeak] = useState(null);
   const [lastAssistantText, setLastAssistantText] = useState("");
@@ -239,11 +240,15 @@ export default function Home() {
     energy: 1.0,
     pause: 1.1,
     engine: "piper",
-    voice: { reference_wav_path: "riko_sample.wav", name: "", prompt_text: "" }
+    voice: { reference_wav_path: "riko_sample.wav", name: "en_GB-semaine-medium", prompt_text: "" }
   });
   const [availableVoices, setAvailableVoices] = useState([]);
   const recognizerRef = useRef(null);
   const audioRef = useRef(null);
+  const ttsAudioCtxRef = useRef(null);
+  const ttsAnalyserRef = useRef(null);
+  const ttsSourceRef = useRef(null);
+  const ttsRafRef = useRef(null);
   const prefTimerRef = useRef(null);
   const lastPrefRef = useRef("");
   const promptTimerRef = useRef(null);
@@ -323,12 +328,59 @@ export default function Home() {
       audio.pause();
       audio.currentTime = 0;
       audio.volume = start;
+      audio.muted = false;
     }
+    stopLipSync();
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     setTtsStatus("idle");
     setBehavior(prev => ({ ...prev, speaking: false }));
+  }
+
+  function stopLipSync() {
+    if (ttsRafRef.current) cancelAnimationFrame(ttsRafRef.current);
+    ttsRafRef.current = null;
+    setTtsLevel(0);
+  }
+
+  async function startLipSync(audio) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx || !audio) return;
+      const ctx = ttsAudioCtxRef.current || new AudioCtx();
+      ttsAudioCtxRef.current = ctx;
+      if (ctx.state === "suspended") await ctx.resume();
+      if (!ttsSourceRef.current) {
+        ttsSourceRef.current = ctx.createMediaElementSource(audio);
+      }
+      if (!ttsAnalyserRef.current) {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        ttsAnalyserRef.current = analyser;
+        ttsSourceRef.current.connect(analyser);
+        analyser.connect(ctx.destination);
+      }
+      audio.muted = true;
+      audio.volume = 1;
+      const analyser = ttsAnalyserRef.current;
+      const data = new Uint8Array(analyser.fftSize);
+      const loop = () => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        const level = Math.min(1, Math.max(0, rms * 3.2));
+        setTtsLevel(prev => prev * 0.6 + level * 0.4);
+        ttsRafRef.current = requestAnimationFrame(loop);
+      };
+      if (!ttsRafRef.current) loop();
+    } catch {
+      // ignore lip sync failures
+    }
   }
 
   async function testVoice() {
@@ -372,10 +424,12 @@ export default function Home() {
       audio.src = objectUrl;
       audio.preload = "auto";
       audio.volume = 1;
+      startLipSync(audio);
       audio.onended = () => {
         URL.revokeObjectURL(objectUrl);
         setTtsStatus("idle");
         setBehavior(prev => ({ ...prev, speaking: false }));
+        stopLipSync();
         if (voiceMode && !textOnly) {
           setTimeout(() => startMic(), 200);
         }
@@ -387,6 +441,7 @@ export default function Home() {
           await playBlobWithAudioContext(blob);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          stopLipSync();
           if (voiceMode && !textOnly) {
             setTimeout(() => startMic(), 200);
           }
@@ -394,6 +449,7 @@ export default function Home() {
           setTtsStatus("error");
           setTtsError(e?.message || "audio_play_failed");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          stopLipSync();
         }
       };
 
@@ -474,11 +530,13 @@ export default function Home() {
         audio.src = objectUrl;
         audio.preload = "auto";
         audio.volume = 1;
+        startLipSync(audio);
         audio.onended = () => {
           URL.revokeObjectURL(objectUrl);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
           ttsActiveRef.current = false;
+          stopLipSync();
           if (restartMicOnEnd && voiceMode && !textOnly) {
             setTimeout(() => startMic(), 600);
           }
@@ -492,6 +550,7 @@ export default function Home() {
             setTtsStatus("idle");
             setBehavior(prev => ({ ...prev, speaking: false }));
             ttsActiveRef.current = false;
+            stopLipSync();
             if (restartMicOnEnd && voiceMode && !textOnly) {
               setTimeout(() => startMic(), 600);
             }
@@ -500,6 +559,7 @@ export default function Home() {
             setTtsError(e?.message || "audio_play_failed");
             setBehavior(prev => ({ ...prev, speaking: false }));
             ttsActiveRef.current = false;
+            stopLipSync();
           }
           resolve();
         };
@@ -1460,8 +1520,8 @@ export default function Home() {
           )}
           <AikaAvatar
             mood={behavior?.emotion || Emotion.NEUTRAL}
-            isTalking={behavior?.speaking}
-            talkIntensity={behavior?.intensity ?? 0.35}
+            isTalking={ttsStatus === "playing" || behavior?.speaking}
+            talkIntensity={ttsStatus === "playing" ? Math.max(0.12, ttsLevel) : (behavior?.intensity ?? 0.35)}
             isListening={micState === "listening"}
             modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
             fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
@@ -1958,6 +2018,7 @@ export default function Home() {
 
               <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Live2D avatar</div>
               <div>1) Miku loads by default when available.</div>
+              <div>2) Lip-sync uses the actual voice audio, so mouth moves to what you hear.</div>
               <div>2) Use Avatar Model to switch.</div>
               <div>3) Import a Live2D zip and then click Refresh Models.</div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>If you see a Live2D core error, upload live2dcubismcore.js (and .wasm if provided) from the Cubism SDK.</div>
