@@ -1,5 +1,6 @@
 node_modules
 .venv
+.venv-piper
 gptsovits_service/.venv/
 tools/ffmpeg/
 .env
