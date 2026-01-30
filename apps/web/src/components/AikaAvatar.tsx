@@ -30,6 +30,7 @@ export default function AikaAvatar({
   const pngRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<AvatarEngine | null>(null);
   const [engineType, setEngineType] = useState<"live2d" | "png">("png");
+  const [loadError, setLoadError] = useState<string>("");
 
   useEffect(() => {
     let destroyed = false;
@@ -37,6 +38,7 @@ export default function AikaAvatar({
     async function initEngine() {
       if (!hostRef.current || !canvasRef.current) return;
       if (typeof window === "undefined") return;
+      setLoadError("");
 
       const targetModel = modelUrl || "";
       const targetPng = fallbackPng || FALLBACK_PNG;
@@ -61,7 +63,8 @@ export default function AikaAvatar({
           engineRef.current = live;
           setEngineType("live2d");
           return;
-        } catch {
+        } catch (err: any) {
+          setLoadError(err?.message || "live2d_load_failed");
           // fall back to PNG
         }
       }
@@ -135,6 +138,21 @@ export default function AikaAvatar({
             justifyContent: "center"
           }}
         />
+      )}
+      {loadError && (
+        <div
+          style={{
+            position: "absolute",
+            inset: "auto 8px 8px 8px",
+            background: "rgba(15,23,42,0.72)",
+            color: "#e2e8f0",
+            fontSize: 11,
+            padding: "6px 8px",
+            borderRadius: 8
+          }}
+        >
+          Live2D error: {loadError}
+        </div>
       )}
     </div>
   );

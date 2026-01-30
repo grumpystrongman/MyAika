@@ -27,3 +27,9 @@ Update parameter IDs in:
 - `apps/web/src/avatar/Live2DWebEngine.ts`
   - Mouth: `ParamMouthOpenY`
   - Eyes: `ParamEyeLOpen`, `ParamEyeROpen`, `ParamEyeBallX`
+
+
+## Troubleshooting
+- If the model fails to render, open the browser console and check for Live2D load errors.
+- Ensure the model's `.model3.json` and referenced textures are inside `/public/assets/aika/live2d/<model-id>/`.
+- Try hard reload (Ctrl+Shift+R).

@@ -30,12 +30,11 @@ export class Live2DWebEngine implements AvatarEngine {
     }
     if (!this.canvas.getContext("webgl")) throw new Error("webgl_not_supported");
 
-    const [{ Application }, { Live2DModel }] = await Promise.all([
-      import("pixi.js"),
-      import("pixi-live2d-display/cubism4")
-    ]);
+    const PIXI = await import("pixi.js");
+    (window as any).PIXI = PIXI;
+    const { Live2DModel } = await import("pixi-live2d-display/cubism4");
 
-    this.app = new Application({
+    this.app = new PIXI.Application({
       view: this.canvas,
       autoStart: true,
       backgroundAlpha: 0
