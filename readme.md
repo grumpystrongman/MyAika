@@ -44,11 +44,26 @@ Notes:
    - `GOOGLE_CLIENT_ID`
    - `GOOGLE_CLIENT_SECRET`
    - `GOOGLE_REDIRECT_URI` (example: `http://localhost:8790/api/integrations/google/callback`)
+   - `WEB_UI_URL` (example: `http://localhost:3000`)
 2) Click "Connect" for Google Docs/Drive in the Integrations tab to complete OAuth.
 3) Use these endpoints:
+   - `GET /api/integrations/google/status`
+   - `POST /api/integrations/google/disconnect`
    - `POST /api/integrations/google/docs/create` `{ title, content }`
    - `POST /api/integrations/google/docs/append` `{ documentId, content }`
+   - `GET /api/integrations/google/docs/get?docId=...`
    - `POST /api/integrations/google/drive/upload` `{ name, content, mimeType }`
+   - `GET /api/integrations/google/drive/list?limit=20`
+   - `GET /api/integrations/google/sheets/get?spreadsheetId=...&range=Sheet1!A1:B5`
+   - `POST /api/integrations/google/sheets/append` `{ spreadsheetId, range, values }`
+   - `GET /api/integrations/google/calendar/next?max=10`
+   - `POST /api/integrations/google/calendar/create` `{ summary, startISO, endISO, description?, location? }`
+   - `GET /api/integrations/google/slides/get?presentationId=...`
+   - `GET /api/integrations/google/meet/spaces`
+   - `POST /api/integrations/google/meet/spaces`
+
+Smoke test (PowerShell):
+- `scripts/google_smoke_test.ps1` (optionally set `GOOGLE_SMOKE_DOC_ID`)
 
 Docs: Google Docs API and Drive API. citeturn0search0turn0search1
 

@@ -1683,7 +1683,7 @@ export default function Home() {
     }
 
     const connectSpecs = {
-      google: { method: "oauth", authorizeUrl: "/api/integrations/google/auth/start" },
+      google: { method: "oauth", authorizeUrl: "/api/integrations/google/connect" },
       amazon: { method: "oauth", authorizeUrl: "/api/integrations/amazon/auth/start" },
       walmart: { method: "oauth", authorizeUrl: "/api/integrations/walmart/auth/start" },
       fireflies: { method: "api_key", fields: [{ key: "FIREFLIES_API_KEY", label: "Fireflies API Key", type: "password", required: true }] },

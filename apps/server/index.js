@@ -15,12 +15,23 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { importLive2DZip } from "./avatar_import.js";
 import {
-  getGoogleAuthUrl,
+  connectGoogle,
   exchangeGoogleCode,
   createGoogleDoc,
   appendGoogleDoc,
   uploadDriveFile,
-  getGoogleAccessToken
+  getGoogleStatus,
+  disconnectGoogle,
+  listDriveFiles,
+  getGoogleDoc,
+  getSheetValues,
+  appendSheetValues,
+  listCalendarEvents,
+  createCalendarEvent,
+  getSlidesPresentation,
+  listMeetSpaces,
+  createMeetSpace,
+  fetchGoogleUserInfo
 } from "./integrations/google.js";
 import {
   fetchFirefliesTranscripts,
@@ -329,7 +340,6 @@ app.post("/chat", async (req, res) => {
 
         let docLink = "";
         try {
-          await getGoogleAccessToken();
           const doc = await createGoogleDoc(`Aika Notes - ${title}`, [
             `Title: ${title}`,
             `Date: ${transcript.dateString || ""}`,
@@ -1163,17 +1173,21 @@ app.post("/api/integrations/disconnect", (req, res) => {
   res.json({ ok: true, provider });
 });
 
-app.get("/api/integrations/google/auth/start", (_req, res) => {
+app.get("/api/integrations/google/connect", (req, res) => {
   try {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       return res.status(400).send("google_oauth_not_configured");
     }
-    const state = Math.random().toString(36).slice(2);
-    const url = getGoogleAuthUrl(state);
+    const preset = String(req.query.preset || "core");
+    const url = connectGoogle(preset);
     res.redirect(url);
   } catch (err) {
     res.status(500).send(err.message || "google_auth_failed");
   }
+});
+
+app.get("/api/integrations/google/auth/start", (req, res) => {
+  res.redirect(`/api/integrations/google/connect?preset=${encodeURIComponent(String(req.query.preset || "core"))}`);
 });
 
 app.get("/api/integrations/amazon/auth/start", (_req, res) => {
@@ -1193,8 +1207,9 @@ app.get("/api/integrations/walmart/auth/start", (_req, res) => {
 app.get("/api/integrations/google/callback", async (req, res) => {
   try {
     const code = req.query.code;
-    if (!code) return res.status(400).send("missing_code");
-    const token = await exchangeGoogleCode(String(code));
+    const state = req.query.state;
+    if (!code || !state) return res.status(400).send("missing_code_or_state");
+    const token = await exchangeGoogleCode(String(code), String(state));
     integrationsState.google_docs.connected = true;
     integrationsState.google_drive.connected = true;
     integrationsState.google_docs.connectedAt = new Date().toISOString();
@@ -1202,20 +1217,46 @@ app.get("/api/integrations/google/callback", async (req, res) => {
     // store token in persistent store
     await (async () => {
       const { setProvider } = await import("./integrations/store.js");
-      setProvider("google", { ...token, connectedAt: new Date().toISOString() });
+      const existing = getProvider("google") || {};
+      let email = null;
+      try {
+        const info = await fetchGoogleUserInfo(token.access_token);
+        email = info?.email || null;
+      } catch {
+        // ignore userinfo errors
+      }
+      setProvider("google", {
+        ...existing,
+        ...token,
+        refresh_token: token.refresh_token || existing.refresh_token,
+        scope: token.scope || existing.scope,
+        email: email || existing.email,
+        connectedAt: new Date().toISOString()
+      });
     })();
-    res.send("<html><body><h3>Google connected. You can close this tab.</h3></body></html>");
+    const uiBase = process.env.WEB_UI_URL || "http://localhost:3000";
+    res.redirect(`${uiBase}/?integration=google&status=success`);
   } catch (err) {
-    res.status(500).send(err.message || "google_auth_failed");
+    const uiBase = process.env.WEB_UI_URL || "http://localhost:3000";
+    res.redirect(`${uiBase}/?integration=google&status=error`);
   }
 });
 
 app.get("/api/integrations/google/status", async (_req, res) => {
   try {
-    const token = await getGoogleAccessToken();
-    res.json({ ok: true, connected: true, tokenPresent: Boolean(token) });
+    const status = getGoogleStatus();
+    res.json({ ok: status.connected, ...status });
   } catch (err) {
-    res.status(400).json({ ok: false, error: err.message || "google_not_connected" });
+    res.status(200).json({ ok: false, error: err.message || "google_not_connected" });
+  }
+});
+
+app.post("/api/integrations/google/disconnect", async (_req, res) => {
+  try {
+    const result = await disconnectGoogle();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_disconnect_failed" });
   }
 });
 
@@ -1250,6 +1291,114 @@ app.post("/api/integrations/google/drive/upload", async (req, res) => {
     res.json({ ok: true, file });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_drive_upload_failed" });
+  }
+});
+
+app.get("/api/integrations/google/drive/list", async (req, res) => {
+  try {
+    const limit = Number(req.query.limit || 20);
+    const data = await listDriveFiles("trashed=false", limit);
+    res.json({ files: data.files || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_drive_list_failed", detail: err.detail || null });
+  }
+});
+
+app.get("/api/integrations/google/docs/get", async (req, res) => {
+  try {
+    const docId = req.query.docId;
+    if (!docId) return res.status(400).json({ error: "docId_required" });
+    const doc = await getGoogleDoc(String(docId));
+    const title = doc?.title || "";
+    const text = (doc?.body?.content || [])
+      .map(c => c.paragraph?.elements?.map(e => e.textRun?.content || "").join("") || "")
+      .join("")
+      .slice(0, 2000);
+    res.json({ title, text });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_docs_get_failed", detail: err.detail || null });
+  }
+});
+
+app.get("/api/integrations/google/sheets/get", async (req, res) => {
+  try {
+    const spreadsheetId = req.query.spreadsheetId;
+    const range = req.query.range;
+    if (!spreadsheetId || !range) return res.status(400).json({ error: "spreadsheetId_and_range_required" });
+    const data = await getSheetValues(String(spreadsheetId), String(range));
+    res.json({ data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_sheets_get_failed", detail: err.detail || null });
+  }
+});
+
+app.post("/api/integrations/google/sheets/append", async (req, res) => {
+  try {
+    const { spreadsheetId, range, values } = req.body || {};
+    if (!spreadsheetId || !range || !Array.isArray(values)) {
+      return res.status(400).json({ error: "spreadsheetId_range_values_required" });
+    }
+    const data = await appendSheetValues(String(spreadsheetId), String(range), values);
+    res.json({ data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_sheets_append_failed", detail: err.detail || null });
+  }
+});
+
+app.get("/api/integrations/google/calendar/next", async (req, res) => {
+  try {
+    const max = Number(req.query.max || 10);
+    const data = await listCalendarEvents(max);
+    res.json({ events: data.items || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_calendar_list_failed", detail: err.detail || null });
+  }
+});
+
+app.post("/api/integrations/google/calendar/create", async (req, res) => {
+  try {
+    const { summary, startISO, endISO, description, location } = req.body || {};
+    if (!summary || !startISO || !endISO) return res.status(400).json({ error: "summary_start_end_required" });
+    const payload = {
+      summary,
+      start: { dateTime: startISO },
+      end: { dateTime: endISO }
+    };
+    if (description) payload.description = description;
+    if (location) payload.location = location;
+    const data = await createCalendarEvent(payload);
+    res.json({ event: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_calendar_create_failed", detail: err.detail || null });
+  }
+});
+
+app.get("/api/integrations/google/slides/get", async (req, res) => {
+  try {
+    const presentationId = req.query.presentationId;
+    if (!presentationId) return res.status(400).json({ error: "presentationId_required" });
+    const data = await getSlidesPresentation(String(presentationId));
+    res.json({ title: data.title, slideCount: (data.slides || []).length });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_slides_get_failed", detail: err.detail || null });
+  }
+});
+
+app.get("/api/integrations/google/meet/spaces", async (_req, res) => {
+  try {
+    const data = await listMeetSpaces();
+    res.json({ spaces: data.spaces || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_meet_list_failed", detail: err.detail || null });
+  }
+});
+
+app.post("/api/integrations/google/meet/spaces", async (req, res) => {
+  try {
+    const data = await createMeetSpace(req.body || {});
+    res.json({ space: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "google_meet_create_failed", detail: err.detail || null });
   }
 });
 

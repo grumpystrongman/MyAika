@@ -33,9 +33,8 @@ export class Live2DWebEngine implements AvatarEngine {
     if (!this.canvas.getContext("webgl")) throw new Error("webgl_not_supported");
 
     await ensureCubismCore();
-    const PIXI = await import("pixi.js");
-    (window as any).PIXI = PIXI;
-    const { Live2DModel } = await import("pixi-live2d-display/cubism4");
+    const w = window as any;
+    const { PIXI, Live2DModel } = await ensurePixiLive2D();
 
     this.app = new PIXI.Application({
       view: this.canvas,
@@ -167,4 +166,71 @@ async function ensureCubismCore() {
   if (!w.Live2DCubismCore) {
     throw new Error("live2d_core_missing");
   }
+}
+
+async function ensurePixiLive2D() {
+  const w = window as any;
+  if (!w.__aikaPixiPromise) {
+    w.__aikaPixiPromise = loadScriptOnce("/vendor/pixi.min.js", "PIXI");
+  }
+  await w.__aikaPixiPromise;
+  const PIXI = w.PIXI;
+  if (!PIXI) throw new Error("pixi_missing");
+  if (!w.__aikaPixiExtensionsPatched && PIXI?.extensions?.add) {
+    const origAdd = PIXI.extensions.add.bind(PIXI.extensions);
+    PIXI.extensions.add = (...args: any[]) => {
+      try {
+        return origAdd(...args);
+      } catch (err) {
+        const msg = String(err?.message || err || "");
+        if (msg.includes("already has a handler")) return;
+        throw err;
+      }
+    };
+    w.__aikaPixiExtensionsPatched = true;
+  }
+  if (!w.__aikaPixiRegisterPatched && PIXI?.Renderer?.registerPlugin) {
+    const origRegister = PIXI.Renderer.registerPlugin.bind(PIXI.Renderer);
+    PIXI.Renderer.registerPlugin = (name: string, ctor: any) => {
+      try {
+        return origRegister(name, ctor);
+      } catch (err) {
+        const msg = String(err?.message || err || "");
+        if (msg.includes("already has a handler") || msg.includes("already has a plugin")) return;
+        throw err;
+      }
+    };
+    w.__aikaPixiRegisterPatched = true;
+  }
+
+  if (!w.__aikaLive2DScriptPromise) {
+    w.__aikaLive2DScriptPromise = loadScriptOnce("/vendor/cubism4.min.js", "PIXI.live2d");
+  }
+  await w.__aikaLive2DScriptPromise;
+  const Live2DModel = w.PIXI?.live2d?.Live2DModel;
+  if (!Live2DModel) throw new Error("live2d_model_unavailable");
+  return { PIXI, Live2DModel };
+}
+
+function loadScriptOnce(src: string, globalName: string) {
+  const w = window as any;
+  if (globalName && resolveGlobal(globalName, w)) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const existing = Array.from(document.scripts).find(s => s.src.includes(src));
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error(`load_failed:${src}`)));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`load_failed:${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+function resolveGlobal(path: string, root: any) {
+  return path.split(".").reduce((acc, key) => (acc ? acc[key] : undefined), root);
 }

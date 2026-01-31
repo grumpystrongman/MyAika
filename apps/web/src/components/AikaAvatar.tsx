@@ -1,7 +1,6 @@
  "use client";
 import { useEffect, useRef, useState } from "react";
 import type { AvatarEngine, Mood } from "../avatar/AvatarEngine";
-import { Live2DWebEngine } from "../avatar/Live2DWebEngine";
 import { PngAvatarEngine } from "../avatar/PngAvatarEngine";
 
 type Props = {
@@ -27,6 +26,7 @@ export default function AikaAvatar({
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const pngRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<AvatarEngine | null>(null);
   const [engineType, setEngineType] = useState<"live2d" | "png">("png");
@@ -36,14 +36,14 @@ export default function AikaAvatar({
     let destroyed = false;
 
     async function initEngine() {
-      if (!hostRef.current || !canvasRef.current) return;
+      if (!hostRef.current) return;
       if (typeof window === "undefined") return;
       setLoadError("");
 
       const targetModel = modelUrl || "";
       const targetPng = fallbackPng || FALLBACK_PNG;
 
-      const canUseWebGL = !!canvasRef.current.getContext("webgl");
+      const canUseWebGL = !!canvasRef.current?.getContext("webgl");
       let useLive2D = false;
       if (canUseWebGL && targetModel) {
         try {
@@ -57,16 +57,8 @@ export default function AikaAvatar({
       if (destroyed) return;
 
       if (useLive2D) {
-        try {
-          const live = new Live2DWebEngine(canvasRef.current);
-          await live.load(targetModel);
-          engineRef.current = live;
-          setEngineType("live2d");
-          return;
-        } catch (err: any) {
-          setLoadError(err?.message || "live2d_load_failed");
-          // fall back to PNG
-        }
+        setEngineType("live2d");
+        return;
       }
 
       if (!pngRef.current) return;
@@ -86,11 +78,22 @@ export default function AikaAvatar({
 
   useEffect(() => {
     const engine = engineRef.current;
-    if (!engine) return;
-    engine.setMood(mood);
-    engine.setTalking(isTalking, talkIntensity);
-    engine.setListening(isListening);
-    engine.setIdle(true);
+    if (engine) {
+      engine.setMood(mood);
+      engine.setTalking(isTalking, talkIntensity);
+      engine.setListening(isListening);
+      engine.setIdle(true);
+      return;
+    }
+    if (engineType === "live2d" && iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({
+        type: "state",
+        mood,
+        isTalking,
+        talkIntensity,
+        isListening
+      }, "*");
+    }
   }, [mood, isTalking, talkIntensity, isListening]);
 
   useEffect(() => {
@@ -106,6 +109,16 @@ export default function AikaAvatar({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      if (ev?.data?.type === "live2d_error") {
+        setLoadError(ev.data.message || "live2d_load_failed");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   return (
     <div
       ref={hostRef}
@@ -118,15 +131,31 @@ export default function AikaAvatar({
         position: "relative"
       }}
     >
-      <canvas
-        ref={canvasRef}
-        style={{
-          width: "100%",
-          height: "100%",
-          display: engineType === "live2d" ? "block" : "none",
-          borderRadius: 20
-        }}
-      />
+      {engineType === "live2d" ? (
+        <iframe
+          ref={iframeRef}
+          title="Aika Live2D"
+          src={modelUrl ? `/live2d_iframe.html?model=${encodeURIComponent(modelUrl)}` : "/live2d_iframe.html"}
+          style={{
+            width: "100%",
+            height: "100%",
+            border: "none",
+            borderRadius: 20,
+            background: "transparent"
+          }}
+          allow="autoplay"
+        />
+      ) : (
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "block",
+            borderRadius: 20
+          }}
+        />
+      )}
       {engineType === "png" && (
         <div
           ref={pngRef}
