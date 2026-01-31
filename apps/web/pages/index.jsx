@@ -1845,26 +1845,15 @@ export default function Home() {
             Chat
           </button>
             <button
-              onClick={() => setActiveTab("integrations")}
+              onClick={() => setActiveTab("workbench")}
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "integrations" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "integrations" ? "#e6f0ff" : "white"
+                border: activeTab === "workbench" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "workbench" ? "#e6f0ff" : "white"
               }}
             >
-              Integrations
-            </button>
-            <button
-              onClick={() => setActiveTab("skills")}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: activeTab === "skills" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "skills" ? "#e6f0ff" : "white"
-              }}
-            >
-              Skills
+              Aika Tools
             </button>
             <button
               onClick={() => setActiveTab("tools")}
@@ -1878,17 +1867,6 @@ export default function Home() {
               Tools
             </button>
             <button
-              onClick={() => setActiveTab("workbench")}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: activeTab === "workbench" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "workbench" ? "#e6f0ff" : "white"
-              }}
-            >
-              Aika Tools
-            </button>
-            <button
               onClick={() => setActiveTab("features")}
               style={{
                 padding: "8px 12px",
@@ -1898,6 +1876,28 @@ export default function Home() {
               }}
             >
               Features
+            </button>
+            <button
+              onClick={() => setActiveTab("integrations")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "integrations" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "integrations" ? "#e6f0ff" : "white"
+              }}
+            >
+              Integrations (Legacy)
+            </button>
+            <button
+              onClick={() => setActiveTab("skills")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "skills" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "skills" ? "#e6f0ff" : "white"
+              }}
+            >
+              Skills (Legacy)
             </button>
             <button
               onClick={() => setActiveTab("debug")}
