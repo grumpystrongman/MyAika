@@ -77,3 +77,6 @@ RATE_LIMIT_PER_MIN=60
 - Outbound domain allowlists are enforced by policy.
 - Approval tokens are required for execution.
 
+
+## Features tab
+The web UI includes a Features tab that discovers MCP tools, groups them by service, and provides basic connect flows. Use the Refresh and Copy Diagnostics buttons for troubleshooting.

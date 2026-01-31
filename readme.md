@@ -279,3 +279,8 @@ Place Live2D exports in `apps/web/public/assets/aika/live2d/`.
 
 ## MCP-lite Tool Control Plane
 This repo includes an MCP-lite policy + approvals + audit layer for tools. See `docs/MCP_LITE.md` and run `node scripts/mcp_smoke_test.js`.
+
+## Features tab
+Use the Features tab in the web app to discover MCP tools and manage connections.
+
+See `docs/QA_CHECKLIST.md` for validation steps.

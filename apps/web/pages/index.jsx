@@ -197,6 +197,12 @@ export default function Home() {
   const [toolCallResult, setToolCallResult] = useState("");
   const [approvals, setApprovals] = useState([]);
   const [approvalsError, setApprovalsError] = useState("");
+  const [featuresServices, setFeaturesServices] = useState([]);
+  const [featuresSelected, setFeaturesSelected] = useState("");
+  const [featuresError, setFeaturesError] = useState("");
+  const [featuresLastDiscovery, setFeaturesLastDiscovery] = useState(null);
+  const [featuresDiagnostics, setFeaturesDiagnostics] = useState(null);
+  const [connectModal, setConnectModal] = useState(null);
   const [avatarModels, setAvatarModels] = useState([]);
   const [avatarModelId, setAvatarModelId] = useState("miku");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -1049,6 +1055,45 @@ export default function Home() {
     };
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab !== "features") return;
+    let cancelled = false;
+    async function loadFeatures(force = false) {
+      const now = Date.now();
+      if (!force && featuresLastDiscovery && now - featuresLastDiscovery < 60_000) return;
+      try {
+        setFeaturesError("");
+        const [toolsResp, integrationsResp] = await Promise.all([
+          fetch(`${SERVER_URL}/api/tools`),
+          fetch(`${SERVER_URL}/api/integrations`)
+        ]);
+        const toolsData = await toolsResp.json();
+        const integrationsData = await integrationsResp.json();
+        const services = normalizeMcpServices(
+          Array.isArray(toolsData.tools) ? toolsData.tools : [],
+          integrationsData.integrations || {}
+        );
+        if (!cancelled) {
+          setFeaturesServices(services);
+          setFeaturesSelected(prev => prev || services[0]?.id || "");
+          setFeaturesLastDiscovery(Date.now());
+          setFeaturesDiagnostics({
+            serverUrl: SERVER_URL,
+            toolCount: toolsData.tools?.length || 0,
+            serviceCount: services.length,
+            lastDiscovery: new Date().toISOString()
+          });
+        }
+      } catch (err) {
+        if (!cancelled) setFeaturesError(err?.message || "features_load_failed");
+      }
+    }
+    loadFeatures();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, featuresLastDiscovery]);
+
     useEffect(() => {
       async function loadConfig() {
         try {
@@ -1566,6 +1611,103 @@ export default function Home() {
     }
   }
 
+  function normalizeMcpServices(tools, integrationsState) {
+    const serviceMap = new Map();
+    const addService = (id, displayName, status = "unknown") => {
+      if (!serviceMap.has(id)) {
+        serviceMap.set(id, { id, displayName, status, tools: [], connectSpec: null, details: {} });
+      }
+      return serviceMap.get(id);
+    };
+
+    const inferService = (toolName) => {
+      const [prefix, rest] = String(toolName || "").split(".");
+      if (prefix === "messaging") {
+        if (rest?.toLowerCase().includes("slack")) return "slack";
+        if (rest?.toLowerCase().includes("telegram")) return "telegram";
+        if (rest?.toLowerCase().includes("discord")) return "discord";
+        return "messaging";
+      }
+      if (prefix === "integrations") {
+        if (rest?.toLowerCase().includes("plex")) return "plex";
+        if (rest?.toLowerCase().includes("fireflies")) return "fireflies";
+        return "integrations";
+      }
+      return prefix || "core";
+    };
+
+    for (const tool of tools) {
+      const serviceId = inferService(tool.name);
+      const svc = addService(serviceId, serviceId.charAt(0).toUpperCase() + serviceId.slice(1));
+      svc.tools.push(tool);
+    }
+
+    const connectSpecs = {
+      google: { method: "oauth", authorizeUrl: "/api/integrations/google/auth/start" },
+      amazon: { method: "oauth", authorizeUrl: "/api/integrations/amazon/auth/start" },
+      walmart: { method: "oauth", authorizeUrl: "/api/integrations/walmart/auth/start" },
+      fireflies: { method: "api_key", fields: [{ key: "FIREFLIES_API_KEY", label: "Fireflies API Key", type: "password", required: true }] },
+      slack: { method: "api_key", fields: [{ key: "SLACK_BOT_TOKEN", label: "Slack Bot Token", type: "password", required: true }] },
+      telegram: { method: "api_key", fields: [{ key: "TELEGRAM_BOT_TOKEN", label: "Telegram Bot Token", type: "password", required: true }] },
+      discord: { method: "api_key", fields: [{ key: "DISCORD_BOT_TOKEN", label: "Discord Bot Token", type: "password", required: true }] },
+      plex: { method: "api_key", fields: [{ key: "PLEX_TOKEN", label: "Plex Token", type: "password", required: true }] }
+    };
+
+    for (const [key, state] of Object.entries(integrationsState || {})) {
+      const svc = addService(key, key.charAt(0).toUpperCase() + key.slice(1), state.connected ? "connected" : "not_connected");
+      svc.details = { configured: state.configured, connectedAt: state.connectedAt };
+      svc.connectSpec = connectSpecs[key] || { method: "custom" };
+    }
+
+    for (const svc of serviceMap.values()) {
+      if (!svc.connectSpec) svc.connectSpec = connectSpecs[svc.id] || { method: "none" };
+      if (svc.status === "unknown" && svc.connectSpec.method === "none") {
+        svc.status = "connected";
+      }
+    }
+
+    return Array.from(serviceMap.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+
+  async function refreshFeatures() {
+    setFeaturesLastDiscovery(0);
+    setFeaturesError("");
+    setFeaturesServices([]);
+    setFeaturesSelected("");
+  }
+
+  async function openConnect(service) {
+    setConnectModal(service);
+  }
+
+  async function runOAuth(service) {
+    if (!service?.connectSpec?.authorizeUrl) return;
+    window.open(`${SERVER_URL}${service.connectSpec.authorizeUrl}`, "_blank", "width=520,height=680");
+  }
+
+  async function markConnected(serviceId, connected) {
+    const url = connected ? "/api/integrations/connect" : "/api/integrations/disconnect";
+    await fetch(`${SERVER_URL}${url}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: serviceId })
+    });
+    refreshFeatures();
+  }
+
+  async function copyDiagnostics() {
+    if (!featuresDiagnostics) return;
+    const payload = {
+      ...featuresDiagnostics,
+      services: featuresServices.map(s => ({
+        id: s.id,
+        status: s.status,
+        tools: s.tools.length
+      }))
+    };
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+  }
+
     return (
       <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
         <div style={{ position: "relative" }}>
@@ -1694,6 +1836,17 @@ export default function Home() {
               }}
             >
               Tools
+            </button>
+            <button
+              onClick={() => setActiveTab("features")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "features" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "features" ? "#e6f0ff" : "white"
+              }}
+            >
+              Features
             </button>
             <button
               onClick={() => setActiveTab("debug")}
@@ -2183,6 +2336,159 @@ export default function Home() {
               </div>
               {approvalsError && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{approvalsError}</div>}
             </div>
+          </div>
+        )}
+
+        {activeTab === "features" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                MCP Features
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={refreshFeatures} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Refresh
+                </button>
+                <button onClick={copyDiagnostics} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Copy Diagnostics
+                </button>
+              </div>
+            </div>
+
+            {featuresError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{featuresError}</div>}
+
+            <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1.3fr", gap: 12 }}>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Services</div>
+                {featuresServices.map(s => (
+                  <div
+                    key={s.id}
+                    onClick={() => setFeaturesSelected(s.id)}
+                    style={{
+                      border: s.id === featuresSelected ? "2px solid #2563eb" : "1px solid #e5e7eb",
+                      borderRadius: 10,
+                      padding: 8,
+                      marginBottom: 8,
+                      cursor: "pointer"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ fontWeight: 600 }}>{s.displayName}</div>
+                      <span style={{
+                        fontSize: 11,
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        background:
+                          s.status === "connected"
+                            ? "#dcfce7"
+                            : s.status === "error"
+                              ? "#fee2e2"
+                              : "#e5e7eb"
+                      }}>
+                        {s.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>{s.tools.length} tools</div>
+                    {s.connectSpec?.method !== "none" && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openConnect(s);
+                        }}
+                        style={{ marginTop: 6, padding: "4px 8px", borderRadius: 6 }}
+                      >
+                        {s.status === "connected" ? "Details" : "Connect"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {featuresServices.length === 0 && <div>No services discovered.</div>}
+              </div>
+
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Tools</div>
+                {featuresServices
+                  .find(s => s.id === featuresSelected)
+                  ?.tools.map(tool => (
+                    <div key={tool.name} style={{ borderBottom: "1px solid #f3f4f6", padding: "6px 0" }}>
+                      <div style={{ fontWeight: 600 }}>{tool.name}</div>
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>{tool.description}</div>
+                      <button
+                        onClick={() => {
+                          setToolCallName(tool.name);
+                          setToolCallParams("{}");
+                          setToolCallResult("");
+                          setActiveTab("tools");
+                        }}
+                        style={{ marginTop: 4, padding: "4px 8px", borderRadius: 6 }}
+                      >
+                        Try
+                      </button>
+                    </div>
+                  ))}
+                {featuresServices.find(s => s.id === featuresSelected)?.tools.length === 0 && (
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>No tools for this service.</div>
+                )}
+              </div>
+            </div>
+
+            {connectModal && (
+              <div style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(15,23,42,0.4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 50
+              }}>
+                <div style={{ width: 420, background: "white", borderRadius: 12, padding: 16 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                    Connect {connectModal.displayName}
+                  </div>
+                  {connectModal.connectSpec?.method === "oauth" && (
+                    <div style={{ fontSize: 12, color: "#374151" }}>
+                      OAuth flow will open a new window. Make sure your credentials are set in `.env`.
+                      <button
+                        onClick={() => runOAuth(connectModal)}
+                        style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+                      >
+                        Start OAuth
+                      </button>
+                    </div>
+                  )}
+                  {connectModal.connectSpec?.method === "api_key" && (
+                    <div style={{ fontSize: 12, color: "#374151" }}>
+                      Set the following env vars, then click “Mark Connected”:
+                      <ul>
+                        {connectModal.connectSpec.fields?.map(f => (
+                          <li key={f.key}><code>{f.key}</code></li>
+                        ))}
+                      </ul>
+                      <button
+                        onClick={() => markConnected(connectModal.id, true)}
+                        style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+                      >
+                        Mark Connected
+                      </button>
+                    </div>
+                  )}
+                  {connectModal.connectSpec?.method === "none" && (
+                    <div style={{ fontSize: 12, color: "#374151" }}>No connection required.</div>
+                  )}
+                  {connectModal.connectSpec?.method === "custom" && (
+                    <div style={{ fontSize: 12, color: "#374151" }}>
+                      Custom connection required. See docs/MCP_LITE.md.
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                    <button onClick={() => setConnectModal(null)} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
