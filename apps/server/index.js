@@ -31,6 +31,8 @@ import {
 import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
 import { getProvider } from "./integrations/store.js";
+import { registry, executor } from "./mcp/index.js";
+import { redactPhi } from "./mcp/policy.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -54,6 +56,25 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 startReminderScheduler();
+
+const rateMap = new Map();
+function rateLimit(req, res, next) {
+  const key = req.ip || "local";
+  const now = Date.now();
+  const windowMs = 60_000;
+  const limit = Number(process.env.RATE_LIMIT_PER_MIN || 60);
+  const entry = rateMap.get(key) || { ts: now, count: 0 };
+  if (now - entry.ts > windowMs) {
+    entry.ts = now;
+    entry.count = 0;
+  }
+  entry.count += 1;
+  rateMap.set(key, entry);
+  if (entry.count > limit) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  next();
+}
 
 const serverRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
 const webPublicDir = path.resolve(serverRoot, "..", "web", "public");
@@ -1018,6 +1039,83 @@ app.get("/api/status", async (_req, res) => {
   });
 });
 
+// MCP-lite Tool Control Plane
+app.get("/api/tools", rateLimit, (_req, res) => {
+  res.json({ tools: registry.list() });
+});
+
+app.get("/api/tools/:name", rateLimit, (req, res) => {
+  const tool = registry.get(req.params.name);
+  if (!tool) return res.status(404).json({ error: "tool_not_found" });
+  res.json({ tool: tool.def });
+});
+
+app.post("/api/tools/call", rateLimit, async (req, res) => {
+  const { name, params, context } = req.body || {};
+  if (!name) return res.status(400).json({ error: "tool_name_required" });
+  try {
+    const result = await executor.callTool({
+      name,
+      params,
+      context: {
+        ...(context || {}),
+        userId: context?.userId || req.headers["x-user-id"] || req.ip,
+        correlationId: context?.correlationId || req.headers["x-correlation-id"] || ""
+      }
+    });
+    res.json(result);
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "tool_call_failed" });
+  }
+});
+
+app.post("/api/approvals", rateLimit, async (req, res) => {
+  const { toolName, params, humanSummary, riskLevel, correlationId } = req.body || {};
+  if (!toolName) return res.status(400).json({ error: "tool_name_required" });
+  try {
+    const redactedParams = JSON.parse(redactPhi(JSON.stringify(params || {})) || "{}");
+    const request = {
+      toolName,
+      params: redactedParams,
+      humanSummary: humanSummary || `Request to run ${toolName}`,
+      riskLevel: riskLevel || "medium",
+      createdBy: req.headers["x-user-id"] || req.ip,
+      correlationId: correlationId || req.headers["x-correlation-id"] || ""
+    };
+    const { createApproval } = await import("./mcp/approvals.js");
+    const approval = createApproval(request);
+    res.json({ approval });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "approval_create_failed" });
+  }
+});
+
+app.post("/api/approvals/:id/approve", rateLimit, (req, res) => {
+  try {
+    const approved = executor.approve(req.params.id, req.headers["x-user-id"] || req.ip);
+    res.json({ approval: approved });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "approval_failed" });
+  }
+});
+
+app.post("/api/approvals/:id/execute", rateLimit, async (req, res) => {
+  try {
+    const { token, context } = req.body || {};
+    const result = await executor.execute(req.params.id, token, {
+      ...(context || {}),
+      userId: context?.userId || req.headers["x-user-id"] || req.ip
+    });
+    res.json(result);
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "approval_execute_failed" });
+  }
+});
+
 app.post("/api/integrations/connect", (req, res) => {
   const { provider } = req.body || {};
   if (!provider || !integrationsState[provider]) {
@@ -1210,36 +1308,27 @@ app.post("/api/integrations/discord/send", async (req, res) => {
   }
 });
 
-app.post("/api/agent/task", async (req, res) => {
+app.post("/api/agent/task", rateLimit, async (req, res) => {
   const { type, payload } = req.body || {};
+  const toolMap = {
+    plex_identity: "integrations.plexIdentity",
+    fireflies_transcripts: "integrations.firefliesTranscripts",
+    slack_post: "messaging.slackPost",
+    telegram_send: "messaging.telegramSend",
+    discord_send: "messaging.discordSend"
+  };
+  const toolName = toolMap[type];
+  if (!toolName) return res.status(400).json({ error: "unknown_task" });
   try {
-    switch (type) {
-      case "plex_identity": {
-        const xml = await fetchPlexIdentity();
-        return res.json({ ok: true, data: xml });
-      }
-      case "fireflies_transcripts": {
-        const limit = Number(payload?.limit || 5);
-        const data = await fetchFirefliesTranscripts(limit);
-        return res.json({ ok: true, data });
-      }
-      case "slack_post": {
-        const data = await sendSlackMessage(payload?.channel, payload?.text);
-        return res.json({ ok: true, data });
-      }
-      case "telegram_send": {
-        const data = await sendTelegramMessage(payload?.chatId, payload?.text);
-        return res.json({ ok: true, data });
-      }
-      case "discord_send": {
-        const data = await sendDiscordMessage(payload?.text);
-        return res.json({ ok: true, data });
-      }
-      default:
-        return res.status(400).json({ error: "unknown_task" });
-    }
+    const result = await executor.callTool({
+      name: toolName,
+      params: payload || {},
+      context: { userId: req.headers["x-user-id"] || req.ip, source: "agent", correlationId: req.headers["x-correlation-id"] || "" }
+    });
+    return res.json(result);
   } catch (err) {
-    return res.status(500).json({ error: err.message || "agent_task_failed" });
+    const status = err.status || 500;
+    return res.status(status).json({ error: err.message || "agent_task_failed" });
   }
 });
 

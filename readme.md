@@ -276,3 +276,6 @@ Keep the clip short and clean (3-10 seconds).
 ### Where is the Live2D model configured?
 `apps/web/src/components/AikaAvatar.tsx` uses `LIVE2D_MODEL_URL`.
 Place Live2D exports in `apps/web/public/assets/aika/live2d/`.
+
+## MCP-lite Tool Control Plane
+This repo includes an MCP-lite policy + approvals + audit layer for tools. See `docs/MCP_LITE.md` and run `node scripts/mcp_smoke_test.js`.
