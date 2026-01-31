@@ -190,6 +190,13 @@ export default function Home() {
   const [reminderAudioCue, setReminderAudioCue] = useState(true);
   const [reminderPush, setReminderPush] = useState(false);
   const [userText, setUserText] = useState("");
+  const [toolsList, setToolsList] = useState([]);
+  const [toolsError, setToolsError] = useState("");
+  const [toolCallName, setToolCallName] = useState("");
+  const [toolCallParams, setToolCallParams] = useState("{}");
+  const [toolCallResult, setToolCallResult] = useState("");
+  const [approvals, setApprovals] = useState([]);
+  const [approvalsError, setApprovalsError] = useState("");
   const [avatarModels, setAvatarModels] = useState([]);
   const [avatarModelId, setAvatarModelId] = useState("miku");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -1014,6 +1021,34 @@ export default function Home() {
     };
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab !== "tools") return;
+    let cancelled = false;
+    async function loadTools() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/tools`);
+        const data = await r.json();
+        if (!cancelled) setToolsList(Array.isArray(data.tools) ? data.tools : []);
+      } catch (err) {
+        if (!cancelled) setToolsError(err?.message || "tools_load_failed");
+      }
+    }
+    async function loadApprovals() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/approvals`);
+        const data = await r.json();
+        if (!cancelled) setApprovals(Array.isArray(data.approvals) ? data.approvals : []);
+      } catch (err) {
+        if (!cancelled) setApprovalsError(err?.message || "approvals_load_failed");
+      }
+    }
+    loadTools();
+    loadApprovals();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
     useEffect(() => {
       async function loadConfig() {
         try {
@@ -1481,6 +1516,56 @@ export default function Home() {
     document.body.removeChild(a);
   }
 
+  async function callTool() {
+    setToolCallResult("");
+    setToolsError("");
+    try {
+      const params = JSON.parse(toolCallParams || "{}");
+      const r = await fetch(`${SERVER_URL}/api/tools/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: toolCallName, params })
+      });
+      const data = await r.json();
+      setToolCallResult(JSON.stringify(data, null, 2));
+      const approvalsResp = await fetch(`${SERVER_URL}/api/approvals`);
+      const approvalsData = await approvalsResp.json();
+      setApprovals(Array.isArray(approvalsData.approvals) ? approvalsData.approvals : []);
+    } catch (err) {
+      setToolsError(err?.message || "tool_call_failed");
+    }
+  }
+
+  async function approveAction(id) {
+    setApprovalsError("");
+    try {
+      const r = await fetch(`${SERVER_URL}/api/approvals/${id}/approve`, { method: "POST" });
+      if (!r.ok) throw new Error("approval_failed");
+      const data = await r.json();
+      setApprovals(prev => prev.map(a => (a.id === id ? data.approval : a)));
+    } catch (err) {
+      setApprovalsError(err?.message || "approval_failed");
+    }
+  }
+
+  async function executeAction(id, token) {
+    setApprovalsError("");
+    try {
+      const r = await fetch(`${SERVER_URL}/api/approvals/${id}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      const data = await r.json();
+      setToolCallResult(JSON.stringify(data, null, 2));
+      const approvalsResp = await fetch(`${SERVER_URL}/api/approvals`);
+      const approvalsData = await approvalsResp.json();
+      setApprovals(Array.isArray(approvalsData.approvals) ? approvalsData.approvals : []);
+    } catch (err) {
+      setApprovalsError(err?.message || "approval_execute_failed");
+    }
+  }
+
     return (
       <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
         <div style={{ position: "relative" }}>
@@ -1600,6 +1685,17 @@ export default function Home() {
               Skills
             </button>
             <button
+              onClick={() => setActiveTab("tools")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "tools" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "tools" ? "#e6f0ff" : "white"
+              }}
+            >
+              Tools
+            </button>
+            <button
               onClick={() => setActiveTab("debug")}
               style={{
                 padding: "8px 12px",
@@ -1665,8 +1761,8 @@ export default function Home() {
             </div>
           )}
 
-          {activeTab === "skills" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {activeTab === "skills" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 Everyday Skills (local-first)
               </div>
@@ -2002,6 +2098,90 @@ export default function Home() {
                   [{l.time}] {l.level.toUpperCase()}: {l.text}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "tools" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              MCP-lite Tools
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Tool List</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                  {toolsList.length} tools available
+                </div>
+                <div style={{ maxHeight: 220, overflow: "auto", fontSize: 12 }}>
+                  {toolsList.map(t => (
+                    <div key={t.name} style={{ marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600 }}>{t.name}</div>
+                      <div style={{ color: "#6b7280" }}>{t.description}</div>
+                    </div>
+                  ))}
+                  {toolsList.length === 0 && <div>No tools loaded.</div>}
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Call Tool</div>
+                <label style={{ fontSize: 12, color: "#374151" }}>
+                  Tool name
+                  <input
+                    value={toolCallName}
+                    onChange={(e) => setToolCallName(e.target.value)}
+                    placeholder="meeting.summarize"
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+                <label style={{ fontSize: 12, color: "#374151", marginTop: 8 }}>
+                  Params (JSON)
+                  <textarea
+                    value={toolCallParams}
+                    onChange={(e) => setToolCallParams(e.target.value)}
+                    rows={6}
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 12 }}
+                  />
+                </label>
+                <button onClick={callTool} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+                  Call Tool
+                </button>
+                {toolsError && <div style={{ fontSize: 12, color: "#b91c1c" }}>{toolsError}</div>}
+                {toolCallResult && (
+                  <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+{toolCallResult}
+                  </pre>
+                )}
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Approvals</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Pending approvals: {approvals.filter(a => a.status === "pending").length}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
+                {approvals.map(a => (
+                  <div key={a.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 8 }}>
+                    <div style={{ fontWeight: 600 }}>{a.toolName}</div>
+                    <div>Status: {a.status}</div>
+                    <div>Summary: {a.humanSummary}</div>
+                    {a.status === "pending" && (
+                      <button onClick={() => approveAction(a.id)} style={{ marginTop: 6, padding: "4px 8px", borderRadius: 6 }}>
+                        Approve
+                      </button>
+                    )}
+                    {a.status === "approved" && (
+                      <button onClick={() => executeAction(a.id, a.token)} style={{ marginTop: 6, padding: "4px 8px", borderRadius: 6 }}>
+                        Execute
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {approvals.length === 0 && <div>No approvals yet.</div>}
+              </div>
+              {approvalsError && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{approvalsError}</div>}
             </div>
           </div>
         )}

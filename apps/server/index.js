@@ -33,6 +33,7 @@ import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./int
 import { getProvider } from "./integrations/store.js";
 import { registry, executor } from "./mcp/index.js";
 import { redactPhi } from "./mcp/policy.js";
+import { listApprovals } from "./mcp/approvals.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -1090,6 +1091,10 @@ app.post("/api/approvals", rateLimit, async (req, res) => {
     const status = err.status || 500;
     res.status(status).json({ error: err.message || "approval_create_failed" });
   }
+});
+
+app.get("/api/approvals", rateLimit, (_req, res) => {
+  res.json({ approvals: listApprovals() });
 });
 
 app.post("/api/approvals/:id/approve", rateLimit, (req, res) => {

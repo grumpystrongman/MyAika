@@ -64,6 +64,10 @@ export function getApproval(id) {
   return list.find(a => a.id === id) || null;
 }
 
+export function listApprovals() {
+  return loadApprovals();
+}
+
 export function markExecuted(id) {
   const list = loadApprovals();
   const item = list.find(a => a.id === id);
@@ -73,4 +77,3 @@ export function markExecuted(id) {
   saveApprovals(list);
   return item;
 }
-
