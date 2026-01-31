@@ -34,6 +34,8 @@ import { getProvider } from "./integrations/store.js";
 import { registry, executor } from "./mcp/index.js";
 import { redactPhi } from "./mcp/policy.js";
 import { listApprovals } from "./mcp/approvals.js";
+import { initDb } from "./storage/db.js";
+import { runMigrations } from "./storage/schema.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -57,6 +59,9 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 startReminderScheduler();
+
+initDb();
+runMigrations();
 
 const rateMap = new Map();
 function rateLimit(req, res, next) {
