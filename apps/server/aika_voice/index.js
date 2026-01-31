@@ -9,6 +9,31 @@ import { generateWithGptSovits } from "./engine_gptsovits.js";
 import { normalizeReferenceWav } from "./voice_ref.js";
 import { generateWithPiper, listPiperVoices } from "./engine_piper.js";
 
+function writeStubWav(filePath, sampleRate = 22050, durationSec = 0.2) {
+  const numSamples = Math.max(1, Math.floor(sampleRate * durationSec));
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * blockAlign;
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(numChannels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataSize, 40);
+  fs.writeFileSync(filePath, buffer);
+  return { sampleRate, duration: durationSec };
+}
+
 function getDefaultEngine() {
   if (process.env.TTS_ENGINE && process.env.TTS_ENGINE.trim()) {
     return process.env.TTS_ENGINE.trim().toLowerCase();
@@ -169,6 +194,9 @@ export async function generateAikaVoice({ text, settings = {} }) {
       voiceName: piperVoiceName,
       rate: normalized.rate
     });
+  } else if (selectedEngine === "stub") {
+    const meta = writeStubWav(outputPath);
+    engineMeta = { engine: "stub", sampleRate: meta.sampleRate, duration: meta.duration };
   } else {
     const err = new Error("unsupported_tts_engine");
     err.status = 400;

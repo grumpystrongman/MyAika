@@ -1,57 +1,57 @@
-import fs from "node:fs";
-import path from "node:path";
+import { createEmailDraft, getEmailDraft, updateEmailDraftStatus } from "../../storage/email.js";
+import { writeOutbox } from "../../storage/outbox.js";
 
-const repoRoot = path.resolve(process.cwd(), "..", "..");
-const draftsFile = path.join(repoRoot, "data", "email_drafts.json");
-
-function ensureDir() {
-  const dir = path.dirname(draftsFile);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-function loadDrafts() {
-  try {
-    if (!fs.existsSync(draftsFile)) return [];
-    return JSON.parse(fs.readFileSync(draftsFile, "utf-8"));
-  } catch {
-    return [];
+function toneTemplate(tone) {
+  if (tone === "direct") {
+    return "Direct and concise";
   }
+  if (tone === "executive") {
+    return "Executive summary style";
+  }
+  return "Friendly and helpful";
 }
 
-function saveDrafts(items) {
-  ensureDir();
-  fs.writeFileSync(draftsFile, JSON.stringify(items, null, 2));
+export function draftReply({ originalEmail, tone = "friendly", context = "", signOffName = "" }) {
+  if (!originalEmail?.subject || !originalEmail?.body) {
+    const err = new Error("original_email_required");
+    err.status = 400;
+    throw err;
+  }
+  const subject = originalEmail.subject.startsWith("Re:")
+    ? originalEmail.subject
+    : `Re: ${originalEmail.subject}`;
+  const signOff = signOffName ? `\n\nBest,\n${signOffName}` : "";
+  const body = `(${toneTemplate(tone)})\n\nThanks for the note. ${context ? `Context: ${context}. ` : ""}Here is my response:\n\n- Acknowledged your message\n- Proposed next step\n- Requested any missing details\n${signOff}`;
+  const draft = createEmailDraft({
+    originalFrom: originalEmail.from || "",
+    originalSubject: originalEmail.subject,
+    draftSubject: subject,
+    draftBody: body,
+    to: originalEmail.to || [],
+    cc: [],
+    bcc: []
+  });
+  return { id: draft.id, subject, body };
 }
 
-export function draftReply({ to, subject, body }) {
-  const drafts = loadDrafts();
-  const item = {
-    id: Date.now().toString(36),
-    to,
-    subject,
-    body,
-    status: "draft",
-    createdAt: new Date().toISOString()
-  };
-  drafts.push(item);
-  saveDrafts(drafts);
-  return item;
-}
-
-export function sendEmail({ draftId }) {
-  const drafts = loadDrafts();
-  const item = drafts.find(d => d.id === draftId);
-  if (!item) {
+export function sendEmail({ draftId, sendTo = null, cc = [], bcc = [] }) {
+  const draft = getEmailDraft(draftId);
+  if (!draft) {
     const err = new Error("draft_not_found");
     err.status = 404;
     throw err;
   }
-  item.status = "send_requested";
-  saveDrafts(drafts);
-  return {
-    status: "stubbed",
-    message: "Provider integration not configured. TODO: wire to email provider.",
-    draft: item
+  updateEmailDraftStatus(draftId, "sent");
+  const payload = {
+    type: "email",
+    draftId,
+    to: sendTo || JSON.parse(draft.to_json || "[]"),
+    cc,
+    bcc,
+    subject: draft.draft_subject,
+    body: draft.draft_body,
+    transport: "stub"
   };
+  const outbox = writeOutbox(payload);
+  return { status: "sent", transport: "stub", outboxId: outbox.id };
 }
-

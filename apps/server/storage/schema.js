@@ -127,6 +127,15 @@ const migrations = [
       updated_at TEXT
     );
     `
+  },
+  {
+    id: 2,
+    sql: `
+    ALTER TABLE approvals ADD COLUMN token TEXT;
+    ALTER TABLE approvals ADD COLUMN approved_by TEXT;
+    ALTER TABLE approvals ADD COLUMN approved_at TEXT;
+    ALTER TABLE approvals ADD COLUMN executed_at TEXT;
+    `
   }
 ];
 

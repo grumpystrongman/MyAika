@@ -170,3 +170,104 @@ export async function uploadDriveFile(name, content, mimeType = "text/plain") {
   }
   return await r.json();
 }
+
+async function listDriveFiles(q) {
+  const token = await getGoogleAccessToken();
+  const params = new URLSearchParams({
+    q,
+    fields: "files(id,name)",
+    spaces: "drive"
+  });
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "google_drive_list_failed");
+  }
+  return await r.json();
+}
+
+async function createDriveFolder(name, parentId) {
+  const token = await getGoogleAccessToken();
+  const body = {
+    name,
+    mimeType: "application/vnd.google-apps.folder"
+  };
+  if (parentId) body.parents = [parentId];
+  const r = await fetch("https://www.googleapis.com/drive/v3/files", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "google_drive_folder_create_failed");
+  }
+  return await r.json();
+}
+
+export async function ensureDriveFolderPath(pathParts) {
+  const stored = getProvider("google") || {};
+  const cache = stored.folder_cache || {};
+  let parentId = "root";
+  let currentPath = "";
+  for (const part of pathParts) {
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+    if (cache[currentPath]) {
+      parentId = cache[currentPath];
+      continue;
+    }
+    const q = `mimeType='application/vnd.google-apps.folder' and name='${part.replace(/'/g, "\\'")}' and '${parentId}' in parents and trashed=false`;
+    const list = await listDriveFiles(q);
+    const found = list.files?.[0];
+    if (found) {
+      cache[currentPath] = found.id;
+      parentId = found.id;
+      continue;
+    }
+    const created = await createDriveFolder(part, parentId === "root" ? null : parentId);
+    cache[currentPath] = created.id;
+    parentId = created.id;
+  }
+  setProvider("google", { ...stored, folder_cache: cache });
+  return parentId;
+}
+
+export async function createGoogleDocInFolder(title, content, folderId) {
+  const token = await getGoogleAccessToken();
+  const r = await fetch("https://docs.googleapis.com/v1/documents", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ title })
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "google_doc_create_failed");
+  }
+  const doc = await r.json();
+  if (folderId) {
+    const params = new URLSearchParams({
+      addParents: folderId,
+      removeParents: "root"
+    });
+    await fetch(`https://www.googleapis.com/drive/v3/files/${doc.documentId}?${params.toString()}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({})
+    });
+  }
+  if (content) {
+    await appendGoogleDoc(doc.documentId, content);
+  }
+  return doc;
+}

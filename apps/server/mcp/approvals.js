@@ -1,79 +1,100 @@
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
-
-const repoRoot = path.resolve(process.cwd(), "..", "..");
-const approvalsPath = path.join(repoRoot, "data", "approvals.json");
-
-function ensureDir() {
-  const dir = path.dirname(approvalsPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-function loadApprovals() {
-  ensureDir();
-  if (!fs.existsSync(approvalsPath)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(approvalsPath, "utf-8"));
-  } catch {
-    return [];
-  }
-}
-
-function saveApprovals(list) {
-  ensureDir();
-  fs.writeFileSync(approvalsPath, JSON.stringify(list, null, 2));
-}
-
-function makeId() {
-  return crypto.randomBytes(8).toString("hex");
-}
-
-function makeToken() {
-  return crypto.randomBytes(16).toString("hex");
-}
+import {
+  createApprovalRecord,
+  listApprovalsRecord,
+  getApprovalRecord,
+  approveApprovalRecord,
+  markApprovalExecuted,
+  denyApprovalRecord
+} from "../storage/approvals.js";
 
 export function createApproval(request) {
-  const list = loadApprovals();
-  const item = {
-    id: makeId(),
-    status: "pending",
-    createdAt: new Date().toISOString(),
-    ...request
+  const { toolName, params, humanSummary, riskLevel, createdBy, correlationId } = request;
+  const preview = humanSummary || `Request to run ${toolName}`;
+  const record = createApprovalRecord({
+    tool: toolName,
+    request: { params, riskLevel, createdBy, correlationId },
+    preview
+  });
+  return {
+    id: record.id,
+    status: record.status,
+    createdAt: record.createdAt,
+    toolName,
+    params,
+    humanSummary: preview,
+    riskLevel,
+    createdBy,
+    correlationId
   };
-  list.push(item);
-  saveApprovals(list);
-  return item;
 }
 
 export function approveApproval(id, approvedBy) {
-  const list = loadApprovals();
-  const item = list.find(a => a.id === id);
-  if (!item) return null;
-  if (item.status !== "pending") return item;
-  item.status = "approved";
-  item.approvedBy = approvedBy || "user";
-  item.approvedAt = new Date().toISOString();
-  item.token = makeToken();
-  saveApprovals(list);
-  return item;
+  const record = approveApprovalRecord(id, approvedBy || "user");
+  if (!record) return null;
+  return {
+    id: record.id,
+    status: record.status,
+    toolName: record.tool,
+    params: JSON.parse(record.request_json || "{}").params || {},
+    token: record.token,
+    approvedBy: record.approved_by,
+    approvedAt: record.approved_at
+  };
 }
 
 export function getApproval(id) {
-  const list = loadApprovals();
-  return list.find(a => a.id === id) || null;
+  const record = getApprovalRecord(id);
+  if (!record) return null;
+  const request = JSON.parse(record.request_json || "{}");
+  return {
+    id: record.id,
+    status: record.status,
+    toolName: record.tool,
+    params: request.params || {},
+    humanSummary: record.preview,
+    riskLevel: request.riskLevel,
+    createdBy: request.createdBy,
+    correlationId: request.correlationId,
+    token: record.token
+  };
 }
 
 export function listApprovals() {
-  return loadApprovals();
+  return listApprovalsRecord().map(record => {
+    const request = JSON.parse(record.request_json || "{}");
+    return {
+      id: record.id,
+      status: record.status,
+      toolName: record.tool,
+      params: request.params || {},
+      humanSummary: record.preview,
+      riskLevel: request.riskLevel,
+      createdBy: request.createdBy,
+      correlationId: request.correlationId,
+      token: record.token,
+      createdAt: record.created_at,
+      approvedAt: record.approved_at,
+      executedAt: record.executed_at
+    };
+  });
 }
 
 export function markExecuted(id) {
-  const list = loadApprovals();
-  const item = list.find(a => a.id === id);
-  if (!item) return null;
-  item.status = "executed";
-  item.executedAt = new Date().toISOString();
-  saveApprovals(list);
-  return item;
+  const record = markApprovalExecuted(id);
+  if (!record) return null;
+  return {
+    id: record.id,
+    status: record.status,
+    executedAt: record.executed_at
+  };
+}
+
+export function denyApproval(id, deniedBy) {
+  const record = denyApprovalRecord(id, deniedBy || "user");
+  if (!record) return null;
+  return {
+    id: record.id,
+    status: record.status,
+    resolvedAt: record.resolved_at
+  };
 }

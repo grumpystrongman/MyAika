@@ -1,6 +1,7 @@
 import { evaluatePolicy, redactPhi } from "./policy.js";
 import { writeAudit } from "./audit.js";
 import { createApproval, approveApproval, getApproval, markExecuted } from "./approvals.js";
+import { recordToolHistory } from "../storage/history.js";
 
 export class ToolExecutor {
   constructor(registry) {
@@ -26,6 +27,12 @@ export class ToolExecutor {
       });
       const err = new Error("policy_blocked");
       err.status = 403;
+      recordToolHistory({
+        tool: def.name,
+        request: params,
+        status: "blocked",
+        error: { message: "policy_blocked" }
+      });
       throw err;
     }
 
@@ -47,11 +54,28 @@ export class ToolExecutor {
         params: policy.redactedParams,
         approvalId: approval.id
       });
+      recordToolHistory({
+        tool: def.name,
+        request: params,
+        status: "pending_approval",
+        response: { approvalId: approval.id }
+      });
       return { status: "approval_required", approval };
     }
 
     const start = Date.now();
-    const result = await handler(params, context);
+    let result;
+    try {
+      result = await handler(params, context);
+    } catch (err) {
+      recordToolHistory({
+        tool: def.name,
+        request: params,
+        status: "error",
+        error: { message: err.message || "tool_failed" }
+      });
+      throw err;
+    }
     const summary = typeof result === "string" ? result.slice(0, 240) : "ok";
     writeAudit({
       type: "tool_call",
@@ -63,6 +87,12 @@ export class ToolExecutor {
       result: redactPhi(JSON.stringify(summary)),
       durationMs: Date.now() - start,
       status: "ok"
+    });
+    recordToolHistory({
+      tool: def.name,
+      request: params,
+      status: "ok",
+      response: result
     });
     return { status: "ok", data: result };
   }
@@ -121,7 +151,12 @@ export class ToolExecutor {
       params: policy.redactedParams,
       status: "ok"
     });
+    recordToolHistory({
+      tool: def.name,
+      request: approval.params,
+      status: "ok",
+      response: result
+    });
     return { status: "ok", data: result };
   }
 }
-

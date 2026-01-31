@@ -1,33 +1,36 @@
-import fs from "node:fs";
-import path from "node:path";
+import { createNoteRecord, searchNotes } from "../../storage/notes.js";
+import { createGoogleDocInFolder, ensureDriveFolderPath } from "../../integrations/google.js";
 
-const repoRoot = path.resolve(process.cwd(), "..", "..");
-const notesFile = path.join(repoRoot, "data", "skills", "notes.jsonl");
-
-function ensureDir() {
-  const dir = path.dirname(notesFile);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-export function createNote(text) {
-  ensureDir();
-  const item = { id: Date.now().toString(36), text: String(text || ""), createdAt: new Date().toISOString() };
-  fs.appendFileSync(notesFile, JSON.stringify(item) + "\n");
-  return item;
-}
-
-export function searchNotes(query, limit = 10) {
-  if (!fs.existsSync(notesFile)) return [];
-  const lines = fs.readFileSync(notesFile, "utf-8").split(/\r?\n/).filter(Boolean);
-  const parsed = lines.map(line => {
+export async function createNote({ title, body, tags = [], store = { googleDocs: true, localMarkdown: true } }) {
+  if (!title || !body) {
+    const err = new Error("title_body_required");
+    err.status = 400;
+    throw err;
+  }
+  let doc = null;
+  if (store?.googleDocs) {
     try {
-      return JSON.parse(line);
+      const folderId = await ensureDriveFolderPath(["Aika", "Notes"]);
+      doc = await createGoogleDocInFolder(title, `# ${title}\n\n${body}\n`, folderId);
     } catch {
-      return null;
+      doc = null;
     }
-  }).filter(Boolean);
-  if (!query) return parsed.slice(-limit).reverse();
-  const q = query.toLowerCase();
-  return parsed.filter(n => String(n.text || "").toLowerCase().includes(q)).slice(0, limit);
+  }
+  const record = createNoteRecord({
+    title,
+    body,
+    tags,
+    googleDocId: doc?.documentId || null,
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+  });
+  return {
+    id: record.id,
+    markdownPath: record.cachePath,
+    googleDocId: doc?.documentId || null,
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+  };
 }
 
+export function searchNotesTool({ query, tags = [], limit = 20 }) {
+  return searchNotes({ query, tags, limit });
+}

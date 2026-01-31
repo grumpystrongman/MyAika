@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Emotion } from "@myaika/shared";
 import AikaAvatar from "../src/components/AikaAvatar";
+import AikaToolsWorkbench from "../src/components/AikaToolsWorkbench";
 
 const SERVER_URL = "http://localhost:8790";
 
@@ -197,6 +198,8 @@ export default function Home() {
   const [toolCallResult, setToolCallResult] = useState("");
   const [approvals, setApprovals] = useState([]);
   const [approvalsError, setApprovalsError] = useState("");
+  const [toolHistory, setToolHistory] = useState([]);
+  const [toolHistoryError, setToolHistoryError] = useState("");
   const [featuresServices, setFeaturesServices] = useState([]);
   const [featuresSelected, setFeaturesSelected] = useState("");
   const [featuresError, setFeaturesError] = useState("");
@@ -1048,8 +1051,18 @@ export default function Home() {
         if (!cancelled) setApprovalsError(err?.message || "approvals_load_failed");
       }
     }
+    async function loadHistory() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/tools/history?limit=50`);
+        const data = await r.json();
+        if (!cancelled) setToolHistory(Array.isArray(data.history) ? data.history : []);
+      } catch (err) {
+        if (!cancelled) setToolHistoryError(err?.message || "history_load_failed");
+      }
+    }
     loadTools();
     loadApprovals();
+    loadHistory();
     return () => {
       cancelled = true;
     };
@@ -1573,11 +1586,23 @@ export default function Home() {
       });
       const data = await r.json();
       setToolCallResult(JSON.stringify(data, null, 2));
+      await refreshToolHistory();
       const approvalsResp = await fetch(`${SERVER_URL}/api/approvals`);
       const approvalsData = await approvalsResp.json();
       setApprovals(Array.isArray(approvalsData.approvals) ? approvalsData.approvals : []);
     } catch (err) {
       setToolsError(err?.message || "tool_call_failed");
+    }
+  }
+
+  async function refreshToolHistory() {
+    setToolHistoryError("");
+    try {
+      const r = await fetch(`${SERVER_URL}/api/tools/history?limit=50`);
+      const data = await r.json();
+      setToolHistory(Array.isArray(data.history) ? data.history : []);
+    } catch (err) {
+      setToolHistoryError(err?.message || "history_load_failed");
     }
   }
 
@@ -1588,8 +1613,22 @@ export default function Home() {
       if (!r.ok) throw new Error("approval_failed");
       const data = await r.json();
       setApprovals(prev => prev.map(a => (a.id === id ? data.approval : a)));
+      await refreshToolHistory();
     } catch (err) {
       setApprovalsError(err?.message || "approval_failed");
+    }
+  }
+
+  async function denyAction(id) {
+    setApprovalsError("");
+    try {
+      const r = await fetch(`${SERVER_URL}/api/approvals/${id}/deny`, { method: "POST" });
+      if (!r.ok) throw new Error("approval_deny_failed");
+      const data = await r.json();
+      setApprovals(prev => prev.map(a => (a.id === id ? data.approval : a)));
+      await refreshToolHistory();
+    } catch (err) {
+      setApprovalsError(err?.message || "approval_deny_failed");
     }
   }
 
@@ -1603,6 +1642,7 @@ export default function Home() {
       });
       const data = await r.json();
       setToolCallResult(JSON.stringify(data, null, 2));
+      await refreshToolHistory();
       const approvalsResp = await fetch(`${SERVER_URL}/api/approvals`);
       const approvalsData = await approvalsResp.json();
       setApprovals(Array.isArray(approvalsData.approvals) ? approvalsData.approvals : []);
@@ -1836,6 +1876,17 @@ export default function Home() {
               }}
             >
               Tools
+            </button>
+            <button
+              onClick={() => setActiveTab("workbench")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "workbench" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "workbench" ? "#e6f0ff" : "white"
+              }}
+            >
+              Aika Tools
             </button>
             <button
               onClick={() => setActiveTab("features")}
@@ -2321,9 +2372,14 @@ export default function Home() {
                     <div>Status: {a.status}</div>
                     <div>Summary: {a.humanSummary}</div>
                     {a.status === "pending" && (
-                      <button onClick={() => approveAction(a.id)} style={{ marginTop: 6, padding: "4px 8px", borderRadius: 6 }}>
-                        Approve
-                      </button>
+                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                        <button onClick={() => approveAction(a.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                          Approve
+                        </button>
+                        <button onClick={() => denyAction(a.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                          Deny
+                        </button>
+                      </div>
                     )}
                     {a.status === "approved" && (
                       <button onClick={() => executeAction(a.id, a.token)} style={{ marginTop: 6, padding: "4px 8px", borderRadius: 6 }}>
@@ -2336,7 +2392,34 @@ export default function Home() {
               </div>
               {approvalsError && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{approvalsError}</div>}
             </div>
+
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontWeight: 600 }}>Tool History</div>
+                <button onClick={refreshToolHistory} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                  Refresh
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280", margin: "6px 0" }}>
+                Last {toolHistory.length} calls
+              </div>
+              <div style={{ maxHeight: 220, overflow: "auto", fontSize: 11 }}>
+                {toolHistory.map(h => (
+                  <div key={h.id} style={{ borderBottom: "1px solid #f3f4f6", padding: "6px 0" }}>
+                    <div style={{ fontWeight: 600 }}>{h.tool}</div>
+                    <div>Status: {h.status}</div>
+                    <div style={{ color: "#6b7280" }}>{h.ts}</div>
+                  </div>
+                ))}
+                {toolHistory.length === 0 && <div>No history yet.</div>}
+              </div>
+              {toolHistoryError && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{toolHistoryError}</div>}
+            </div>
           </div>
+        )}
+
+        {activeTab === "workbench" && (
+          <AikaToolsWorkbench serverUrl={SERVER_URL} />
         )}
 
         {activeTab === "features" && (

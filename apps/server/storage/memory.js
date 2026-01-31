@@ -1,0 +1,100 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { getDb } from "./db.js";
+import { repoRoot, ensureDir, nowIso } from "./utils.js";
+import { encryptString, decryptString } from "./memory_crypto.js";
+
+const cacheDir = path.join(repoRoot, "data", "cache", "memory");
+
+function tierFolder(tier) {
+  if (tier === 1) return "Tier1";
+  if (tier === 2) return "Tier2";
+  return "Tier3";
+}
+
+export function createMemoryEntry({ tier, title, content, tags = [], containsPHI = false, googleDocId = null, googleDocUrl = null, contentCiphertext: providedCiphertext = null }) {
+  const db = getDb();
+  ensureDir(cacheDir);
+  const id = crypto.randomBytes(8).toString("hex");
+  const createdAt = nowIso();
+  const cachePath = path.join(cacheDir, `${id}.md`);
+  let contentPlaintext = null;
+  let contentCiphertext = null;
+  if (tier === 3) {
+    contentCiphertext = providedCiphertext || encryptString(content);
+    const md = `# ${title}\n\nTier: ${tier}\nTags: ${tags.join(", ")}\n\nCiphertext:\n${contentCiphertext}\n`;
+    fs.writeFileSync(cachePath, md);
+  } else {
+    contentPlaintext = String(content);
+    const md = `# ${title}\n\n${contentPlaintext}\n`;
+    fs.writeFileSync(cachePath, md);
+  }
+  db.prepare(
+    `INSERT INTO memory_entries (id, tier, title, tags_json, contains_phi, content_ciphertext, content_plaintext, google_doc_id, google_doc_url, cache_path, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    tier,
+    title,
+    JSON.stringify(tags),
+    containsPHI ? 1 : 0,
+    contentCiphertext,
+    contentPlaintext,
+    googleDocId,
+    googleDocUrl,
+    cachePath,
+    createdAt
+  );
+  if (tier !== 3) {
+    db.prepare(`INSERT INTO memory_fts (id, title, content, tags, tier) VALUES (?, ?, ?, ?, ?)`)
+      .run(id, title, contentPlaintext, tags.join(","), tier);
+  } else {
+    db.prepare(`INSERT INTO memory_fts (id, title, content, tags, tier) VALUES (?, ?, ?, ?, ?)`)
+      .run(id, title, "[ENCRYPTED]", tags.join(","), tier);
+  }
+  return { id, cachePath, tierFolder: tierFolder(tier), contentCiphertext };
+}
+
+export function searchMemory({ tier, query, tags = [], limit = 20 }) {
+  const db = getDb();
+  if (query) {
+    const rows = db.prepare(
+      `SELECT id, title, content, tags, tier FROM memory_fts WHERE memory_fts MATCH ? AND tier = ? LIMIT ?`
+    ).all(query, tier, limit);
+    let results = rows.map(r => ({
+      id: r.id,
+      title: r.title,
+      snippet: (r.content || "").slice(0, 240),
+      tags: r.tags ? r.tags.split(",") : [],
+      tier: r.tier
+    }));
+    if (tags?.length) {
+      results = results.filter(r => tags.some(t => r.tags.includes(t)));
+    }
+    return results;
+  }
+  const rows = db.prepare(
+    `SELECT id, title, tags_json, content_plaintext, content_ciphertext, google_doc_url, created_at FROM memory_entries WHERE tier = ? ORDER BY created_at DESC LIMIT ?`
+  ).all(tier, limit);
+  let list = rows.map(r => {
+    let snippet = r.content_plaintext || "";
+    if (tier === 3 && r.content_ciphertext) {
+      try {
+        snippet = decryptString(r.content_ciphertext);
+      } catch {
+        snippet = "[ENCRYPTED]";
+      }
+    }
+    return {
+      id: r.id,
+      title: r.title,
+      tags: r.tags_json ? JSON.parse(r.tags_json) : [],
+      snippet: snippet.slice(0, 240),
+      googleDocUrl: r.google_doc_url,
+      createdAt: r.created_at
+    };
+  });
+  if (tags?.length) list = list.filter(r => tags.some(t => r.tags.includes(t)));
+  return list;
+}

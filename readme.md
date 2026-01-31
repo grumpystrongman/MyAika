@@ -15,6 +15,7 @@ This repo uses GPT-SoVITS for voice and locks voice output to GPT-SoVITS only (n
 3) Start:
    - `npm run dev:server`
    - `npm run dev:web`
+   - or one-shot PowerShell: `powershell -ExecutionPolicy Bypass -File scripts/quick_start_aika.ps1`
 
 Open:
 - Web: http://localhost:3000
@@ -76,6 +77,36 @@ Use `POST /api/agent/task` with:
 - `slack_post` (payload `{ channel, text }`)
 - `telegram_send` (payload `{ chatId, text }`)
 - `discord_send` (payload `{ text }`)
+
+## Aika Tools v1 (MCP-lite)
+Tools are exposed through the MCP-lite Tool Control Plane and can be tested from:
+- **Tools** tab (raw tool runner + approvals + history)
+- **Aika Tools** tab (forms for meetings, notes, todos, calendar, email, spreadsheet, memory, integrations, messaging)
+- CLI: `node apps/server/cli/aika.js`
+
+Key endpoints:
+- `POST /api/tools/call` { name, params }
+- `GET /api/tools/history`
+- `GET /api/approvals`
+- `POST /api/approvals/:id/approve`
+- `POST /api/approvals/:id/deny`
+- `POST /api/approvals/:id/execute`
+
+Google Docs folder structure created on demand:
+- `/Aika/Meetings`
+- `/Aika/Notes`
+- `/Aika/MemoryVault/Tier1`
+- `/Aika/MemoryVault/Tier2`
+- `/Aika/MemoryVault/Tier3`
+- `/Aika/SpreadsheetPatches`
+
+Tier 3 memory is encrypted locally and stored in Google Docs as ciphertext.
+Local cache and search are powered by SQLite (FTS5).
+
+CLI examples:
+- `node apps/server/cli/aika.js run notes.create --json "{\"title\":\"Test\",\"body\":\"Hello\",\"tags\":[\"demo\"],\"store\":{\"googleDocs\":false,\"localMarkdown\":true}}"`
+- `node apps/server/cli/aika.js run meeting.summarize --json "{\"transcript\":\"Alice: kickoff\",\"store\":{\"googleDocs\":false,\"localMarkdown\":true}}"`
+- `node apps/server/cli/aika.js approvals list`
 
 ## Aika Voice (GPT-SoVITS only)
 Voice output defaults to Piper for fast local speech (configurable). Default voice is `en_GB-semaine-medium`. GPT-SoVITS is still supported for higher quality.

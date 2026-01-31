@@ -31,3 +31,4 @@ apps/web/public/assets/aika/live2d/*/
 !apps/web/public/assets/aika/live2d/placeholder.svg
 apps/web/public/assets/aika/live2d/live2dcubismcore.*
 data/live2d_import/
+secrets/

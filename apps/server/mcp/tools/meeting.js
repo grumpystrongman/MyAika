@@ -1,42 +1,82 @@
-import fs from "node:fs";
-import path from "node:path";
 import OpenAI from "openai";
+import { createMeetingRecord } from "../../storage/meetings.js";
+import { createGoogleDocInFolder, ensureDriveFolderPath } from "../../integrations/google.js";
 
-const repoRoot = path.resolve(process.cwd(), "..", "..");
-const meetingsDir = path.join(repoRoot, "data", "meetings");
-
-function ensureDir() {
-  if (!fs.existsSync(meetingsDir)) fs.mkdirSync(meetingsDir, { recursive: true });
+function summarizeDeterministic({ transcript, title, date, attendees = [] }) {
+  const lines = transcript.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const summaryLines = lines.slice(0, 6);
+  const decisions = lines.filter(l => /decid|agreed|decision/i.test(l)).slice(0, 6);
+  const actions = lines.filter(l => /action|todo|follow up|owner|assign/i.test(l)).slice(0, 8);
+  const risks = lines.filter(l => /risk|issue|concern|blocker/i.test(l)).slice(0, 6);
+  const quotes = lines.filter(l => /".+"|'.+'/.test(l)).slice(0, 3);
+  const md = [
+    `# ${title}`,
+    date ? `**Date:** ${date}` : null,
+    attendees.length ? `**Attendees:** ${attendees.join(", ")}` : null,
+    "\n## Summary",
+    summaryLines.length ? summaryLines.map(l => `- ${l}`).join("\n") : "- Summary unavailable",
+    "\n## Key Decisions",
+    decisions.length ? decisions.map(l => `- ${l}`).join("\n") : "- None noted",
+    "\n## Action Items",
+    actions.length ? actions.map(l => `- ${l}`).join("\n") : "- None noted",
+    "\n## Risks / Issues",
+    risks.length ? risks.map(l => `- ${l}`).join("\n") : "- None noted",
+    "\n## Notable Quotes",
+    quotes.length ? quotes.map(l => `> ${l}`).join("\n") : "-"
+  ].filter(Boolean).join("\n");
+  return md;
 }
 
-export async function summarizeMeeting({ title, transcript }) {
+async function summarizeWithOpenAI({ transcript, title, date, attendees = [] }) {
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const prompt = `Create a polished meeting summary in markdown with sections: Summary, Key Decisions, Action Items (with owners if possible), Risks/Issues, Notable Quotes.\n\nTitle: ${title}\nDate: ${date || ""}\nAttendees: ${attendees.join(", ")}\n\nTranscript:\n${transcript}`;
+  const resp = await client.responses.create({
+    model,
+    input: prompt,
+    max_output_tokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 260)
+  });
+  const output = resp.output_text?.trim() || "";
+  if (!output) return summarizeDeterministic({ transcript, title, date, attendees });
+  return `# ${title}\n${date ? `\n**Date:** ${date}` : ""}${attendees.length ? `\n**Attendees:** ${attendees.join(", ")}` : ""}\n\n${output}`;
+}
+
+export async function summarizeMeeting({ transcript, title, date, attendees = [], tags = [], store = { googleDocs: true, localMarkdown: true } }) {
   if (!transcript || typeof transcript !== "string") {
     const err = new Error("transcript_required");
     err.status = 400;
     throw err;
   }
-  ensureDir();
-  const meetingId = Date.now().toString(36);
-  const safeTitle = typeof title === "string" && title.trim() ? title.trim() : `Meeting ${meetingId}`;
+  const safeTitle = typeof title === "string" && title.trim() ? title.trim() : "Meeting Summary";
+  const summaryMarkdown = process.env.OPENAI_API_KEY
+    ? await summarizeWithOpenAI({ transcript, title: safeTitle, date, attendees })
+    : summarizeDeterministic({ transcript, title: safeTitle, date, attendees });
 
-  const prompt = `You are a meeting assistant. Create a polished, shareable meeting summary from the transcript.\n\nTranscript:\n${transcript}\n\nReturn markdown with sections: Summary, Decisions, Action Items (with owners if possible), Key Details, Next Steps. Keep concise.`;
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const resp = await client.responses.create({
-    model,
-    input: prompt,
-    max_output_tokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 220)
-  });
-  const output = resp.output_text?.trim() || "";
+  let doc = null;
+  if (store?.googleDocs) {
+    try {
+      const folderId = await ensureDriveFolderPath(["Aika", "Meetings"]);
+      doc = await createGoogleDocInFolder(safeTitle, summaryMarkdown, folderId);
+    } catch {
+      doc = null;
+    }
+  }
 
-  const payload = {
-    id: meetingId,
+  const record = createMeetingRecord({
     title: safeTitle,
-    createdAt: new Date().toISOString(),
-    summary: output
-  };
-  const filePath = path.join(meetingsDir, `${meetingId}.md`);
-  fs.writeFileSync(filePath, `# ${safeTitle}\n\n${output}\n`);
-  return { ...payload, docUrl: `/api/meetings/${meetingId}` };
-}
+    date: date || null,
+    attendees,
+    tags,
+    summaryMarkdown,
+    googleDocId: doc?.documentId || null,
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+  });
 
+  return {
+    id: record.id,
+    markdownPath: record.cachePath,
+    googleDocId: doc?.documentId || null,
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null,
+    summaryMarkdown
+  };
+}

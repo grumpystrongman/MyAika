@@ -1,5 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
+import { getDb } from "../storage/db.js";
+import { nowIso } from "../storage/utils.js";
 
 const repoRoot = path.resolve(process.cwd(), "..", "..");
 const defaultLog = path.join(repoRoot, "data", "audit.log");
@@ -24,5 +27,17 @@ export function writeAudit(event) {
   rotateIfNeeded(filePath);
   const line = JSON.stringify(event);
   fs.appendFileSync(filePath, line + "\n");
+  try {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO audit_log (id, ts, action, detail_json) VALUES (?, ?, ?, ?)`
+    ).run(
+      event.id || crypto.randomUUID?.() || String(Date.now()),
+      event.at || nowIso(),
+      event.type || "audit",
+      JSON.stringify(event)
+    );
+  } catch {
+    // Ignore DB insert failures to avoid blocking core flow.
+  }
 }
-

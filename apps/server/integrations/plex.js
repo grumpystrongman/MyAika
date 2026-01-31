@@ -1,6 +1,6 @@
-﻿export async function fetchPlexIdentity() {
+export async function fetchPlexIdentity(overrideToken) {
   const base = process.env.PLEX_URL || "";
-  const token = process.env.PLEX_TOKEN || "";
+  const token = overrideToken || process.env.PLEX_TOKEN || "";
   if (!base || !token) throw new Error("plex_not_configured");
   const url = `${base.replace(/\/$/, "")}/identity?X-Plex-Token=${encodeURIComponent(token)}`;
   const r = await fetch(url);

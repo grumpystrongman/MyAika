@@ -33,7 +33,8 @@ import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./int
 import { getProvider } from "./integrations/store.js";
 import { registry, executor } from "./mcp/index.js";
 import { redactPhi } from "./mcp/policy.js";
-import { listApprovals } from "./mcp/approvals.js";
+import { listApprovals, denyApproval } from "./mcp/approvals.js";
+import { listToolHistory } from "./storage/history.js";
 import { initDb } from "./storage/db.js";
 import { runMigrations } from "./storage/schema.js";
 import {
@@ -1056,6 +1057,11 @@ app.get("/api/tools/:name", rateLimit, (req, res) => {
   res.json({ tool: tool.def });
 });
 
+app.get("/api/tools/history", rateLimit, (req, res) => {
+  const limit = Number(req.query.limit || 50);
+  res.json({ history: listToolHistory(limit) });
+});
+
 app.post("/api/tools/call", rateLimit, async (req, res) => {
   const { name, params, context } = req.body || {};
   if (!name) return res.status(400).json({ error: "tool_name_required" });
@@ -1109,6 +1115,17 @@ app.post("/api/approvals/:id/approve", rateLimit, (req, res) => {
   } catch (err) {
     const status = err.status || 500;
     res.status(status).json({ error: err.message || "approval_failed" });
+  }
+});
+
+app.post("/api/approvals/:id/deny", rateLimit, (req, res) => {
+  try {
+    const denied = denyApproval(req.params.id, req.headers["x-user-id"] || req.ip);
+    if (!denied) return res.status(404).json({ error: "approval_not_found" });
+    res.json({ approval: denied });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "approval_deny_failed" });
   }
 });
 
