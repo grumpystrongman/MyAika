@@ -147,21 +147,24 @@ function heuristicSummary(transcript) {
   const decisions = pickLinesByKeywords(lines, ["decid", "agreed", "we will", "approved"]);
   const actions = pickLinesByKeywords(lines, ["action", "todo", "follow up", "next step", "assign"]);
   const risks = pickLinesByKeywords(lines, ["risk", "issue", "blocker", "concern"]);
+  const discussionPoints = lines.slice(0, 3).map((line, idx) => ({
+    topic: `Topic ${idx + 1}`,
+    summary: line
+  }));
   const nextSteps = actions.length ? actions : ["Review notes and confirm owners."];
-  const recommendations = [];
-  if (actions.length) {
-    recommendations.push("Schedule a follow-up to review action item progress.");
-  }
-  if (risks.length) {
-    recommendations.push("Hold a risk review to address outstanding blockers.");
-  }
+  const tldr = overview.length
+    ? overview.slice(0, 2).join(" ")
+    : "Meeting summary pending.";
   return {
+    tldr,
     overview,
     decisions,
     actionItems: actions,
     risks,
     nextSteps,
-    recommendations
+    discussionPoints,
+    attendees: [],
+    nextMeeting: { date: "", goal: "" }
   };
 }
 
@@ -171,13 +174,14 @@ export async function summarizeTranscript(transcript, title) {
     return toSummaryPayload(data, title);
   }
   const prompt = `You are a meeting copilot. Return strict JSON with fields:
-overview (array of bullets),
+tldr (string, 2-3 sentences),
+attendees (array of names if mentioned, else empty array),
 decisions (array of bullets),
 actionItems (array of objects {task, owner, due}),
-risks (array of bullets),
+discussionPoints (array of objects {topic, summary}),
 nextSteps (array of bullets),
-recommendations (array of bullets: suggestions like follow-up meetings or outreach).
-Keep outputs concise and grounded in the transcript.
+nextMeeting (object {date, goal} or empty strings).
+Keep outputs concise and grounded in the transcript. Use empty strings when unknown.
 
 Title: ${title}
 Transcript:
@@ -199,6 +203,8 @@ ${transcript}`;
 }
 
 function toSummaryPayload(data, title) {
+  const tldr = typeof data.tldr === "string" ? data.tldr.trim() : "";
+  const attendees = Array.isArray(data.attendees) ? data.attendees : [];
   const overview = Array.isArray(data.overview) ? data.overview : [];
   const decisions = Array.isArray(data.decisions) ? data.decisions : [];
   const risks = Array.isArray(data.risks) ? data.risks : [];
@@ -210,31 +216,61 @@ function toSummaryPayload(data, title) {
         due: item.due || ""
       }))
     : [];
-  const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
+  const discussionPoints = Array.isArray(data.discussionPoints)
+    ? data.discussionPoints.map(item => ({
+        topic: item.topic || "Discussion",
+        summary: item.summary || item.text || ""
+      }))
+    : [];
+  const nextMeeting = data.nextMeeting && typeof data.nextMeeting === "object"
+    ? {
+        date: data.nextMeeting.date || "",
+        goal: data.nextMeeting.goal || ""
+      }
+    : { date: "", goal: "" };
   const summaryMarkdown = [
     `# ${title}`,
     "",
-    "## Overview",
-    overview.length ? overview.map(o => `- ${o}`).join("\n") : "- Summary unavailable",
+    "## Meeting Title & Date",
+    `- ${title}`,
     "",
-    "## Decisions",
+    "## Attendees",
+    attendees.length ? attendees.map(a => `- ${a}`).join("\n") : "- Not captured",
+    "",
+    "## ⚡ TL;DR / Executive Summary",
+    tldr || (overview.length ? overview.slice(0, 2).join(" ") : "Summary unavailable"),
+    "",
+    "## 🎯 Key Decisions Made",
     decisions.length ? decisions.map(o => `- ${o}`).join("\n") : "- None captured",
     "",
-    "## Action Items",
+    "## ✅ Action Items",
     actionItems.length
       ? actionItems.map(a => `- ${a.task} (Owner: ${a.owner}${a.due ? `, Due: ${a.due}` : ""})`).join("\n")
       : "- None captured",
     "",
-    "## Risks",
-    risks.length ? risks.map(r => `- ${r}`).join("\n") : "- None captured",
+    "## 💡 Key Discussion Points/Insights",
+    discussionPoints.length
+      ? discussionPoints.map(p => `- ${p.topic}: ${p.summary}`).join("\n")
+      : "- Not captured",
     "",
-    "## Next Steps",
+    "## 📅 Next Steps/Follow-up",
     nextSteps.length ? nextSteps.map(n => `- ${n}`).join("\n") : "- Follow up and confirm owners.",
-    "",
-    "## Recommendations",
-    recommendations.length ? recommendations.map(r => `- ${r}`).join("\n") : "- No recommendations."
+    nextMeeting?.date || nextMeeting?.goal
+      ? `Next meeting: ${nextMeeting.date || "TBD"} — ${nextMeeting.goal || "TBD"}`
+      : ""
   ].join("\n");
-  return { overview, decisions, actionItems, risks, nextSteps, recommendations, summaryMarkdown };
+  return {
+    tldr,
+    attendees,
+    overview,
+    decisions,
+    actionItems,
+    risks,
+    nextSteps,
+    discussionPoints,
+    nextMeeting,
+    summaryMarkdown
+  };
 }
 
 export function extractEntities({ decisions = [], actionItems = [], risks = [], nextSteps = [] }) {

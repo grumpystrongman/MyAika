@@ -1113,6 +1113,10 @@ function buildMeetingNotesMarkdown(recording) {
   const risks = recording?.risks_json || summary.risks || [];
   const nextSteps = recording?.next_steps_json || summary.nextSteps || [];
   const overview = summary.overview || [];
+  const tldr = summary.tldr || "";
+  const attendees = summary.attendees || [];
+  const discussionPoints = summary.discussionPoints || [];
+  const nextMeeting = summary.nextMeeting || {};
   const transcriptText = buildTranscriptText(recording);
   return [
     `# ${title}`,
@@ -1124,8 +1128,11 @@ function buildMeetingNotesMarkdown(recording) {
     `- Workspace: ${recording?.workspace_id || "default"}`,
     `- Created by: ${recording?.created_by || "local"}`,
     "",
-    "## Summary",
-    overview.length ? overview.map(item => `- ${item}`).join("\n") : "- Summary pending.",
+    "## ⚡ TL;DR / Executive Summary",
+    tldr || (overview.length ? overview.slice(0, 2).join(" ") : "Summary pending."),
+    "",
+    "## Attendees",
+    attendees.length ? attendees.map(a => `- ${a}`).join("\n") : "- Not captured.",
     "",
     "## Decisions",
     decisions.length ? decisions.map(item => `- ${item}`).join("\n") : "- None captured.",
@@ -1143,8 +1150,16 @@ function buildMeetingNotesMarkdown(recording) {
     "## Risks",
     risks.length ? risks.map(item => `- ${item}`).join("\n") : "- None captured.",
     "",
-    "## Next Steps",
+    "## 💡 Key Discussion Points/Insights",
+    discussionPoints.length
+      ? discussionPoints.map(p => `- ${p.topic || "Discussion"}: ${p.summary || ""}`).join("\n")
+      : "- Not captured.",
+    "",
+    "## 📅 Next Steps/Follow-up",
     nextSteps.length ? nextSteps.map(item => `- ${item}`).join("\n") : "- Follow up to confirm next steps.",
+    nextMeeting?.date || nextMeeting?.goal
+      ? `Next meeting: ${nextMeeting.date || "TBD"} — ${nextMeeting.goal || "TBD"}`
+      : "",
     "",
     "## Transcript (Timestamped)",
     transcriptText || "Transcript not available yet."
@@ -1217,11 +1232,17 @@ app.post("/api/recordings/:id/stop", (req, res) => {
   if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
   const { durationSec } = req.body || {};
   const endedAt = new Date().toISOString();
-  updateRecording(recording.id, {
+  const audioPath = combineChunks(recording.id, recordingsDir);
+  const updates = {
     ended_at: endedAt,
     duration: durationSec ? Math.round(Number(durationSec)) : null,
     status: "processing"
-  });
+  };
+  if (audioPath) {
+    updates.storage_path = audioPath;
+    updates.storage_url = `/api/recordings/${recording.id}/audio`;
+  }
+  updateRecording(recording.id, updates);
   updateProcessingState(recording.id, { stage: "processing", endedAt });
   setTimeout(() => {
     processRecordingPipeline(recording.id, { createArtifacts: true }).catch(err => {
@@ -1229,7 +1250,7 @@ app.post("/api/recordings/:id/stop", (req, res) => {
       updateRecording(recording.id, { status: "failed" });
     });
   }, 100);
-  res.json({ ok: true, id: recording.id });
+  res.json({ ok: true, id: recording.id, audioUrl: updates.storage_url || null });
 });
 
 app.get("/api/recordings", (req, res) => {
@@ -1285,7 +1306,7 @@ app.get("/api/recordings/:id/audio", (req, res) => {
   if (!recording.storage_path || !fs.existsSync(recording.storage_path)) {
     return res.status(404).json({ error: "audio_not_found" });
   }
-  res.sendFile(recording.storage_path);
+  res.type("audio/webm").sendFile(recording.storage_path);
 });
 
 app.get("/api/recordings/:id/transcript", (req, res) => {

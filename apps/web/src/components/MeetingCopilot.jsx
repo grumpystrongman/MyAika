@@ -538,12 +538,29 @@ export default function MeetingCopilot({
                     Started: {selected.started_at ? new Date(selected.started_at).toLocaleString() : "unknown"}{" "}
                     | Ended: {selected.ended_at ? new Date(selected.ended_at).toLocaleString() : "unknown"}
                   </div>
+                  <div style={{ fontWeight: 600, marginTop: 10 }}>⚡ TL;DR / Executive Summary</div>
+                  <div style={{ fontSize: 13 }}>
+                    {selected.summary_json?.tldr || (selected.summary_json?.overview || []).slice(0, 2).join(" ") || "Summary pending."}
+                  </div>
+                  <div style={{ fontWeight: 600, marginTop: 10 }}>Attendees</div>
+                  <ul>{(selected.summary_json?.attendees || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
                   <div style={{ fontWeight: 600 }}>Overview</div>
                   <ul>{(selected.summary_json?.overview || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
                   <div style={{ fontWeight: 600 }}>Risks</div>
                   <ul>{(selected.summary_json?.risks || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  <div style={{ fontWeight: 600 }}>💡 Key Discussion Points/Insights</div>
+                  <ul>
+                    {(selected.summary_json?.discussionPoints || []).map((item, i) => (
+                      <li key={i}><b>{item.topic || "Discussion"}:</b> {item.summary}</li>
+                    ))}
+                  </ul>
                   <div style={{ fontWeight: 600 }}>Next Steps</div>
                   <ul>{(selected.summary_json?.nextSteps || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  {(selected.summary_json?.nextMeeting?.date || selected.summary_json?.nextMeeting?.goal) && (
+                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+                      Next meeting: {selected.summary_json?.nextMeeting?.date || "TBD"} — {selected.summary_json?.nextMeeting?.goal || "TBD"}
+                    </div>
+                  )}
                   {selected.summary_json?.recommendations?.length > 0 && (
                     <>
                       <div style={{ fontWeight: 600 }}>Recommendations</div>
