@@ -826,7 +826,7 @@ export default function Home() {
     r.onend = () => {
       console.log("[mic] recognition end");
       const elapsed = Date.now() - (lastMicStartRef.current || 0);
-      if (elapsed && elapsed < 600) {
+      if (elapsed && elapsed < 1500) {
         micFailCountRef.current += 1;
       } else {
         micFailCountRef.current = 0;
@@ -838,8 +838,9 @@ export default function Home() {
         silenceTimerRef.current = null;
       }
       stopLevelMeter();
-      if (micFailCountRef.current >= 2) {
+      if (micFailCountRef.current >= 1) {
         forceServerSttRef.current = true;
+        setMicStatus("Switching to server STT...");
         startServerStt();
         return;
       }
