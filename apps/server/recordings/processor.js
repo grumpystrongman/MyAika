@@ -154,10 +154,11 @@ export async function transcribeAudio(audioPath) {
   } catch (err) {
     console.error("Transcription failed:", err);
     return {
-      text: "Transcription failed. Check provider configuration.",
+      text: "",
       language: "en",
       provider: "error",
-      segments: buildSegmentsFromText("Transcription failed. Check provider configuration.")
+      error: "transcription_failed",
+      segments: []
     };
   }
 }

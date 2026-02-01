@@ -403,6 +403,24 @@ async function processRecordingPipeline(recordingId, opts = {}) {
     updateRecording(recordingId, { storage_path: audioPath, storage_url: `/api/recordings/${recordingId}/audio` });
   }
   const transcriptResult = await transcribeAudio(audioPath);
+  if (transcriptResult?.error) {
+    updateRecording(recordingId, {
+      status: "failed",
+      transcript_text: "",
+      transcript_json: JSON.stringify({
+        provider: transcriptResult.provider || "unknown",
+        error: transcriptResult.error,
+        segments: []
+      }),
+      diarization_json: JSON.stringify([])
+    });
+    updateProcessingState(recordingId, {
+      stage: "failed",
+      error: transcriptResult.error,
+      doneAt: new Date().toISOString()
+    });
+    return;
+  }
   updateRecording(recordingId, {
     transcript_text: transcriptResult.text,
     language: transcriptResult.language,
