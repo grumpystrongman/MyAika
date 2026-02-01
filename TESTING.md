@@ -32,6 +32,18 @@
    - Queue a Slack message (approval required)
    - Approve + Execute in Tools tab
 
+## Meeting Copilot checks (Recordings tab)
+1) Click **Start recording** (header or Recordings tab)
+2) Speak for 5-10 seconds, then click **Stop**
+3) Verify a new recording appears in the list with status **processing** then **ready**
+4) Open the recording and verify:
+   - Transcript tab shows text (or mock text if no provider key)
+   - Summary tab shows overview/decisions/tasks/risks/next steps
+   - Tasks tab allows edit + Save
+5) Ask this meeting: enter a question and verify a response
+6) Ask across meetings: enter a cross-meeting question and verify a response
+7) Actions tab: click **Draft recap email** or **Create recap doc** and verify output
+
 ## CLI smoke checks
 Run from repo root:
 - `node apps/server/cli/aika.js run notes.create --json "{\"title\":\"Test\",\"body\":\"Hello\",\"tags\":[\"demo\"],\"store\":{\"googleDocs\":false,\"localMarkdown\":true}}"`

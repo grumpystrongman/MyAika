@@ -27,6 +27,41 @@ Default UI behavior:
 - Integrations are available under the "Integrations" tab.
 - Skills are available under the "Skills" tab.
 
+## Meeting Copilot (Recordings)
+Meeting Copilot adds a one-click recorder, background transcription/summaries, and a recordings library.
+
+UI:
+- Use the **Start recording** button in the header or the **Recordings** tab.
+- A recorder popup shows live waveform, elapsed time, and Pause/Resume/Stop.
+- Voice commands are supported if you enable “Listening for voice commands” (say: “hey Aika, start recording”, “pause recording”, “resume recording”, “stop recording”).
+
+Backend endpoints:
+- `POST /api/recordings/start` `{ title?, redactionEnabled?, retentionDays? }`
+- `POST /api/recordings/:id/chunk` (multipart form-data, `chunk` file, `seq` query param)
+- `POST /api/recordings/:id/pause`
+- `POST /api/recordings/:id/resume`
+- `POST /api/recordings/:id/stop` `{ durationSec? }`
+- `GET /api/recordings?status=&q=&limit=`
+- `GET /api/recordings/:id`
+- `GET /api/recordings/:id/audio`
+- `POST /api/recordings/:id/ask` `{ question }`
+- `POST /api/memory/ask` `{ question }`
+- `POST /api/recordings/:id/actions` `{ actionType, input? }`
+- `POST /api/recordings/:id/tasks` `{ tasks: [] }`
+
+Retention:
+- Set `RECORDING_RETENTION_DAYS` in `apps/server/.env` (default 30).
+
+Transcription:
+- If `OPENAI_API_KEY` is set, audio transcription uses `OPENAI_TRANSCRIBE_MODEL` (default: `whisper-1`).
+- Without an API key, the pipeline runs in mock mode so the UI remains usable.
+
+## Appearance (Themes + Backgrounds)
+- Open **Settings** in the Chat tab to select a theme (Light, Dracula, One Dark, Nord, Catppuccin).
+- Upload an app background image (stored locally in browser storage).
+- Choose an **Avatar background** (animated GIFs included under `apps/web/public/assets/aika/backgrounds/`).
+- Credits for bundled backgrounds live in `docs/AVATAR_BACKGROUNDS.md`.
+
 ## Integrations (beta)
 The Integrations tab lets you connect external services so Aika can:
 - Post and respond on social channels (Facebook/Instagram)

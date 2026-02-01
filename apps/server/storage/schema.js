@@ -136,6 +136,67 @@ const migrations = [
     ALTER TABLE approvals ADD COLUMN approved_at TEXT;
     ALTER TABLE approvals ADD COLUMN executed_at TEXT;
     `
+  },
+  {
+    id: 3,
+    sql: `
+    CREATE TABLE IF NOT EXISTS recordings (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      created_by TEXT,
+      title TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      duration INTEGER,
+      status TEXT,
+      storage_url TEXT,
+      storage_path TEXT,
+      transcript_text TEXT,
+      transcript_json TEXT,
+      language TEXT,
+      diarization_json TEXT,
+      summary_json TEXT,
+      decisions_json TEXT,
+      tasks_json TEXT,
+      risks_json TEXT,
+      next_steps_json TEXT,
+      artifacts_json TEXT,
+      redaction_enabled INTEGER,
+      retention_expires_at TEXT,
+      processing_json TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS audio_chunks (
+      id TEXT PRIMARY KEY,
+      recording_id TEXT,
+      seq INTEGER,
+      storage_path TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_entities (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      recording_id TEXT,
+      type TEXT,
+      value TEXT,
+      normalized_value TEXT,
+      metadata_json TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_actions (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      recording_id TEXT,
+      requested_by TEXT,
+      action_type TEXT,
+      input_json TEXT,
+      output_json TEXT,
+      status TEXT,
+      created_at TEXT
+    );
+    `
   }
 ];
 

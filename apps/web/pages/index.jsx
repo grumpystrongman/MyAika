@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Emotion } from "@myaika/shared";
 import AikaAvatar from "../src/components/AikaAvatar";
 import AikaToolsWorkbench from "../src/components/AikaToolsWorkbench";
+import MeetingCopilot from "../src/components/MeetingCopilot";
 
 const SERVER_URL = "http://localhost:8790";
 
@@ -26,6 +27,82 @@ const THINKING_CUES = [
   "Give me a blink.",
   "Thinking, thinking.",
   "Let me get this right."
+];
+
+const THEMES = [
+  {
+    id: "light",
+    label: "Light",
+    vars: {
+      "--app-bg": "#f4f6fb",
+      "--panel-bg": "#ffffff",
+      "--panel-border": "#e5e7eb",
+      "--text-primary": "#111827",
+      "--text-muted": "#6b7280",
+      "--accent": "#2563eb",
+      "--button-bg": "#f3f4f6"
+    }
+  },
+  {
+    id: "dracula",
+    label: "Dracula",
+    vars: {
+      "--app-bg": "#0f1117",
+      "--panel-bg": "#1b1f2a",
+      "--panel-border": "#2b3140",
+      "--text-primary": "#f8f8f2",
+      "--text-muted": "#b0b8d3",
+      "--accent": "#bd93f9",
+      "--button-bg": "#2c3142"
+    }
+  },
+  {
+    id: "one-dark",
+    label: "One Dark",
+    vars: {
+      "--app-bg": "#0f141b",
+      "--panel-bg": "#1a212b",
+      "--panel-border": "#2b3442",
+      "--text-primary": "#e6edf7",
+      "--text-muted": "#9aa7bd",
+      "--accent": "#61afef",
+      "--button-bg": "#2b3442"
+    }
+  },
+  {
+    id: "nord",
+    label: "Nord",
+    vars: {
+      "--app-bg": "#2e3440",
+      "--panel-bg": "#3b4252",
+      "--panel-border": "#4c566a",
+      "--text-primary": "#eceff4",
+      "--text-muted": "#cbd5e1",
+      "--accent": "#88c0d0",
+      "--button-bg": "#434c5e"
+    }
+  },
+  {
+    id: "catppuccin-mocha",
+    label: "Catppuccin Mocha",
+    vars: {
+      "--app-bg": "#1e1e2e",
+      "--panel-bg": "#24273a",
+      "--panel-border": "#363a4f",
+      "--text-primary": "#f4f4f6",
+      "--text-muted": "#b8c0e0",
+      "--accent": "#c6a0f6",
+      "--button-bg": "#303446"
+    }
+  }
+];
+
+const AVATAR_BACKGROUNDS = [
+  { id: "none", label: "None", src: "" },
+  { id: "heaven", label: "Heaven (clouds)", src: "/assets/aika/backgrounds/heaven.gif" },
+  { id: "hell", label: "Hell (fire)", src: "/assets/aika/backgrounds/hell.gif" },
+  { id: "office", label: "Office", src: "/assets/aika/backgrounds/office.gif" },
+  { id: "gamer", label: "Gamer (neon)", src: "/assets/aika/backgrounds/gamer.gif" }
 ];
 
 function pickThinkingCue() {
@@ -214,6 +291,7 @@ export default function Home() {
   const [avatarImportNotice, setAvatarImportNotice] = useState("");
   const [avatarCoreInfo, setAvatarCoreInfo] = useState({ coreJs: false, coreWasm: false });
   const [avatarCoreError, setAvatarCoreError] = useState("");
+  const meetingCopilotRef = useRef({ start: null, stop: null });
   const meetingRecRef = useRef(null);
   const [meetingRecording, setMeetingRecording] = useState(false);
   const [meetingTranscript, setMeetingTranscript] = useState("");
@@ -239,6 +317,10 @@ export default function Home() {
   const [fastReplies, setFastReplies] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [themeId, setThemeId] = useState("light");
+  const [appBackground, setAppBackground] = useState("");
+  const [avatarBackground, setAvatarBackground] = useState("none");
+  const [meetingCommandListening, setMeetingCommandListening] = useState(false);
   const [ttsEngineOnline, setTtsEngineOnline] = useState(null);
   const [voicePromptText, setVoicePromptText] = useState("");
   const [ttsStatus, setTtsStatus] = useState("idle");
@@ -258,6 +340,79 @@ export default function Home() {
     engine: "piper",
     voice: { reference_wav_path: "riko_sample.wav", name: "en_GB-semaine-medium", prompt_text: "" }
   });
+  const [meetingLock, setMeetingLock] = useState(false);
+  const previousChatState = useRef(null);
+
+  function registerMeetingCopilotControls(controls) {
+    meetingCopilotRef.current = controls || {};
+  }
+
+  function setMeetingRecordingActive(active) {
+    setMeetingLock(Boolean(active));
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedTheme = window.localStorage.getItem("aika_theme");
+    const savedBg = window.localStorage.getItem("aika_app_bg") || "";
+    const savedAvatarBg = window.localStorage.getItem("aika_avatar_bg") || "none";
+    const savedMeetingCommands = window.localStorage.getItem("aika_meeting_commands") || "";
+    if (savedTheme) setThemeId(savedTheme);
+    if (savedBg) setAppBackground(savedBg);
+    if (savedAvatarBg) setAvatarBackground(savedAvatarBg);
+    if (savedMeetingCommands) setMeetingCommandListening(savedMeetingCommands === "true");
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const theme = THEMES.find(t => t.id === themeId) || THEMES[0];
+    Object.entries(theme.vars).forEach(([key, value]) => {
+      document.documentElement.style.setProperty(key, value);
+    });
+    document.body.style.backgroundColor = theme.vars["--app-bg"];
+    if (appBackground) {
+      document.body.style.backgroundImage = `url(${appBackground})`;
+      document.body.style.backgroundSize = "cover";
+      document.body.style.backgroundPosition = "center";
+      document.body.style.backgroundAttachment = "fixed";
+    } else {
+      document.body.style.backgroundImage = "none";
+    }
+    window.localStorage.setItem("aika_theme", theme.id);
+    if (appBackground) {
+      window.localStorage.setItem("aika_app_bg", appBackground);
+    } else {
+      window.localStorage.removeItem("aika_app_bg");
+    }
+    window.localStorage.setItem("aika_avatar_bg", avatarBackground);
+  }, [themeId, appBackground, avatarBackground]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("aika_meeting_commands", String(meetingCommandListening));
+  }, [meetingCommandListening]);
+
+  useEffect(() => {
+    const shouldMute = activeTab === "recordings" || meetingLock;
+    if (shouldMute) {
+      if (!previousChatState.current) {
+        previousChatState.current = { voiceMode, autoSpeak, micEnabled, textOnly };
+      }
+      setVoiceMode(false);
+      setAutoSpeak(false);
+      setMicEnabled(false);
+      setTextOnly(true);
+      stopMic();
+      stopAudio();
+    } else if (previousChatState.current) {
+      const prev = previousChatState.current;
+      setVoiceMode(prev.voiceMode);
+      setAutoSpeak(prev.autoSpeak);
+      setMicEnabled(prev.micEnabled);
+      setTextOnly(prev.textOnly);
+      previousChatState.current = null;
+    }
+  }, [activeTab, meetingLock]);
   const [availableVoices, setAvailableVoices] = useState([]);
   const recognizerRef = useRef(null);
   const audioRef = useRef(null);
@@ -279,6 +434,10 @@ export default function Home() {
   const ttsActiveRef = useRef(false);
 
   async function send(overrideText) {
+    if (activeTab === "recordings" || meetingLock) {
+      setChatError("chat_paused_recording");
+      return;
+    }
     const raw = typeof overrideText === "string" ? overrideText : userText;
     const text = raw.trim();
     if (!text) return;
@@ -1748,8 +1907,24 @@ export default function Home() {
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
   }
 
+  function handleBackgroundUpload(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      setAppBackground(result);
+    };
+    reader.readAsDataURL(file);
+  }
+
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", height: "100vh" }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1.15fr 0.85fr",
+        height: "100vh",
+        background: "var(--app-bg)",
+        color: "var(--text-primary)"
+      }}>
         <div style={{ position: "relative" }}>
           {skillToasts.length > 0 && (
             <div style={{
@@ -1792,10 +1967,19 @@ export default function Home() {
             isListening={micState === "listening"}
             modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
             fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
+            backgroundSrc={AVATAR_BACKGROUNDS.find(bg => bg.id === avatarBackground)?.src}
           />
       </div>
 
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        background: "var(--panel-bg)",
+        color: "var(--text-primary)",
+        borderLeft: "1px solid var(--panel-border)"
+      }}>
         {!audioUnlocked && (
           <div style={{
             border: "1px solid #f59e0b",
@@ -1832,7 +2016,7 @@ export default function Home() {
             </button>
           </div>
         )}
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={() => setActiveTab("chat")}
             style={{
@@ -1843,6 +2027,17 @@ export default function Home() {
             }}
           >
             Chat
+          </button>
+          <button
+            onClick={() => setActiveTab("recordings")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: activeTab === "recordings" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+              background: activeTab === "recordings" ? "#e6f0ff" : "white"
+            }}
+          >
+            Recordings
           </button>
             <button
               onClick={() => setActiveTab("workbench")}
@@ -2422,6 +2617,16 @@ export default function Home() {
           <AikaToolsWorkbench serverUrl={SERVER_URL} />
         )}
 
+        <MeetingCopilot
+          serverUrl={SERVER_URL}
+          registerControls={registerMeetingCopilotControls}
+          onActivateTab={() => setActiveTab("recordings")}
+          onRecordingStateChange={setMeetingRecordingActive}
+          visible={activeTab === "recordings"}
+          commandListening={meetingCommandListening}
+          onCommandListeningChange={setMeetingCommandListening}
+        />
+
         {activeTab === "features" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -2618,7 +2823,12 @@ export default function Home() {
         )}
 
         {activeTab === "chat" && (
-        <div style={{ flex: 1, overflow: "auto", border: "1px solid #ddd", borderRadius: 14, padding: 12, background: "white" }}>
+        <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--panel-border)", borderRadius: 14, padding: 12, background: "var(--panel-bg)", color: "var(--text-primary)" }}>
+          {meetingLock && (
+            <div style={{ fontSize: 12, marginBottom: 10, color: "#b45309" }}>
+              Recording in progress. Chat is paused until the meeting recording finishes.
+            </div>
+          )}
           {log.map((m, i) => (
             <div key={i} style={{ marginBottom: 10 }}>
               <b>{m.role === "user" ? "You" : "Aika"}:</b> {m.text}
@@ -2634,8 +2844,9 @@ export default function Home() {
             value={userText}
             onChange={(e) => setUserText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Type your message..."
-            style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px solid #ccc" }}
+            placeholder={meetingLock ? "Recording in progress..." : "Type your message..."}
+            disabled={meetingLock}
+            style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px solid #ccc", background: meetingLock ? "#e5e7eb" : "white" }}
           />
           <div style={{
             width: 10,
@@ -2678,6 +2889,7 @@ export default function Home() {
           </div>
           <button
             onClick={toggleMic}
+            disabled={meetingLock}
             style={{
               padding: "12px 16px",
               borderRadius: 12,
@@ -2688,7 +2900,7 @@ export default function Home() {
           >
             {micEnabled ? "Mic On" : "Mic Off"}
           </button>
-          <button onClick={() => send()} style={{ padding: "12px 16px", borderRadius: 12 }}>
+          <button onClick={() => send()} disabled={meetingLock} style={{ padding: "12px 16px", borderRadius: 12 }}>
             Send
           </button>
           <button
@@ -2707,11 +2919,11 @@ export default function Home() {
             gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
             gap: 8,
             padding: 10,
-            border: "1px solid #e5e7eb",
+            border: "1px solid var(--panel-border)",
             borderRadius: 10,
-            background: "#fafafa"
+            background: "var(--panel-bg)"
           }}>
-            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
               Voice + Input
             </div>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
@@ -2751,6 +2963,58 @@ export default function Home() {
               }}
             />
               Text only (no voice)
+            </label>
+            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginTop: 6 }}>
+              Appearance
+            </div>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Theme
+              <select
+                value={themeId}
+                onChange={(e) => setThemeId(e.target.value)}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              >
+                {THEMES.map(t => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              App background image
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleBackgroundUpload(e.target.files?.[0])}
+              />
+              <button
+                onClick={() => setAppBackground("")}
+                style={{ marginTop: 4, padding: "4px 8px", borderRadius: 6 }}
+              >
+                Clear background
+              </button>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              Avatar background
+              <select
+                value={avatarBackground}
+                onChange={(e) => setAvatarBackground(e.target.value)}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+              >
+                {AVATAR_BACKGROUNDS.map(bg => (
+                  <option key={bg.id} value={bg.id}>{bg.label}</option>
+                ))}
+              </select>
+            </label>
+            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginTop: 6 }}>
+              Meeting Copilot
+            </div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+              <input
+                type="checkbox"
+                checked={meetingCommandListening}
+                onChange={(e) => setMeetingCommandListening(e.target.checked)}
+              />
+              Listening for recording commands (“hey Aika, start recording”)
             </label>
           </div>
           )}

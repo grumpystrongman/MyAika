@@ -11,6 +11,7 @@ type Props = {
   className?: string;
   modelUrl?: string;
   fallbackPng?: string;
+  backgroundSrc?: string;
 };
 
 const FALLBACK_PNG = "/assets/aika/live2d/placeholder.svg";
@@ -22,7 +23,8 @@ export default function AikaAvatar({
   isListening,
   className,
   modelUrl,
-  fallbackPng
+  fallbackPng,
+  backgroundSrc
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -131,6 +133,19 @@ export default function AikaAvatar({
         position: "relative"
       }}
     >
+      {backgroundSrc && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 20,
+            backgroundImage: `url(${backgroundSrc})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            filter: "saturate(1.05)"
+          }}
+        />
+      )}
       {engineType === "live2d" ? (
         <iframe
           ref={iframeRef}

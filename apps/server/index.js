@@ -49,6 +49,21 @@ import { listToolHistory } from "./storage/history.js";
 import { initDb } from "./storage/db.js";
 import { runMigrations } from "./storage/schema.js";
 import {
+  createRecording,
+  updateRecording,
+  getRecording,
+  listRecordings,
+  addRecordingChunk,
+  listRecordingChunks,
+  ensureRecordingDir,
+  getRecordingBaseDir,
+  writeArtifact
+} from "./storage/recordings.js";
+import { addMemoryEntities, searchMemoryEntities } from "./storage/memory_entities.js";
+import { createAgentAction, listAgentActions } from "./storage/agent_actions.js";
+import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities } from "./recordings/processor.js";
+import { redactStructured, redactText } from "./recordings/redaction.js";
+import {
   getSkillsState,
   toggleSkill,
   getSkillEvents,
@@ -102,6 +117,22 @@ const live2dCoreWasm = path.join(live2dDir, "live2dcubismcore.wasm");
 const uploadDir = path.resolve(serverRoot, "..", "..", "data", "_live2d_uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
+const recordingsDir = getRecordingBaseDir();
+const recordingUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const id = req.params.id;
+      const dir = ensureRecordingDir(id);
+      cb(null, path.join(dir, "chunks"));
+    },
+    filename: (req, file, cb) => {
+      const seq = Number(req.query.seq || req.body?.seq || 0);
+      const ext = path.extname(file.originalname || "") || ".webm";
+      const name = `${String(seq).padStart(6, "0")}${ext}`;
+      cb(null, name);
+    }
+  })
+});
 
 // Load persona
 const persona = JSON.parse(
@@ -265,6 +296,106 @@ function extractResponseText(response) {
     }
   }
   return parts.join("\n").trim();
+}
+
+function getWorkspaceId(req) {
+  return req.headers["x-workspace-id"] || "default";
+}
+
+function getUserId(req) {
+  return req.headers["x-user-id"] || "local";
+}
+
+function isAdmin(req) {
+  return String(req.headers["x-user-role"] || "").toLowerCase() === "admin";
+}
+
+function canAccessRecording(req, recording) {
+  if (!recording) return false;
+  if (recording.workspace_id && recording.workspace_id !== getWorkspaceId(req)) return false;
+  if (recording.created_by && recording.created_by !== getUserId(req) && !isAdmin(req)) return false;
+  return true;
+}
+
+function updateProcessingState(recordingId, patch) {
+  const existing = getRecording(recordingId);
+  const current = existing?.processing_json || {};
+  const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+  updateRecording(recordingId, { processing_json: JSON.stringify(next) });
+  return next;
+}
+
+async function processRecordingPipeline(recordingId, opts = {}) {
+  const recording = getRecording(recordingId);
+  if (!recording) return;
+  updateProcessingState(recordingId, { stage: "transcribing" });
+  updateRecording(recordingId, { status: "processing" });
+  const audioPath = recording.storage_path || combineChunks(recordingId, recordingsDir);
+  if (audioPath && audioPath !== recording.storage_path) {
+    updateRecording(recordingId, { storage_path: audioPath, storage_url: `/api/recordings/${recordingId}/audio` });
+  }
+  const transcriptResult = await transcribeAudio(audioPath);
+  updateRecording(recordingId, {
+    transcript_text: transcriptResult.text,
+    language: transcriptResult.language,
+    transcript_json: JSON.stringify({
+      provider: transcriptResult.provider || "unknown",
+      segments: transcriptResult.segments || []
+    }),
+    diarization_json: JSON.stringify(transcriptResult.segments || [])
+  });
+
+  updateProcessingState(recordingId, { stage: "summarizing" });
+  const summary = await summarizeTranscript(transcriptResult.text || "", recording.title);
+  let summaryPayload = {
+    overview: summary.overview,
+    decisions: summary.decisions,
+    actionItems: summary.actionItems,
+    risks: summary.risks,
+    nextSteps: summary.nextSteps,
+    recommendations: summary.recommendations || []
+  };
+  if (recording.redaction_enabled) {
+    summaryPayload = redactStructured(summaryPayload);
+  }
+
+  updateRecording(recordingId, {
+    summary_json: JSON.stringify(summaryPayload),
+    decisions_json: JSON.stringify(summaryPayload.decisions || []),
+    tasks_json: JSON.stringify(summaryPayload.actionItems || []),
+    risks_json: JSON.stringify(summaryPayload.risks || []),
+    next_steps_json: JSON.stringify(summaryPayload.nextSteps || [])
+  });
+
+  updateProcessingState(recordingId, { stage: "extracting" });
+  const entities = extractEntities(summaryPayload);
+  addMemoryEntities(
+    entities.map(entity => ({
+      ...entity,
+      workspaceId: recording.workspace_id || "default",
+      recordingId
+    }))
+  );
+
+  const artifacts = [];
+  if (opts.createArtifacts) {
+    const content = summary.summaryMarkdown || "";
+    const filePath = writeArtifact(recordingId, "summary.md", content);
+    artifacts.push({ type: "local", name: "summary.md", path: filePath });
+    try {
+      const doc = await createGoogleDoc(`${recording.title} Summary`, content);
+      const url = doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}/edit` : null;
+      artifacts.push({ type: "google_doc", docId: doc.documentId, url });
+    } catch (err) {
+      // ignore if Google is not configured
+    }
+  }
+  if (artifacts.length) {
+    updateRecording(recordingId, { artifacts_json: JSON.stringify(artifacts) });
+  }
+
+  updateProcessingState(recordingId, { stage: "ready", doneAt: new Date().toISOString() });
+  updateRecording(recordingId, { status: "ready" });
 }
 
 // Health check
@@ -876,6 +1007,262 @@ app.get("/api/meetings/:id", (req, res) => {
   const filePath = path.join(meetingDir, `${req.params.id}.md`);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not_found" });
   res.type("text/markdown").send(fs.readFileSync(filePath, "utf-8"));
+});
+
+// Meeting Copilot recordings
+app.post("/api/recordings/start", (req, res) => {
+  try {
+    const { title, redactionEnabled, retentionDays } = req.body || {};
+    const retentionWindow = Number(retentionDays || process.env.RECORDING_RETENTION_DAYS || 30);
+    const retentionExpiresAt = retentionWindow
+      ? new Date(Date.now() + retentionWindow * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+    const recording = createRecording({
+      title,
+      redactionEnabled: Boolean(redactionEnabled),
+      workspaceId: getWorkspaceId(req),
+      createdBy: getUserId(req),
+      retentionExpiresAt
+    });
+    res.json({
+      ok: true,
+      recording: {
+        id: recording.id,
+        title: recording.title,
+        startedAt: recording.startedAt,
+        retentionExpiresAt
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "recording_start_failed" });
+  }
+});
+
+app.post("/api/recordings/:id/chunk", recordingUpload.single("chunk"), (req, res) => {
+  try {
+    const recording = getRecording(req.params.id);
+    if (!recording) return res.status(404).json({ error: "recording_not_found" });
+    if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+    const seq = Number(req.query.seq || req.body?.seq || 0);
+    if (!req.file?.path) return res.status(400).json({ error: "chunk_missing" });
+    addRecordingChunk({ recordingId: recording.id, seq, storagePath: req.file.path });
+    res.json({ ok: true, seq });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "recording_chunk_failed" });
+  }
+});
+
+app.post("/api/recordings/:id/pause", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  updateRecording(recording.id, { status: "paused" });
+  updateProcessingState(recording.id, { stage: "paused" });
+  res.json({ ok: true });
+});
+
+app.post("/api/recordings/:id/resume", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  updateRecording(recording.id, { status: "recording" });
+  updateProcessingState(recording.id, { stage: "recording" });
+  res.json({ ok: true });
+});
+
+app.post("/api/recordings/:id/stop", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  const { durationSec } = req.body || {};
+  const endedAt = new Date().toISOString();
+  updateRecording(recording.id, {
+    ended_at: endedAt,
+    duration: durationSec ? Math.round(Number(durationSec)) : null,
+    status: "processing"
+  });
+  updateProcessingState(recording.id, { stage: "processing", endedAt });
+  setTimeout(() => {
+    processRecordingPipeline(recording.id, { createArtifacts: true }).catch(err => {
+      console.error("Recording pipeline failed:", err);
+      updateRecording(recording.id, { status: "failed" });
+    });
+  }, 100);
+  res.json({ ok: true, id: recording.id });
+});
+
+app.get("/api/recordings", (req, res) => {
+  try {
+    const list = listRecordings({
+      workspaceId: getWorkspaceId(req),
+      status: String(req.query.status || ""),
+      query: String(req.query.q || ""),
+      limit: Number(req.query.limit || 50)
+    });
+    const now = Date.now();
+    const filtered = list.filter(row => canAccessRecording(req, row)).map(row => {
+      if (row.retention_expires_at && Date.parse(row.retention_expires_at) < now) {
+        return { ...row, status: "expired" };
+      }
+      return row;
+    });
+    res.json({ recordings: filtered });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "recordings_list_failed" });
+  }
+});
+
+app.get("/api/recordings/:id", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  res.json({
+    recording,
+    chunks: listRecordingChunks(recording.id),
+    actions: listAgentActions(recording.id)
+  });
+});
+
+app.post("/api/recordings/:id/tasks", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  const { tasks } = req.body || {};
+  if (!Array.isArray(tasks)) return res.status(400).json({ error: "tasks_array_required" });
+  updateRecording(recording.id, { tasks_json: JSON.stringify(tasks) });
+  const updated = getRecording(recording.id);
+  res.json({ recording: updated });
+});
+
+app.get("/api/recordings/:id/audio", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  if (!recording.storage_path || !fs.existsSync(recording.storage_path)) {
+    return res.status(404).json({ error: "audio_not_found" });
+  }
+  res.sendFile(recording.storage_path);
+});
+
+app.post("/api/recordings/:id/ask", async (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  const { question } = req.body || {};
+  if (!question) return res.status(400).json({ error: "question_required" });
+  if (!process.env.OPENAI_API_KEY) {
+    const excerpt = (recording.transcript_text || "").slice(0, 600);
+    return res.json({ answer: `Here's what I found in the transcript:\n${excerpt || "Transcript not available yet."}` });
+  }
+  try {
+    const prompt = `Answer the question using only this meeting transcript and summary.\n\nTranscript:\n${recording.transcript_text || ""}\n\nSummary:\n${JSON.stringify(recording.summary_json || {}, null, 2)}\n\nQuestion: ${question}`;
+    const response = await client.responses.create({
+      model: OPENAI_MODEL,
+      input: prompt,
+      max_output_tokens: 500
+    });
+    const answer = extractResponseText(response) || "No answer generated.";
+    res.json({ answer: recording.redaction_enabled ? redactText(answer) : answer });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "recording_ask_failed" });
+  }
+});
+
+app.post("/api/memory/ask", async (req, res) => {
+  const { question } = req.body || {};
+  if (!question) return res.status(400).json({ error: "question_required" });
+  const entities = searchMemoryEntities({ workspaceId: getWorkspaceId(req), query: question, limit: 20 });
+  if (!process.env.OPENAI_API_KEY) {
+    const summary = entities.map(e => `${e.type}: ${e.value}`).join("\n");
+    return res.json({ answer: summary || "No related meetings found yet.", entities });
+  }
+  try {
+    const prompt = `Answer the question using only the structured memory entities below.\n\nEntities:\n${JSON.stringify(entities, null, 2)}\n\nQuestion: ${question}`;
+    const response = await client.responses.create({
+      model: OPENAI_MODEL,
+      input: prompt,
+      max_output_tokens: 400
+    });
+    const answer = extractResponseText(response) || "No answer generated.";
+    res.json({ answer, entities });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "memory_ask_failed" });
+  }
+});
+
+app.post("/api/recordings/:id/actions", async (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  const { actionType, input } = req.body || {};
+  if (!actionType) return res.status(400).json({ error: "action_type_required" });
+  let output = {};
+  let status = "draft";
+  try {
+    if (actionType === "schedule_followup") {
+      const fallback = {
+        summary: input?.summary || `Follow-up for ${recording.title}`,
+        startISO: input?.startISO,
+        endISO: input?.endISO,
+        description: input?.description || "Follow-up meeting generated by Aika."
+      };
+      try {
+        const event = await createCalendarEvent(fallback);
+        output = { event, provider: "google" };
+        status = "completed";
+      } catch {
+        output = { draft: fallback, provider: "draft" };
+      }
+    } else if (actionType === "draft_email") {
+      const body = [
+        `Subject: Recap - ${recording.title}`,
+        "",
+        "Summary:",
+        ...(recording.summary_json?.overview || []),
+        "",
+        "Decisions:",
+        ...(recording.summary_json?.decisions || []),
+        "",
+        "Action Items:",
+        ...(recording.summary_json?.actionItems || []).map(a => `- ${a.task} (${a.owner || "Unassigned"})`)
+      ].join("\n");
+      output = { draft: body };
+      status = "completed";
+    } else if (actionType === "create_doc") {
+      const markdown = (recording.summary_json && JSON.stringify(recording.summary_json, null, 2)) || "";
+      try {
+        const doc = await createGoogleDoc(`${recording.title} Recap`, markdown);
+        const url = doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}/edit` : null;
+        output = { docId: doc.documentId, url };
+        status = "completed";
+      } catch {
+        const filePath = writeArtifact(recording.id, "recap.md", markdown);
+        output = { localPath: filePath };
+      }
+    } else if (actionType === "create_task") {
+      output = { task: input || { title: "Follow up", owner: "Unassigned" }, provider: "draft" };
+      status = "completed";
+    } else if (actionType === "create_ticket") {
+      output = { ticket: input || { title: "Follow up ticket" }, provider: "draft" };
+      status = "completed";
+    } else {
+      output = { note: "Action type not implemented yet." };
+    }
+  } catch (err) {
+    output = { error: err?.message || "action_failed" };
+    status = "failed";
+  }
+
+  const action = createAgentAction({
+    workspaceId: recording.workspace_id || "default",
+    recordingId: recording.id,
+    requestedBy: getUserId(req),
+    actionType,
+    input,
+    output,
+    status
+  });
+  res.json({ action });
 });
 
 app.get("/api/aika/config", (_req, res) => {
