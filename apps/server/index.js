@@ -1316,6 +1316,9 @@ app.post("/api/stt/transcribe", sttUpload.single("audio"), async (req, res) => {
   try {
     if (!req.file?.path) return res.status(400).json({ error: "audio_required" });
     const result = await transcribeAudio(req.file.path);
+    if (result?.error) {
+      return res.status(400).json({ error: result.error, provider: result.provider || "unknown" });
+    }
     res.json({ text: result.text || "", provider: result.provider || "unknown" });
   } catch (err) {
     res.status(500).json({ error: err?.message || "stt_failed" });

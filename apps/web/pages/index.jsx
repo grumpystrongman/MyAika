@@ -945,15 +945,29 @@ export default function Home() {
         : MediaRecorder.isTypeSupported("audio/ogg")
           ? "audio/ogg"
           : "";
+      if (!mimeType) {
+        setMicError("audio_format_unsupported");
+        sttActiveRef.current = false;
+        return;
+      }
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       sttRecorderRef.current = recorder;
       recorder.ondataavailable = async (evt) => {
         if (!evt.data || evt.data.size < 256) return;
         try {
           const form = new FormData();
-          form.append("audio", evt.data, `stt-${Date.now()}.webm`);
+          const ext = mimeType.includes("ogg") ? "ogg" : "webm";
+          form.append("audio", evt.data, `stt-${Date.now()}.${ext}`);
           const r = await fetch(`${SERVER_URL}/api/stt/transcribe`, { method: "POST", body: form });
-          const data = await r.json();
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            if (data?.error === "unsupported_audio_format") {
+              setMicError("unsupported_audio_format");
+            } else if (data?.error === "audio_too_short") {
+              setMicStatus("Listening...");
+            }
+            return;
+          }
           if (data?.text) {
             latestTranscriptRef.current = String(data.text).trim();
             setUserText(latestTranscriptRef.current);

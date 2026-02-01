@@ -101,23 +101,25 @@ function applyTimestampsToSegments(segments) {
 
 export async function transcribeAudio(audioPath) {
   if (!audioPath || !fs.existsSync(audioPath)) {
-    return { text: "", language: "en", provider: "none" };
+    return { text: "", language: "en", provider: "none", error: "audio_missing" };
   }
   const stat = fs.statSync(audioPath);
   if (stat.size < 256) {
     return {
-      text: "Transcription pending (audio too short).",
+      text: "",
       language: "en",
       provider: "mock",
-      segments: buildSegmentsFromText("Transcription pending (audio too short).")
+      error: "audio_too_short",
+      segments: []
     };
   }
   if (!client) {
     return {
-      text: "Transcription pending (no provider configured).",
+      text: "",
       language: "en",
       provider: "mock",
-      segments: buildSegmentsFromText("Transcription pending (no provider configured).")
+      error: "provider_not_configured",
+      segments: []
     };
   }
   const header = fs.readFileSync(audioPath, { encoding: null, length: 8 });
@@ -127,10 +129,11 @@ export async function transcribeAudio(audioPath) {
   const isWav = header?.slice(0, 4).toString("utf8") === "RIFF";
   if (!isWebm && !isOgg && !isWav) {
     return {
-      text: "Transcription pending (unsupported audio format).",
+      text: "",
       language: "en",
       provider: "mock",
-      segments: buildSegmentsFromText("Transcription pending (unsupported audio format).")
+      error: "unsupported_audio_format",
+      segments: []
     };
   }
   try {
