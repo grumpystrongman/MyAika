@@ -433,6 +433,7 @@ export default function Home() {
   const sttActiveRef = useRef(false);
   const sttModeRef = useRef("browser");
   const sttLastDataRef = useRef(0);
+  const sttTranscriptRef = useRef("");
   const micFailCountRef = useRef(0);
   const lastMicStartRef = useRef(0);
   const forceServerSttRef = useRef(false);
@@ -988,7 +989,11 @@ export default function Home() {
               setMicError("stt_provider_unavailable");
               return;
             }
-            latestTranscriptRef.current = transcriptText;
+            if (!sttTranscriptRef.current.toLowerCase().endsWith(transcriptText.toLowerCase())) {
+              sttTranscriptRef.current = `${sttTranscriptRef.current} ${transcriptText}`.trim();
+            }
+            latestTranscriptRef.current = sttTranscriptRef.current;
+            setMicStatus(`Heard: ${latestTranscriptRef.current}`);
             setUserText(latestTranscriptRef.current);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = setTimeout(() => {
@@ -996,10 +1001,11 @@ export default function Home() {
               if (toSend) {
                 setMicStatus(`Sending: ${toSend}`);
                 latestTranscriptRef.current = "";
+                sttTranscriptRef.current = "";
                 setUserText("");
                 send(toSend);
               }
-            }, 1500);
+            }, 2600);
           }
         } catch (err) {
           setMicError(err?.message || "stt_failed");
@@ -1012,7 +1018,7 @@ export default function Home() {
           stream.getTracks().forEach(t => t.stop());
         }
       };
-      recorder.start(3000);
+      recorder.start(1200);
       setMicState("listening");
       setMicStatus("Listening (server STT)...");
     } catch (err) {
@@ -1029,6 +1035,7 @@ export default function Home() {
     }
     sttActiveRef.current = false;
     sttLastDataRef.current = 0;
+    sttTranscriptRef.current = "";
   }
 
   async function startMic() {
