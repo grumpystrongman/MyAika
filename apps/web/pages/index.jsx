@@ -434,6 +434,7 @@ export default function Home() {
   const sttModeRef = useRef("browser");
   const sttLastDataRef = useRef(0);
   const sttTranscriptRef = useRef("");
+  const sttChunkCountRef = useRef(0);
   const micFailCountRef = useRef(0);
   const lastMicStartRef = useRef(0);
   const forceServerSttRef = useRef(false);
@@ -949,6 +950,7 @@ export default function Home() {
       const stream = mediaStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
       sttActiveRef.current = true;
       sttLastDataRef.current = Date.now();
+      sttChunkCountRef.current = 0;
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
         : MediaRecorder.isTypeSupported("audio/ogg")
@@ -991,21 +993,28 @@ export default function Home() {
             }
             if (!sttTranscriptRef.current.toLowerCase().endsWith(transcriptText.toLowerCase())) {
               sttTranscriptRef.current = `${sttTranscriptRef.current} ${transcriptText}`.trim();
+              sttChunkCountRef.current += 1;
             }
             latestTranscriptRef.current = sttTranscriptRef.current;
             setMicStatus(`Heard: ${latestTranscriptRef.current}`);
             setUserText(latestTranscriptRef.current);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = setTimeout(() => {
+              const quietForMs = Date.now() - (sttLastDataRef.current || 0);
+              if (quietForMs < 3000) return;
               const toSend = latestTranscriptRef.current.trim();
-              if (toSend) {
+              const enoughText = toSend.length >= 12 || sttChunkCountRef.current >= 2;
+              if (toSend && enoughText) {
                 setMicStatus(`Sending: ${toSend}`);
                 latestTranscriptRef.current = "";
                 sttTranscriptRef.current = "";
+                sttChunkCountRef.current = 0;
                 setUserText("");
                 send(toSend);
+              } else {
+                setMicStatus("Listening...");
               }
-            }, 2600);
+            }, 4200);
           }
         } catch (err) {
           setMicError(err?.message || "stt_failed");
@@ -1018,7 +1027,7 @@ export default function Home() {
           stream.getTracks().forEach(t => t.stop());
         }
       };
-      recorder.start(1200);
+      recorder.start(2200);
       setMicState("listening");
       setMicStatus("Listening (server STT)...");
     } catch (err) {
@@ -1036,6 +1045,7 @@ export default function Home() {
     sttActiveRef.current = false;
     sttLastDataRef.current = 0;
     sttTranscriptRef.current = "";
+    sttChunkCountRef.current = 0;
   }
 
   async function startMic() {
