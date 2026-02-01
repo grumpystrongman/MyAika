@@ -66,6 +66,12 @@ export default function MeetingCopilot({
   const [askMemoryAnswer, setAskMemoryAnswer] = useState("");
   const [taskEdits, setTaskEdits] = useState([]);
   const [actionResult, setActionResult] = useState("");
+  const [exportInfo, setExportInfo] = useState(null);
+  const toAbsolute = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http")) return url;
+    return `${serverUrl}${url}`;
+  };
 
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
@@ -104,6 +110,7 @@ export default function MeetingCopilot({
       setSelected(data.recording);
       setSelectedActions(data.actions || []);
       setTaskEdits(data.recording?.tasks_json || []);
+      setExportInfo(null);
     } catch (err) {
       setSelected(null);
     }
@@ -355,6 +362,32 @@ export default function MeetingCopilot({
     loadRecording(selectedId);
   }
 
+  async function deleteRecordingById(id) {
+    if (!id) return;
+    if (!confirm("Delete this recording and all related files? This cannot be undone.")) return;
+    const resp = await fetch(`${serverUrl}/api/recordings/${id}`, { method: "DELETE" });
+    const data = await resp.json();
+    if (!resp.ok) {
+      setRecordingsError(data.error || "recording_delete_failed");
+      return;
+    }
+    setSelectedId("");
+    setSelected(null);
+    setExportInfo(null);
+    refreshRecordings();
+  }
+
+  async function exportRecording(id) {
+    if (!id) return;
+    const resp = await fetch(`${serverUrl}/api/recordings/${id}/export`);
+    const data = await resp.json();
+    if (!resp.ok) {
+      setRecordingsError(data.error || "recording_export_failed");
+      return;
+    }
+    setExportInfo(data);
+  }
+
   const statusChip = (status) => (
     <span style={{
       padding: "2px 8px",
@@ -454,7 +487,42 @@ export default function MeetingCopilot({
                 <div style={{ fontSize: 12, color: "#6b7280" }}>
                   {selected.duration ? `${selected.duration}s` : "duration pending"}
                 </div>
+                <button
+                  onClick={() => deleteRecordingById(selected.id)}
+                  style={{ marginLeft: "auto", padding: "6px 10px", borderRadius: 8, background: "#fee2e2", border: "1px solid #fecaca", color: "#991b1b" }}
+                >
+                  Delete
+                </button>
               </div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+                Recording file:{" "}
+                {selected.audioUrl ? (
+                  <a href={toAbsolute(selected.audioUrl)} target="_blank" rel="noreferrer">download audio (webm/opus)</a>
+                ) : (
+                  "pending"
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <button onClick={() => exportRecording(selected.id)} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Export meeting notes
+                </button>
+                <a href={`${serverUrl}/api/recordings/${selected.id}/transcript`} target="_blank" rel="noreferrer">
+                  Download transcript.txt
+                </a>
+                <a href={`${serverUrl}/api/recordings/${selected.id}/notes`} target="_blank" rel="noreferrer">
+                  Download meeting_notes.md
+                </a>
+              </div>
+              {exportInfo && (
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+                  Export ready:{" "}
+                  <a href={toAbsolute(exportInfo.notesUrl)} target="_blank" rel="noreferrer">notes</a>{" "}
+                  |{" "}
+                  <a href={toAbsolute(exportInfo.transcriptUrl)} target="_blank" rel="noreferrer">transcript</a>{" "}
+                  |{" "}
+                  <a href={toAbsolute(exportInfo.audioUrl)} target="_blank" rel="noreferrer">audio</a>
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                 {["summary", "transcript", "tasks", "decisions", "actions", "ask"].map(tab => (
                   <button key={tab} onClick={() => setDetailTab(tab)} style={{ padding: "6px 10px", borderRadius: 8, border: detailTab === tab ? "2px solid #2563eb" : "1px solid #e5e7eb" }}>
@@ -465,6 +533,11 @@ export default function MeetingCopilot({
 
               {detailTab === "summary" && (
                 <div style={{ marginTop: 12 }}>
+                  <div style={{ fontWeight: 600 }}>Meeting Info</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    Started: {selected.started_at ? new Date(selected.started_at).toLocaleString() : "unknown"}{" "}
+                    | Ended: {selected.ended_at ? new Date(selected.ended_at).toLocaleString() : "unknown"}
+                  </div>
                   <div style={{ fontWeight: 600 }}>Overview</div>
                   <ul>{(selected.summary_json?.overview || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
                   <div style={{ fontWeight: 600 }}>Risks</div>

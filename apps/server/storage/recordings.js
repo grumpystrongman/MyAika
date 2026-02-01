@@ -119,3 +119,18 @@ export function getRecordingBaseDir() {
   ensureDir(recordingsDir);
   return recordingsDir;
 }
+
+export function deleteRecording(recordingId) {
+  const db = getDb();
+  const dir = path.join(recordingsDir, recordingId);
+  try {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.warn("Failed to remove recording files:", err?.message || err);
+  }
+  db.prepare(`DELETE FROM audio_chunks WHERE recording_id = ?`).run(recordingId);
+  db.prepare(`DELETE FROM recordings WHERE id = ?`).run(recordingId);
+  return true;
+}

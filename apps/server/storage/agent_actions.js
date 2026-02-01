@@ -42,3 +42,8 @@ export function listAgentActions(recordingId) {
     output_json: safeJsonParse(row.output_json, {})
   }));
 }
+
+export function deleteAgentActionsForRecording(recordingId) {
+  const db = getDb();
+  db.prepare(`DELETE FROM agent_actions WHERE recording_id = ?`).run(recordingId);
+}

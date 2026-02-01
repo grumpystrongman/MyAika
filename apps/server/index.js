@@ -57,10 +57,19 @@ import {
   listRecordingChunks,
   ensureRecordingDir,
   getRecordingBaseDir,
-  writeArtifact
+  writeArtifact,
+  deleteRecording
 } from "./storage/recordings.js";
-import { addMemoryEntities, searchMemoryEntities } from "./storage/memory_entities.js";
-import { createAgentAction, listAgentActions } from "./storage/agent_actions.js";
+import {
+  addMemoryEntities,
+  deleteMemoryEntitiesForRecording,
+  searchMemoryEntities
+} from "./storage/memory_entities.js";
+import {
+  createAgentAction,
+  deleteAgentActionsForRecording,
+  listAgentActions
+} from "./storage/agent_actions.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import {
@@ -1010,6 +1019,82 @@ app.get("/api/meetings/:id", (req, res) => {
 });
 
 // Meeting Copilot recordings
+function getRecordingAudioUrl(recordingId, recording) {
+  if (recording?.storage_url) return recording.storage_url;
+  return `/api/recordings/${recordingId}/audio`;
+}
+
+function formatStamp(seconds) {
+  if (!Number.isFinite(seconds)) return "00:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function buildTranscriptText(recording) {
+  const segments = recording?.transcript_json?.segments;
+  if (Array.isArray(segments) && segments.length) {
+    return segments
+      .map(seg => {
+        const start = formatStamp(seg.start);
+        const end = formatStamp(seg.end);
+        const speaker = seg.speaker || "Speaker";
+        return `[${start}-${end}] ${speaker}: ${seg.text || ""}`.trim();
+      })
+      .join("\n");
+  }
+  return recording?.transcript_text || "";
+}
+
+function buildMeetingNotesMarkdown(recording) {
+  const title = recording?.title || "Meeting";
+  const started = recording?.started_at ? new Date(recording.started_at).toLocaleString() : "Unknown";
+  const ended = recording?.ended_at ? new Date(recording.ended_at).toLocaleString() : "Unknown";
+  const duration = recording?.duration ? `${recording.duration}s` : "Unknown";
+  const summary = recording?.summary_json || {};
+  const decisions = recording?.decisions_json || summary.decisions || [];
+  const tasks = recording?.tasks_json || summary.actionItems || [];
+  const risks = recording?.risks_json || summary.risks || [];
+  const nextSteps = recording?.next_steps_json || summary.nextSteps || [];
+  const overview = summary.overview || [];
+  const transcriptText = buildTranscriptText(recording);
+  return [
+    `# ${title}`,
+    "",
+    "## Meeting Info",
+    `- Start: ${started}`,
+    `- End: ${ended}`,
+    `- Duration: ${duration}`,
+    `- Workspace: ${recording?.workspace_id || "default"}`,
+    `- Created by: ${recording?.created_by || "local"}`,
+    "",
+    "## Summary",
+    overview.length ? overview.map(item => `- ${item}`).join("\n") : "- Summary pending.",
+    "",
+    "## Decisions",
+    decisions.length ? decisions.map(item => `- ${item}`).join("\n") : "- None captured.",
+    "",
+    "## Action Items / Tasks",
+    tasks.length
+      ? tasks.map(item => {
+          const task = item.task || item.title || item.text || "";
+          const owner = item.owner || "Unassigned";
+          const due = item.due ? `, Due: ${item.due}` : "";
+          return `- ${task} (Owner: ${owner}${due})`;
+        }).join("\n")
+      : "- None captured.",
+    "",
+    "## Risks",
+    risks.length ? risks.map(item => `- ${item}`).join("\n") : "- None captured.",
+    "",
+    "## Next Steps",
+    nextSteps.length ? nextSteps.map(item => `- ${item}`).join("\n") : "- Follow up to confirm next steps.",
+    "",
+    "## Transcript (Timestamped)",
+    transcriptText || "Transcript not available yet."
+  ].join("\n");
+}
+
 app.post("/api/recordings/start", (req, res) => {
   try {
     const { title, redactionEnabled, retentionDays } = req.body || {};
@@ -1102,9 +1187,9 @@ app.get("/api/recordings", (req, res) => {
     const now = Date.now();
     const filtered = list.filter(row => canAccessRecording(req, row)).map(row => {
       if (row.retention_expires_at && Date.parse(row.retention_expires_at) < now) {
-        return { ...row, status: "expired" };
+        return { ...row, status: "expired", audioUrl: getRecordingAudioUrl(row.id, row) };
       }
-      return row;
+      return { ...row, audioUrl: getRecordingAudioUrl(row.id, row) };
     });
     res.json({ recordings: filtered });
   } catch (err) {
@@ -1117,7 +1202,10 @@ app.get("/api/recordings/:id", (req, res) => {
   if (!recording) return res.status(404).json({ error: "recording_not_found" });
   if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
   res.json({
-    recording,
+    recording: {
+      ...recording,
+      audioUrl: getRecordingAudioUrl(recording.id, recording)
+    },
     chunks: listRecordingChunks(recording.id),
     actions: listAgentActions(recording.id)
   });
@@ -1142,6 +1230,53 @@ app.get("/api/recordings/:id/audio", (req, res) => {
     return res.status(404).json({ error: "audio_not_found" });
   }
   res.sendFile(recording.storage_path);
+});
+
+app.get("/api/recordings/:id/transcript", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  const transcriptText = buildTranscriptText(recording);
+  if (!transcriptText) return res.status(404).json({ error: "transcript_not_ready" });
+  const filePath = writeArtifact(recording.id, "transcript.txt", transcriptText);
+  res.type("text/plain").sendFile(filePath);
+});
+
+app.get("/api/recordings/:id/notes", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  const notes = buildMeetingNotesMarkdown(recording);
+  const filePath = writeArtifact(recording.id, "meeting_notes.md", notes);
+  res.type("text/markdown").sendFile(filePath);
+});
+
+app.get("/api/recordings/:id/export", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  const notes = buildMeetingNotesMarkdown(recording);
+  const transcriptText = buildTranscriptText(recording);
+  const notesPath = writeArtifact(recording.id, "meeting_notes.md", notes);
+  const transcriptPath = writeArtifact(recording.id, "transcript.txt", transcriptText || "");
+  res.json({
+    ok: true,
+    notesUrl: `/api/recordings/${recording.id}/notes`,
+    transcriptUrl: `/api/recordings/${recording.id}/transcript`,
+    audioUrl: getRecordingAudioUrl(recording.id, recording),
+    notesPath,
+    transcriptPath
+  });
+});
+
+app.delete("/api/recordings/:id", (req, res) => {
+  const recording = getRecording(req.params.id);
+  if (!recording) return res.status(404).json({ error: "recording_not_found" });
+  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+  deleteAgentActionsForRecording(recording.id);
+  deleteMemoryEntitiesForRecording(recording.id);
+  deleteRecording(recording.id);
+  res.json({ ok: true, id: recording.id });
 });
 
 app.post("/api/recordings/:id/ask", async (req, res) => {

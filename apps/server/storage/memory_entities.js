@@ -38,3 +38,8 @@ export function searchMemoryEntities({ workspaceId = "default", query = "", limi
     `SELECT * FROM memory_entities WHERE workspace_id = ? AND (value LIKE ? OR normalized_value LIKE ?) ORDER BY created_at DESC LIMIT ?`
   ).all(workspaceId, `%${query}%`, `%${query}%`, limit);
 }
+
+export function deleteMemoryEntitiesForRecording(recordingId) {
+  const db = getDb();
+  db.prepare(`DELETE FROM memory_entities WHERE recording_id = ?`).run(recordingId);
+}
