@@ -431,6 +431,9 @@ export default function Home() {
   const sttRecorderRef = useRef(null);
   const sttActiveRef = useRef(false);
   const sttModeRef = useRef("browser");
+  const micFailCountRef = useRef(0);
+  const lastMicStartRef = useRef(0);
+  const forceServerSttRef = useRef(false);
   const ttsSourceRef = useRef(null);
   const ttsRafRef = useRef(null);
   const prefTimerRef = useRef(null);
@@ -801,6 +804,7 @@ export default function Home() {
 
     r.onstart = () => {
       console.log("[mic] recognition start");
+      lastMicStartRef.current = Date.now();
       setMicState("listening");
       setMicError("");
       setMicStatus("Listening? speak now");
@@ -817,6 +821,12 @@ export default function Home() {
 
     r.onend = () => {
       console.log("[mic] recognition end");
+      const elapsed = Date.now() - (lastMicStartRef.current || 0);
+      if (elapsed && elapsed < 600) {
+        micFailCountRef.current += 1;
+      } else {
+        micFailCountRef.current = 0;
+      }
       setMicState("idle");
       setMicStatus("Mic idle");
       if (silenceTimerRef.current) {
@@ -824,6 +834,12 @@ export default function Home() {
         silenceTimerRef.current = null;
       }
       stopLevelMeter();
+      if (micFailCountRef.current >= 2) {
+        forceServerSttRef.current = true;
+        startServerStt();
+        return;
+      }
+      if (sttActiveRef.current || forceServerSttRef.current) return;
       if (micEnabled && voiceMode && !textOnly && !ttsActiveRef.current) {
         setTimeout(() => startMic(), 300);
       }
@@ -982,6 +998,10 @@ export default function Home() {
 
   async function startMic() {
     if (micState === "listening" || micStartingRef.current || ttsActiveRef.current) return;
+    if (forceServerSttRef.current) {
+      await startServerStt();
+      return;
+    }
     const r = ensureRecognizer();
     if (!r) {
       await startServerStt();
@@ -1008,6 +1028,7 @@ export default function Home() {
       r.start();
     } catch (e) {
       if (e?.name === "NotAllowedError" || e?.name === "NotFoundError") {
+        forceServerSttRef.current = true;
         await startServerStt();
       } else if (e?.name !== "InvalidStateError") {
         throw e;
@@ -1021,6 +1042,8 @@ export default function Home() {
     const r = ensureRecognizer();
     if (r) r.stop();
     stopServerStt();
+    forceServerSttRef.current = false;
+    micFailCountRef.current = 0;
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
