@@ -428,6 +428,8 @@ export default function Home() {
   const audioRef = useRef(null);
   const ttsAudioCtxRef = useRef(null);
   const ttsAnalyserRef = useRef(null);
+  const sttRecorderRef = useRef(null);
+  const sttActiveRef = useRef(false);
   const ttsSourceRef = useRef(null);
   const ttsRafRef = useRef(null);
   const prefTimerRef = useRef(null);
@@ -911,10 +913,72 @@ export default function Home() {
     setMicLevel(0);
   }
 
+  async function startServerStt() {
+    if (sttActiveRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      sttActiveRef.current = true;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/ogg")
+          ? "audio/ogg"
+          : "";
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      sttRecorderRef.current = recorder;
+      recorder.ondataavailable = async (evt) => {
+        if (!evt.data || evt.data.size < 256) return;
+        try {
+          const form = new FormData();
+          form.append("audio", evt.data, `stt-${Date.now()}.webm`);
+          const r = await fetch(`${SERVER_URL}/api/stt/transcribe`, { method: "POST", body: form });
+          const data = await r.json();
+          if (data?.text) {
+            latestTranscriptRef.current = String(data.text).trim();
+            setUserText(latestTranscriptRef.current);
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+              const toSend = latestTranscriptRef.current.trim();
+              if (toSend) {
+                setMicStatus(`Sending: ${toSend}`);
+                latestTranscriptRef.current = "";
+                setUserText("");
+                send(toSend);
+              }
+            }, 1500);
+          }
+        } catch (err) {
+          setMicError(err?.message || "stt_failed");
+        }
+      };
+      recorder.onstop = () => {
+        sttActiveRef.current = false;
+        stream.getTracks().forEach(t => t.stop());
+      };
+      recorder.start(2000);
+      setMicState("listening");
+      setMicStatus("Listening? speak now");
+    } catch (err) {
+      sttActiveRef.current = false;
+      setMicState("error");
+      setMicError(err?.message || "Microphone error.");
+    }
+  }
+
+  function stopServerStt() {
+    if (sttRecorderRef.current) {
+      try { sttRecorderRef.current.stop(); } catch {}
+      sttRecorderRef.current = null;
+    }
+    sttActiveRef.current = false;
+  }
+
   async function startMic() {
     if (micState === "listening" || micStartingRef.current || ttsActiveRef.current) return;
     const r = ensureRecognizer();
-    if (!r) return;
+    if (!r) {
+      await startServerStt();
+      return;
+    }
     micStartingRef.current = true;
     await stopAudio(200);
     await sleep(120);
@@ -939,6 +1003,7 @@ export default function Home() {
   function stopMic() {
     const r = ensureRecognizer();
     if (r) r.stop();
+    stopServerStt();
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;

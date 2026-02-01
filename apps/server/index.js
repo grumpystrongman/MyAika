@@ -129,6 +129,9 @@ const uploadDir = path.resolve(serverRoot, "..", "..", "data", "_live2d_uploads"
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
 const recordingsDir = getRecordingBaseDir();
+const sttUploadDir = path.resolve(serverRoot, "..", "..", "data", "_stt_uploads");
+if (!fs.existsSync(sttUploadDir)) fs.mkdirSync(sttUploadDir, { recursive: true });
+const sttUpload = multer({ dest: sttUploadDir });
 const recordingUpload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
@@ -1307,6 +1310,20 @@ app.get("/api/recordings/:id/audio", (req, res) => {
     return res.status(404).json({ error: "audio_not_found" });
   }
   res.type("audio/webm").sendFile(recording.storage_path);
+});
+
+app.post("/api/stt/transcribe", sttUpload.single("audio"), async (req, res) => {
+  try {
+    if (!req.file?.path) return res.status(400).json({ error: "audio_required" });
+    const result = await transcribeAudio(req.file.path);
+    res.json({ text: result.text || "", provider: result.provider || "unknown" });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "stt_failed" });
+  } finally {
+    try {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    } catch {}
+  }
 });
 
 app.get("/api/recordings/:id/transcript", (req, res) => {
