@@ -457,6 +457,10 @@ export default function Home() {
     const raw = typeof overrideText === "string" ? overrideText : userText;
     const text = raw.trim();
     if (!text) return;
+    if (/^transcription failed\b/i.test(text) || /^transcription pending\b/i.test(text)) {
+      setMicError("stt_provider_unavailable");
+      return;
+    }
 
     stopMic();
     if (voiceMode && autoSpeak && !textOnly) {
@@ -969,7 +973,12 @@ export default function Home() {
             return;
           }
           if (data?.text) {
-            latestTranscriptRef.current = String(data.text).trim();
+            const transcriptText = String(data.text).trim();
+            if (!transcriptText || /^transcription failed\b/i.test(transcriptText) || /^transcription pending\b/i.test(transcriptText)) {
+              setMicError("stt_provider_unavailable");
+              return;
+            }
+            latestTranscriptRef.current = transcriptText;
             setUserText(latestTranscriptRef.current);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = setTimeout(() => {
