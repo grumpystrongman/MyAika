@@ -203,7 +203,6 @@ function toSummaryPayload(data, title) {
   const decisions = Array.isArray(data.decisions) ? data.decisions : [];
   const risks = Array.isArray(data.risks) ? data.risks : [];
   const nextSteps = Array.isArray(data.nextSteps) ? data.nextSteps : [];
-  const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
   const actionItems = Array.isArray(data.actionItems)
     ? data.actionItems.map(item => ({
         task: item.task || item.title || item.text || "",
