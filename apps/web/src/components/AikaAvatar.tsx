@@ -141,7 +141,9 @@ export default function AikaAvatar({
             backgroundImage: `url(${backgroundSrc})`,
             backgroundSize: "cover",
             backgroundPosition: "center",
-            filter: "saturate(1.05)"
+            filter: "saturate(1.05)",
+            zIndex: 1,
+            pointerEvents: "none"
           }}
         />
       )}
@@ -155,7 +157,9 @@ export default function AikaAvatar({
             height: "100%",
             border: "none",
             borderRadius: 20,
-            background: "transparent"
+            background: "transparent",
+            position: "relative",
+            zIndex: 2
           }}
           allow="autoplay"
         />
@@ -166,7 +170,9 @@ export default function AikaAvatar({
             width: "100%",
             height: "100%",
             display: "block",
-            borderRadius: 20
+            borderRadius: 20,
+            position: "relative",
+            zIndex: 2
           }}
         />
       )}
@@ -178,7 +184,8 @@ export default function AikaAvatar({
             inset: 0,
             display: "flex",
             alignItems: "center",
-            justifyContent: "center"
+            justifyContent: "center",
+            zIndex: 2
           }}
         />
       )}
