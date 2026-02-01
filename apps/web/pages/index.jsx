@@ -430,6 +430,7 @@ export default function Home() {
   const ttsAnalyserRef = useRef(null);
   const sttRecorderRef = useRef(null);
   const sttActiveRef = useRef(false);
+  const sttModeRef = useRef("browser");
   const ttsSourceRef = useRef(null);
   const ttsRafRef = useRef(null);
   const prefTimerRef = useRef(null);
@@ -811,6 +812,7 @@ export default function Home() {
       setMicError(e?.error || "Microphone error.");
       setMicStatus("Mic error");
       stopLevelMeter();
+      startServerStt();
     };
 
     r.onend = () => {
@@ -822,6 +824,9 @@ export default function Home() {
         silenceTimerRef.current = null;
       }
       stopLevelMeter();
+      if (micEnabled && voiceMode && !textOnly && !ttsActiveRef.current) {
+        setTimeout(() => startMic(), 300);
+      }
     };
 
     r.onresult = (e) => {
@@ -916,7 +921,8 @@ export default function Home() {
   async function startServerStt() {
     if (sttActiveRef.current) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      sttModeRef.current = "server";
+      const stream = mediaStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
       sttActiveRef.current = true;
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
@@ -952,11 +958,13 @@ export default function Home() {
       };
       recorder.onstop = () => {
         sttActiveRef.current = false;
-        stream.getTracks().forEach(t => t.stop());
+        if (!mediaStreamRef.current) {
+          stream.getTracks().forEach(t => t.stop());
+        }
       };
       recorder.start(2000);
       setMicState("listening");
-      setMicStatus("Listening? speak now");
+      setMicStatus("Listening (server STT)...");
     } catch (err) {
       sttActiveRef.current = false;
       setMicState("error");
@@ -982,7 +990,12 @@ export default function Home() {
     micStartingRef.current = true;
     await stopAudio(200);
     await sleep(120);
-    await startLevelMeter();
+    try {
+      await startLevelMeter();
+    } catch {
+      // If level meter fails, still attempt server STT.
+      await startServerStt();
+    }
     if (!audioUnlocked) {
       unlockAudio().then(ok => {
         if (ok) {
@@ -994,7 +1007,11 @@ export default function Home() {
     try {
       r.start();
     } catch (e) {
-      if (e?.name !== "InvalidStateError") throw e;
+      if (e?.name === "NotAllowedError" || e?.name === "NotFoundError") {
+        await startServerStt();
+      } else if (e?.name !== "InvalidStateError") {
+        throw e;
+      }
     } finally {
       micStartingRef.current = false;
     }
