@@ -45,14 +45,13 @@ export default function AikaAvatar({
       const targetModel = modelUrl || "";
       const targetPng = fallbackPng || FALLBACK_PNG;
 
-      const canUseWebGL = !!canvasRef.current?.getContext("webgl");
-      let useLive2D = false;
-      if (canUseWebGL && targetModel) {
+      let useLive2D = Boolean(targetModel);
+      if (useLive2D) {
         try {
           const r = await fetch(targetModel, { method: "HEAD" });
           useLive2D = r.ok;
         } catch {
-          useLive2D = false;
+          useLive2D = true;
         }
       }
 
