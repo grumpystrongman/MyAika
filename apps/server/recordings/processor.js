@@ -122,20 +122,6 @@ export async function transcribeAudio(audioPath) {
       segments: []
     };
   }
-  const header = fs.readFileSync(audioPath, { encoding: null, length: 8 });
-  const magic = header ? header.toString("hex") : "";
-  const isWebm = magic.startsWith("1a45dfa3");
-  const isOgg = header?.slice(0, 4).toString("utf8") === "OggS";
-  const isWav = header?.slice(0, 4).toString("utf8") === "RIFF";
-  if (!isWebm && !isOgg && !isWav) {
-    return {
-      text: "",
-      language: "en",
-      provider: "mock",
-      error: "unsupported_audio_format",
-      segments: []
-    };
-  }
   try {
     const file = fs.createReadStream(audioPath);
     const result = await client.audio.transcriptions.create({

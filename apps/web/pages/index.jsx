@@ -5,6 +5,7 @@ import AikaToolsWorkbench from "../src/components/AikaToolsWorkbench";
 import MeetingCopilot from "../src/components/MeetingCopilot";
 
 const SERVER_URL = "http://localhost:8790";
+const ALWAYS_SERVER_STT = true;
 
 const THINKING_CUES = [
   "Hold on, I'm thinking.",
@@ -1002,7 +1003,7 @@ export default function Home() {
           stream.getTracks().forEach(t => t.stop());
         }
       };
-      recorder.start(2000);
+      recorder.start(3000);
       setMicState("listening");
       setMicStatus("Listening (server STT)...");
     } catch (err) {
@@ -1022,6 +1023,11 @@ export default function Home() {
 
   async function startMic() {
     if (micState === "listening" || micStartingRef.current || ttsActiveRef.current) return;
+    if (ALWAYS_SERVER_STT) {
+      forceServerSttRef.current = true;
+      await startServerStt();
+      return;
+    }
     if (forceServerSttRef.current) {
       await startServerStt();
       return;
