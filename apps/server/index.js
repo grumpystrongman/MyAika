@@ -41,7 +41,9 @@ import {
 } from "./integrations/fireflies.js";
 import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
-import { getProvider } from "./integrations/store.js";
+import { getProvider, setProvider } from "./integrations/store.js";
+import { searchAmazonItems } from "./integrations/amazon_paapi.js";
+import { buildMetaAuthUrl, exchangeMetaCode, getMetaToken, storeMetaToken } from "./integrations/meta.js";
 import { registry, executor } from "./mcp/index.js";
 import { redactPhi } from "./mcp/policy.js";
 import { listApprovals, denyApproval } from "./mcp/approvals.js";
@@ -245,6 +247,31 @@ if (googleStored) {
   integrationsState.google_docs.connectedAt = googleStored.connectedAt || new Date().toISOString();
   integrationsState.google_drive.connectedAt = googleStored.connectedAt || new Date().toISOString();
 }
+const slackStored = getProvider("slack");
+if (slackStored?.access_token || slackStored?.bot_token) {
+  integrationsState.slack.connected = true;
+  integrationsState.slack.connectedAt = slackStored.connectedAt || new Date().toISOString();
+}
+const discordStored = getProvider("discord");
+if (discordStored?.access_token || discordStored?.bot_token || discordStored?.webhook) {
+  integrationsState.discord.connected = true;
+  integrationsState.discord.connectedAt = discordStored.connectedAt || new Date().toISOString();
+}
+const telegramStored = getProvider("telegram");
+if (telegramStored?.token) {
+  integrationsState.telegram.connected = true;
+  integrationsState.telegram.connectedAt = telegramStored.connectedAt || new Date().toISOString();
+}
+const firefliesStored = getProvider("fireflies");
+if (firefliesStored?.connected) {
+  integrationsState.fireflies.connected = true;
+  integrationsState.fireflies.connectedAt = firefliesStored.connectedAt || new Date().toISOString();
+}
+const plexStored = getProvider("plex");
+if (plexStored?.connected) {
+  integrationsState.plex.connected = true;
+  integrationsState.plex.connectedAt = plexStored.connectedAt || new Date().toISOString();
+}
 
 // Heuristic fallback behavior
 function inferBehaviorFromText(text) {
@@ -307,12 +334,41 @@ function extractResponseText(response) {
   return parts.join("\n").trim();
 }
 
+function createOAuthState(provider) {
+  const state = Math.random().toString(36).slice(2);
+  setProvider(`${provider}_oauth_state`, { state, createdAt: Date.now() });
+  return state;
+}
+
+function validateOAuthState(provider, incoming) {
+  const stored = getProvider(`${provider}_oauth_state`);
+  const ok = stored?.state && stored.state === incoming;
+  try {
+    setProvider(`${provider}_oauth_state`, null);
+  } catch {}
+  if (!ok) throw new Error(`${provider}_oauth_state_invalid`);
+}
+
+function encodeForm(data) {
+  return Object.entries(data)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&");
+}
+
 function getWorkspaceId(req) {
   return req.headers["x-workspace-id"] || "default";
 }
 
 function getUserId(req) {
   return req.headers["x-user-id"] || "local";
+}
+
+function getBaseUrl() {
+  return process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 8790}`;
+}
+
+function getUiBaseUrl() {
+  return process.env.WEB_UI_URL || "http://localhost:3000";
 }
 
 function isAdmin(req) {
@@ -1409,8 +1465,14 @@ app.get("/api/integrations", (_req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const firefliesConfigured = Boolean(process.env.FIREFLIES_API_KEY);
   const plexConfigured = Boolean(process.env.PLEX_URL && process.env.PLEX_TOKEN);
-  const amazonConfigured = Boolean(process.env.AMAZON_CLIENT_ID && process.env.AMAZON_CLIENT_SECRET);
+  const amazonConfigured = Boolean(process.env.AMAZON_ACCESS_KEY && process.env.AMAZON_SECRET_KEY);
   const walmartConfigured = Boolean(process.env.WALMART_CLIENT_ID && process.env.WALMART_CLIENT_SECRET);
+  const slackConfigured = Boolean(process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET);
+  const discordConfigured = Boolean(process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET);
+  const telegramConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
+  const facebookConfigured = Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
+  const instagramConfigured = Boolean(process.env.INSTAGRAM_APP_ID && process.env.INSTAGRAM_APP_SECRET);
+  const whatsappConfigured = Boolean(process.env.WHATSAPP_APP_ID && process.env.WHATSAPP_APP_SECRET);
   res.json({
     integrations: {
       ...integrationsState,
@@ -1419,7 +1481,13 @@ app.get("/api/integrations", (_req, res) => {
       fireflies: { ...integrationsState.fireflies, configured: firefliesConfigured },
       amazon: { ...integrationsState.amazon, configured: amazonConfigured },
       walmart: { ...integrationsState.walmart, configured: walmartConfigured },
-      plex: { ...integrationsState.plex, configured: plexConfigured }
+      plex: { ...integrationsState.plex, configured: plexConfigured },
+      slack: { ...integrationsState.slack, configured: slackConfigured },
+      discord: { ...integrationsState.discord, configured: discordConfigured },
+      telegram: { ...integrationsState.telegram, configured: telegramConfigured },
+      facebook: { ...integrationsState.facebook, configured: facebookConfigured },
+      instagram: { ...integrationsState.instagram, configured: instagramConfigured },
+      whatsapp: { ...integrationsState.whatsapp, configured: whatsappConfigured }
     }
   });
 });
@@ -1712,11 +1780,172 @@ app.get("/api/integrations/google/auth/start", (req, res) => {
   res.redirect(`/api/integrations/google/connect?preset=${encodeURIComponent(String(req.query.preset || "core"))}`);
 });
 
-app.get("/api/integrations/amazon/auth/start", (_req, res) => {
-  if (!process.env.AMAZON_CLIENT_ID || !process.env.AMAZON_CLIENT_SECRET) {
-    return res.status(400).send("amazon_oauth_not_configured");
+app.get("/api/integrations/slack/connect", (_req, res) => {
+  if (!process.env.SLACK_CLIENT_ID || !process.env.SLACK_CLIENT_SECRET) {
+    return res.status(400).send("slack_oauth_not_configured");
   }
-  res.send("amazon_oauth_placeholder");
+  const redirectUri = process.env.SLACK_REDIRECT_URI || `${getBaseUrl()}/api/integrations/slack/callback`;
+  const scopes = process.env.SLACK_SCOPES || "chat:write,channels:read,users:read";
+  const state = createOAuthState("slack");
+  const url = `https://slack.com/oauth/v2/authorize?client_id=${encodeURIComponent(process.env.SLACK_CLIENT_ID)}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
+  res.redirect(url);
+});
+
+app.get("/api/integrations/slack/callback", async (req, res) => {
+  try {
+    const { code, state } = req.query || {};
+    validateOAuthState("slack", String(state || ""));
+    const redirectUri = process.env.SLACK_REDIRECT_URI || `${getBaseUrl()}/api/integrations/slack/callback`;
+    const body = encodeForm({
+      client_id: process.env.SLACK_CLIENT_ID,
+      client_secret: process.env.SLACK_CLIENT_SECRET,
+      code,
+      redirect_uri: redirectUri
+    });
+    const r = await fetch("https://slack.com/api/oauth.v2.access", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || "slack_oauth_failed");
+    setProvider("slack", {
+      access_token: data.access_token,
+      bot_token: data.access_token,
+      team: data.team || null,
+      authed_user: data.authed_user || null,
+      connectedAt: new Date().toISOString()
+    });
+    integrationsState.slack.connected = true;
+    integrationsState.slack.connectedAt = new Date().toISOString();
+    res.redirect(`${getUiBaseUrl()}/?integration=slack&status=success`);
+  } catch (err) {
+    res.redirect(`${getUiBaseUrl()}/?integration=slack&status=error`);
+  }
+});
+
+app.post("/api/integrations/slack/disconnect", (_req, res) => {
+  setProvider("slack", null);
+  integrationsState.slack.connected = false;
+  delete integrationsState.slack.connectedAt;
+  res.json({ ok: true });
+});
+
+app.get("/api/integrations/discord/connect", (_req, res) => {
+  if (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET) {
+    return res.status(400).send("discord_oauth_not_configured");
+  }
+  const redirectUri = process.env.DISCORD_REDIRECT_URI || `${getBaseUrl()}/api/integrations/discord/callback`;
+  const scopes = process.env.DISCORD_SCOPES || "identify";
+  const state = createOAuthState("discord");
+  const url = `https://discord.com/api/oauth2/authorize?client_id=${encodeURIComponent(process.env.DISCORD_CLIENT_ID)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&state=${encodeURIComponent(state)}`;
+  res.redirect(url);
+});
+
+app.get("/api/integrations/discord/callback", async (req, res) => {
+  try {
+    const { code, state } = req.query || {};
+    validateOAuthState("discord", String(state || ""));
+    const redirectUri = process.env.DISCORD_REDIRECT_URI || `${getBaseUrl()}/api/integrations/discord/callback`;
+    const body = encodeForm({
+      client_id: process.env.DISCORD_CLIENT_ID,
+      client_secret: process.env.DISCORD_CLIENT_SECRET,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri
+    });
+    const r = await fetch("https://discord.com/api/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+    const data = await r.json();
+    if (!data.access_token) throw new Error(data.error_description || "discord_oauth_failed");
+    setProvider("discord", {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || null,
+      expires_in: data.expires_in || null,
+      scope: data.scope || null,
+      token_type: data.token_type || null,
+      connectedAt: new Date().toISOString()
+    });
+    integrationsState.discord.connected = true;
+    integrationsState.discord.connectedAt = new Date().toISOString();
+    res.redirect(`${getUiBaseUrl()}/?integration=discord&status=success`);
+  } catch (err) {
+    res.redirect(`${getUiBaseUrl()}/?integration=discord&status=error`);
+  }
+});
+
+app.post("/api/integrations/discord/disconnect", (_req, res) => {
+  setProvider("discord", null);
+  integrationsState.discord.connected = false;
+  delete integrationsState.discord.connectedAt;
+  res.json({ ok: true });
+});
+
+app.get("/api/integrations/amazon/search", (req, res) => {
+  const q = String(req.query.q || "").trim();
+  if (!q) return res.status(400).json({ error: "query_required" });
+  searchAmazonItems({ keywords: q })
+    .then(data => res.json({ results: data.items || [], raw: data.raw || null }))
+    .catch(err => res.status(500).json({ error: err?.message || "amazon_paapi_failed" }));
+});
+
+app.get("/api/integrations/meta/connect", (req, res) => {
+  try {
+    const product = String(req.query.product || "facebook");
+    const state = createOAuthState(`meta_${product}`);
+    const url = buildMetaAuthUrl(product, state);
+    res.redirect(url);
+  } catch (err) {
+    res.status(400).send(err?.message || "meta_oauth_failed");
+  }
+});
+
+app.get("/api/integrations/meta/callback", async (req, res) => {
+  try {
+    const { code, state, product } = req.query || {};
+    const key = `meta_${String(product || "facebook")}`;
+    validateOAuthState(key, String(state || ""));
+    const token = await exchangeMetaCode({ code: String(code || ""), product: String(product || "facebook") });
+    storeMetaToken(String(product || "facebook"), token);
+    integrationsState.facebook.connected = true;
+    integrationsState.facebook.connectedAt = new Date().toISOString();
+    res.redirect(`${getUiBaseUrl()}/?integration=meta&status=success`);
+  } catch (err) {
+    res.redirect(`${getUiBaseUrl()}/?integration=meta&status=error`);
+  }
+});
+
+app.post("/api/integrations/meta/disconnect", (_req, res) => {
+  setProvider("meta", null);
+  integrationsState.facebook.connected = false;
+  integrationsState.instagram.connected = false;
+  integrationsState.whatsapp.connected = false;
+  res.json({ ok: true });
+});
+
+app.get("/api/integrations/facebook/profile", async (_req, res) => {
+  const token = getMetaToken("facebook");
+  if (!token) return res.status(400).json({ error: "facebook_not_connected" });
+  const r = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,email&access_token=${encodeURIComponent(token)}`);
+  const data = await r.json();
+  if (data.error) return res.status(500).json({ error: data.error.message || "facebook_profile_failed" });
+  res.json(data);
+});
+
+app.get("/api/integrations/facebook/posts", async (_req, res) => {
+  const token = getMetaToken("facebook");
+  if (!token) return res.status(400).json({ error: "facebook_not_connected" });
+  const r = await fetch(`https://graph.facebook.com/v19.0/me/posts?limit=10&access_token=${encodeURIComponent(token)}`);
+  const data = await r.json();
+  if (data.error) return res.status(500).json({ error: data.error.message || "facebook_posts_failed" });
+  res.json(data);
+});
+
+app.get("/api/integrations/amazon/auth/start", (_req, res) => {
+  res.status(400).send("amazon_oauth_not_supported_use_paapi_keys");
 });
 
 app.get("/api/integrations/walmart/auth/start", (_req, res) => {

@@ -1,5 +1,8 @@
-﻿export async function sendSlackMessage(channel, text) {
-  const token = process.env.SLACK_BOT_TOKEN || "";
+import { getProvider } from "./store.js";
+
+export async function sendSlackMessage(channel, text) {
+  const stored = getProvider("slack") || {};
+  const token = stored.bot_token || stored.access_token || process.env.SLACK_BOT_TOKEN || "";
   if (!token) throw new Error("slack_token_missing");
   const r = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
@@ -17,7 +20,8 @@
 }
 
 export async function sendTelegramMessage(chatId, text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN || "";
+  const stored = getProvider("telegram") || {};
+  const token = stored.token || process.env.TELEGRAM_BOT_TOKEN || "";
   if (!token) throw new Error("telegram_token_missing");
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   const r = await fetch(url, {
@@ -33,7 +37,8 @@ export async function sendTelegramMessage(chatId, text) {
 }
 
 export async function sendDiscordMessage(content) {
-  const webhook = process.env.DISCORD_WEBHOOK_URL || "";
+  const stored = getProvider("discord") || {};
+  const webhook = stored.webhook || process.env.DISCORD_WEBHOOK_URL || "";
   if (!webhook) throw new Error("discord_webhook_missing");
   const r = await fetch(webhook, {
     method: "POST",

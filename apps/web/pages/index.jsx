@@ -291,6 +291,9 @@ export default function Home() {
   const [avatarImportNotice, setAvatarImportNotice] = useState("");
   const [avatarCoreInfo, setAvatarCoreInfo] = useState({ coreJs: false, coreWasm: false });
   const [avatarCoreError, setAvatarCoreError] = useState("");
+  const [integrationActionResult, setIntegrationActionResult] = useState("");
+  const [integrationActionError, setIntegrationActionError] = useState("");
+  const [amazonQuery, setAmazonQuery] = useState("");
   const meetingCopilotRef = useRef({ start: null, stop: null });
   const meetingRecRef = useRef(null);
   const [meetingRecording, setMeetingRecording] = useState(false);
@@ -317,6 +320,7 @@ export default function Home() {
   const [fastReplies, setFastReplies] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("integrations");
   const [themeId, setThemeId] = useState("light");
   const [appBackground, setAppBackground] = useState("");
   const [avatarBackground, setAvatarBackground] = useState("none");
@@ -391,6 +395,12 @@ export default function Home() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("aika_meeting_commands", String(meetingCommandListening));
   }, [meetingCommandListening]);
+
+  useEffect(() => {
+    if (activeTab === "settings" && settingsTab === "voice") {
+      setShowSettings(true);
+    }
+  }, [activeTab, settingsTab]);
 
   useEffect(() => {
     const shouldMute = activeTab === "recordings" || meetingLock;
@@ -1503,40 +1513,57 @@ export default function Home() {
   }, []);
 
   const integrationList = [
-    { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes." },
-    { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts." },
-    { key: "fireflies", label: "Fireflies.ai", detail: "Meeting transcription and summaries." },
-    { key: "amazon", label: "Amazon", detail: "Sync shopping list (OAuth required)." },
-    { key: "walmart", label: "Walmart+", detail: "Sync shopping list (OAuth required)." },
-    { key: "facebook", label: "Facebook Pages", detail: "Post updates and monitor campaigns." },
-    { key: "instagram", label: "Instagram", detail: "Post updates and monitor campaigns." },
-    { key: "whatsapp", label: "WhatsApp", detail: "Message you directly." },
-    { key: "telegram", label: "Telegram", detail: "Message you directly." },
-    { key: "slack", label: "Slack", detail: "Team chat updates." },
-    { key: "discord", label: "Discord", detail: "Community updates." },
-    { key: "plex", label: "Plex", detail: "Check server status and library health." }
+    { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes.", method: "oauth", connectUrl: "/api/integrations/google/auth/start" },
+    { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts.", method: "oauth", connectUrl: "/api/integrations/google/auth/start" },
+    { key: "slack", label: "Slack", detail: "Team chat updates.", method: "oauth", connectUrl: "/api/integrations/slack/connect", connectLabel: "Connect OAuth" },
+    { key: "discord", label: "Discord", detail: "Community updates (OAuth identity).", method: "oauth", connectUrl: "/api/integrations/discord/connect", connectLabel: "Connect OAuth" },
+    { key: "telegram", label: "Telegram", detail: "Message you directly (bot token).", method: "token" },
+    { key: "fireflies", label: "Fireflies.ai", detail: "Meeting transcription and summaries (API key).", method: "token" },
+    { key: "plex", label: "Plex", detail: "Check server status and library health.", method: "token" },
+    { key: "amazon", label: "Amazon", detail: "Product search via Product Advertising API.", method: "api_key" },
+    { key: "walmart", label: "Walmart+", detail: "Shopping list sync (requires developer API).", method: "api_key" },
+    { key: "facebook", label: "Facebook Pages", detail: "Posts, insights, sentiment (Meta app required).", method: "oauth", connectUrl: "/api/integrations/meta/connect?product=facebook", connectLabel: "Connect Meta" },
+    { key: "instagram", label: "Instagram", detail: "Posts and metrics (Meta app required).", method: "oauth", connectUrl: "/api/integrations/meta/connect?product=instagram", connectLabel: "Connect Meta" },
+    { key: "whatsapp", label: "WhatsApp", detail: "Messaging via Cloud API (Meta app required).", method: "oauth", connectUrl: "/api/integrations/meta/connect?product=whatsapp", connectLabel: "Connect Meta" }
   ];
 
-  async function toggleIntegration(provider, next) {
+  async function toggleIntegration(provider, next, item) {
     try {
       const configured = integrations[provider]?.configured;
       if (configured === false) {
         setChatError(`${provider}_not_configured`);
         return;
       }
+      if (item?.method === "oauth" && next) {
+        const url = item.connectUrl ? `${SERVER_URL}${item.connectUrl}` : null;
+        if (url) {
+          window.open(url, "_blank", "width=520,height=680");
+          return;
+        }
+        setChatError(`${provider}_oauth_not_implemented`);
+        return;
+      }
+      if (!next) {
         if (provider === "google_docs" || provider === "google_drive") {
-          window.open(`${SERVER_URL}/api/integrations/google/auth/start`, "_blank", "width=520,height=680");
-          return;
+          await fetch(`${SERVER_URL}/api/integrations/google/disconnect`, { method: "POST" });
+        } else if (provider === "slack") {
+          await fetch(`${SERVER_URL}/api/integrations/slack/disconnect`, { method: "POST" });
+        } else if (provider === "discord") {
+          await fetch(`${SERVER_URL}/api/integrations/discord/disconnect`, { method: "POST" });
+        } else {
+          await fetch(`${SERVER_URL}/api/integrations/disconnect`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider })
+          });
         }
-        if (provider === "amazon") {
-          window.open(`${SERVER_URL}/api/integrations/amazon/auth/start`, "_blank", "width=520,height=680");
-          return;
-        }
-        if (provider === "walmart") {
-          window.open(`${SERVER_URL}/api/integrations/walmart/auth/start`, "_blank", "width=520,height=680");
-          return;
-        }
-      const url = next ? "/api/integrations/connect" : "/api/integrations/disconnect";
+        setIntegrations(prev => ({
+          ...prev,
+          [provider]: { ...prev[provider], connected: false, connectedAt: undefined }
+        }));
+        return;
+      }
+      const url = "/api/integrations/connect";
       await fetch(`${SERVER_URL}${url}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1548,6 +1575,44 @@ export default function Home() {
       }));
     } catch {
       // ignore
+    }
+  }
+
+  async function runAmazonSearch() {
+    try {
+      setIntegrationActionError("");
+      const query = amazonQuery.trim();
+      if (!query) return;
+      const r = await fetch(`${SERVER_URL}/api/integrations/amazon/search?q=${encodeURIComponent(query)}`);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "amazon_search_failed");
+      setIntegrationActionResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setIntegrationActionError(err?.message || "amazon_search_failed");
+    }
+  }
+
+  async function fetchFacebookProfile() {
+    try {
+      setIntegrationActionError("");
+      const r = await fetch(`${SERVER_URL}/api/integrations/facebook/profile`);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "facebook_profile_failed");
+      setIntegrationActionResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setIntegrationActionError(err?.message || "facebook_profile_failed");
+    }
+  }
+
+  async function fetchFacebookPosts() {
+    try {
+      setIntegrationActionError("");
+      const r = await fetch(`${SERVER_URL}/api/integrations/facebook/posts`);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "facebook_posts_failed");
+      setIntegrationActionResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setIntegrationActionError(err?.message || "facebook_posts_failed");
     }
   }
 
@@ -2073,26 +2138,18 @@ export default function Home() {
               Features
             </button>
             <button
-              onClick={() => setActiveTab("integrations")}
+              onClick={() => {
+                setActiveTab("settings");
+                setSettingsTab("integrations");
+              }}
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "integrations" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "integrations" ? "#e6f0ff" : "white"
+                border: activeTab === "settings" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "settings" ? "#e6f0ff" : "white"
               }}
             >
-              Integrations (Legacy)
-            </button>
-            <button
-              onClick={() => setActiveTab("skills")}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: activeTab === "skills" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "skills" ? "#e6f0ff" : "white"
-              }}
-            >
-              Skills (Legacy)
+              Settings
             </button>
             <button
               onClick={() => setActiveTab("debug")}
@@ -2118,7 +2175,31 @@ export default function Home() {
           </button>
         </div>
 
-          {activeTab === "integrations" && (
+          {activeTab === "settings" && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              {[
+                { key: "integrations", label: "Integrations" },
+                { key: "skills", label: "Skills" },
+                { key: "appearance", label: "Appearance" },
+                { key: "voice", label: "Voice" }
+              ].map(item => (
+                <button
+                  key={item.key}
+                  onClick={() => setSettingsTab(item.key)}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: settingsTab === item.key ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                    background: settingsTab === item.key ? "#e6f0ff" : "white"
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {activeTab === "settings" && settingsTab === "integrations" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 Connect services for Aika's agent mode
@@ -2145,7 +2226,7 @@ export default function Home() {
                       {status}{configured === false ? " · Missing config" : ""}
                     </span>
                     <button
-                      onClick={() => toggleIntegration(item.key, !integrations[item.key]?.connected)}
+                      onClick={() => toggleIntegration(item.key, !integrations[item.key]?.connected, item)}
                       style={{ padding: "6px 10px", borderRadius: 8 }}
                     >
                       {integrations[item.key]?.connected ? "Disconnect" : "Connect"}
@@ -2157,10 +2238,40 @@ export default function Home() {
               <div style={{ fontSize: 12, color: "#6b7280" }}>
                 Note: Real connections require API keys and OAuth setup. Configure them in `apps/server/.env`.
               </div>
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "white" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Integration Actions</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    value={amazonQuery}
+                    onChange={(e) => setAmazonQuery(e.target.value)}
+                    placeholder="Search Amazon for..."
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 220 }}
+                  />
+                  <button onClick={runAmazonSearch} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                    Search Amazon
+                  </button>
+                  <button onClick={fetchFacebookProfile} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                    Fetch Facebook Profile
+                  </button>
+                  <button onClick={fetchFacebookPosts} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                    Fetch Facebook Posts
+                  </button>
+                </div>
+                {integrationActionError && (
+                  <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>
+                    {integrationActionError}
+                  </div>
+                )}
+                {integrationActionResult && (
+                  <pre style={{ fontSize: 11, marginTop: 8, whiteSpace: "pre-wrap", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                    {integrationActionResult}
+                  </pre>
+                )}
+              </div>
             </div>
           )}
 
-        {activeTab === "skills" && (
+        {activeTab === "settings" && settingsTab === "skills" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 Everyday Skills (local-first)
@@ -2393,6 +2504,77 @@ export default function Home() {
                   </a>
                 )}
               </div>
+            </div>
+          )}
+
+          {activeTab === "settings" && settingsTab === "appearance" && (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Appearance
+              </div>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#374151", maxWidth: 260 }}>
+                Theme
+                <select
+                  value={themeId}
+                  onChange={(e) => setThemeId(e.target.value)}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                >
+                  {THEMES.map(t => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#374151", maxWidth: 360 }}>
+                App background image (fills the borders, not the panels)
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleBackgroundUpload(e.target.files?.[0])}
+                />
+                <button
+                  onClick={() => setAppBackground("")}
+                  style={{ marginTop: 4, padding: "4px 8px", borderRadius: 6 }}
+                >
+                  Clear background
+                </button>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#374151", maxWidth: 260 }}>
+                Avatar background
+                <select
+                  value={avatarBackground}
+                  onChange={(e) => setAvatarBackground(e.target.value)}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                >
+                  {AVATAR_BACKGROUNDS.map(bg => (
+                    <option key={bg.id} value={bg.id}>{bg.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+                <input
+                  type="checkbox"
+                  checked={meetingCommandListening}
+                  onChange={(e) => setMeetingCommandListening(e.target.checked)}
+                />
+                Listening for recording commands ("hey Aika, start recording")
+              </label>
+            </div>
+          )}
+
+          {activeTab === "settings" && settingsTab === "voice" && (
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Voice & Audio
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Voice settings are in the panel below. Open it here to edit.
+              </div>
+              <button
+                onClick={() => setShowSettings(true)}
+                style={{ padding: "6px 10px", borderRadius: 8, maxWidth: 200 }}
+              >
+                Open Voice Settings
+              </button>
             </div>
           )}
 
