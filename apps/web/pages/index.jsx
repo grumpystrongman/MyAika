@@ -432,6 +432,7 @@ export default function Home() {
   const sttRecorderRef = useRef(null);
   const sttActiveRef = useRef(false);
   const sttModeRef = useRef("browser");
+  const sttLastDataRef = useRef(0);
   const micFailCountRef = useRef(0);
   const lastMicStartRef = useRef(0);
   const forceServerSttRef = useRef(false);
@@ -946,6 +947,7 @@ export default function Home() {
       sttModeRef.current = "server";
       const stream = mediaStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
       sttActiveRef.current = true;
+      sttLastDataRef.current = Date.now();
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
         : MediaRecorder.isTypeSupported("audio/ogg")
@@ -958,7 +960,13 @@ export default function Home() {
       }
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       sttRecorderRef.current = recorder;
+      recorder.onerror = () => {
+        setMicError("stt_recorder_error");
+        setMicState("idle");
+        setMicStatus("Mic restarted");
+      };
       recorder.ondataavailable = async (evt) => {
+        sttLastDataRef.current = Date.now();
         if (!evt.data || evt.data.size < 256) return;
         try {
           const form = new FormData();
@@ -999,6 +1007,7 @@ export default function Home() {
       };
       recorder.onstop = () => {
         sttActiveRef.current = false;
+        setMicState("idle");
         if (!mediaStreamRef.current) {
           stream.getTracks().forEach(t => t.stop());
         }
@@ -1019,6 +1028,7 @@ export default function Home() {
       sttRecorderRef.current = null;
     }
     sttActiveRef.current = false;
+    sttLastDataRef.current = 0;
   }
 
   async function startMic() {
@@ -1146,6 +1156,21 @@ export default function Home() {
     if (!voiceMode || !micEnabled || micState !== "idle") return;
     startMic();
   }, [voiceMode, micEnabled, micState]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!micEnabled || !voiceMode || textOnly) return;
+      if (!sttActiveRef.current) return;
+      const age = Date.now() - (sttLastDataRef.current || 0);
+      if (age < 12000) return;
+      setMicStatus("Reconnecting mic...");
+      stopServerStt();
+      setTimeout(() => {
+        startServerStt();
+      }, 200);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [micEnabled, voiceMode, textOnly]);
 
   useEffect(() => {
     async function checkTtsEngine() {
