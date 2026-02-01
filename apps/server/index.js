@@ -1331,9 +1331,32 @@ app.get("/api/recordings/:id/audio", (req, res) => {
 });
 
 app.post("/api/stt/transcribe", sttUpload.single("audio"), async (req, res) => {
+  let sttPath = req.file?.path;
   try {
-    if (!req.file?.path) return res.status(400).json({ error: "audio_required" });
-    const result = await transcribeAudio(req.file.path);
+    if (!sttPath) return res.status(400).json({ error: "audio_required" });
+    const originalExt = path.extname(req.file.originalname || "").replace(".", "").toLowerCase();
+    const mime = String(req.file.mimetype || "").toLowerCase();
+    const inferredExt =
+      originalExt ||
+      (mime.includes("webm")
+        ? "webm"
+        : mime.includes("ogg")
+          ? "ogg"
+          : mime.includes("wav")
+            ? "wav"
+            : mime.includes("mp3") || mime.includes("mpeg")
+              ? "mp3"
+              : mime.includes("mp4")
+                ? "mp4"
+                : mime.includes("m4a")
+                  ? "m4a"
+                  : "");
+    if (inferredExt && !sttPath.toLowerCase().endsWith(`.${inferredExt}`)) {
+      const withExt = `${sttPath}.${inferredExt}`;
+      fs.renameSync(sttPath, withExt);
+      sttPath = withExt;
+    }
+    const result = await transcribeAudio(sttPath);
     if (result?.error) {
       return res.status(400).json({ error: result.error, provider: result.provider || "unknown" });
     }
@@ -1342,7 +1365,8 @@ app.post("/api/stt/transcribe", sttUpload.single("audio"), async (req, res) => {
     res.status(500).json({ error: err?.message || "stt_failed" });
   } finally {
     try {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      if (sttPath && fs.existsSync(sttPath)) fs.unlinkSync(sttPath);
+      if (req.file?.path && sttPath !== req.file.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     } catch {}
   }
 });
