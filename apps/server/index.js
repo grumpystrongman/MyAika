@@ -641,6 +641,7 @@ INSTRUCTIONS:
 - Be conversational and warm
 - Use memories as true unless corrected
 - Keep responses concise
+- Reply in English unless the user explicitly asks for another language
 - At the END, output a JSON object on its own line:
   {
     "emotion": one of ${Object.values(Emotion).join(", ")},

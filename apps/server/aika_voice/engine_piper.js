@@ -43,11 +43,16 @@ function lengthScaleFromRate(rate) {
 export async function generateWithPiper({ text, outputPath, voiceName, rate = 1.0 }) {
   let warnings = [];
   const originalText = String(text || "");
-  const safeText = originalText
+  const normalizedText = originalText
     .normalize("NFKC")
     .replace(/[\uD800-\uDFFF]/g, "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
-  if (safeText !== originalText) warnings.push("piper_text_sanitized");
+  let safeText = normalizedText
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalizedText !== originalText) warnings.push("piper_text_sanitized");
+  if (safeText !== normalizedText) warnings.push("piper_text_ascii_only");
   if (!safeText.trim()) {
     const err = new Error("piper_text_empty_after_sanitize");
     err.status = 400;
@@ -84,22 +89,42 @@ export async function generateWithPiper({ text, outputPath, voiceName, rate = 1.
     String(lengthScale)
   ];
 
-  await new Promise((resolve, reject) => {
-    const child = spawn(cmd, spawnArgs, {
-      stdio: ["pipe", "pipe", "pipe"]
+  async function runPiper(inputText) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(cmd, spawnArgs, {
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      let errText = "";
+      child.stderr.on("data", chunk => {
+        errText += chunk.toString();
+      });
+      child.on("error", reject);
+      child.on("close", code => {
+        if (code === 0) resolve();
+        else reject(new Error(errText || `piper_failed_${code}`));
+      });
+      child.stdin.write(inputText);
+      child.stdin.end();
     });
-    let errText = "";
-    child.stderr.on("data", chunk => {
-      errText += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", code => {
-      if (code === 0) resolve();
-      else reject(new Error(errText || `piper_failed_${code}`));
-    });
-    child.stdin.write(safeText);
-    child.stdin.end();
-  });
+  }
+
+  try {
+    await runPiper(safeText);
+  } catch (err) {
+    const message = String(err?.message || "");
+    if (message.includes("UnicodeEncodeError")) {
+      const asciiRetry = safeText.replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim();
+      if (asciiRetry && asciiRetry !== safeText) {
+        warnings.push("piper_unicode_retry");
+        safeText = asciiRetry;
+        await runPiper(safeText);
+      } else {
+        throw err;
+      }
+    } else {
+      throw err;
+    }
+  }
 
   if (!fs.existsSync(outputPath)) {
     throw new Error("piper_output_missing");
