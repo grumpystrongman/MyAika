@@ -103,12 +103,34 @@ export async function transcribeAudio(audioPath) {
   if (!audioPath || !fs.existsSync(audioPath)) {
     return { text: "", language: "en", provider: "none" };
   }
+  const stat = fs.statSync(audioPath);
+  if (stat.size < 256) {
+    return {
+      text: "Transcription pending (audio too short).",
+      language: "en",
+      provider: "mock",
+      segments: buildSegmentsFromText("Transcription pending (audio too short).")
+    };
+  }
   if (!client) {
     return {
       text: "Transcription pending (no provider configured).",
       language: "en",
       provider: "mock",
       segments: buildSegmentsFromText("Transcription pending (no provider configured).")
+    };
+  }
+  const header = fs.readFileSync(audioPath, { encoding: null, length: 8 });
+  const magic = header ? header.toString("hex") : "";
+  const isWebm = magic.startsWith("1a45dfa3");
+  const isOgg = header?.slice(0, 4).toString("utf8") === "OggS";
+  const isWav = header?.slice(0, 4).toString("utf8") === "RIFF";
+  if (!isWebm && !isOgg && !isWav) {
+    return {
+      text: "Transcription pending (unsupported audio format).",
+      language: "en",
+      provider: "mock",
+      segments: buildSegmentsFromText("Transcription pending (unsupported audio format).")
     };
   }
   try {
@@ -182,6 +204,7 @@ discussionPoints (array of objects {topic, summary}),
 nextSteps (array of bullets),
 nextMeeting (object {date, goal} or empty strings).
 Keep outputs concise and grounded in the transcript. Use empty strings when unknown.
+Return ONLY valid JSON. Do not include code fences.
 
 Title: ${title}
 Transcript:
@@ -193,7 +216,8 @@ ${transcript}`;
       max_output_tokens: 800
     });
     const text = extractResponseText(response);
-    const parsed = JSON.parse(text);
+    const parsed = safeJsonParse(text);
+    if (!parsed) throw new Error("summary_json_parse_failed");
     return toSummaryPayload(parsed, title);
   } catch (err) {
     console.error("Summary failed:", err);
@@ -307,4 +331,29 @@ function extractResponseText(response) {
     }
   }
   return parts.join("\n").trim();
+}
+
+function safeJsonParse(raw) {
+  if (!raw) return null;
+  let text = String(raw).trim();
+  text = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    const firstBracket = text.indexOf("[");
+    const lastBracket = text.lastIndexOf("]");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+      } catch {}
+    }
+    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+      try {
+        return JSON.parse(text.slice(firstBracket, lastBracket + 1));
+      } catch {}
+    }
+  }
+  return null;
 }
