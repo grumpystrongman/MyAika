@@ -143,7 +143,10 @@ export async function transcribeAudio(audioPath) {
     const result = await client.audio.transcriptions.create({
       file,
       model: TRANSCRIBE_MODEL,
-      language: STT_FORCE_LANGUAGE
+      language: STT_FORCE_LANGUAGE,
+      temperature: 0,
+      prompt:
+        "Transcribe natural conversational English. Ignore silence/background noise/music and return only spoken words."
     });
     const text = String(result?.text || "").trim();
     if (isLikelyHallucinatedTranscript(text)) {

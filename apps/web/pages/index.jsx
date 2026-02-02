@@ -457,6 +457,9 @@ export default function Home() {
   const sttTranscriptRef = useRef("");
   const sttChunkCountRef = useRef(0);
   const sttLastSpeechRef = useRef(0);
+  const sttBlobPartsRef = useRef([]);
+  const sttSpeechActiveRef = useRef(false);
+  const sttRequestInFlightRef = useRef(false);
   const micFailCountRef = useRef(0);
   const lastMicStartRef = useRef(0);
   const forceServerSttRef = useRef(false);
@@ -976,6 +979,9 @@ export default function Home() {
       sttLastDataRef.current = 0;
       sttChunkCountRef.current = 0;
       sttLastSpeechRef.current = 0;
+      sttBlobPartsRef.current = [];
+      sttSpeechActiveRef.current = false;
+      sttRequestInFlightRef.current = false;
       setSttDebug({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
@@ -994,13 +1000,19 @@ export default function Home() {
         setMicState("idle");
         setMicStatus("Mic restarted");
       };
-      recorder.ondataavailable = async (evt) => {
-        if (ttsActiveRef.current) return;
-        if (!evt.data || evt.data.size < 256) return;
+      const sendBufferedUtterance = async () => {
+        if (sttRequestInFlightRef.current) return;
+        const parts = sttBlobPartsRef.current;
+        if (!parts || !parts.length) return;
+        const utteranceBlob = new Blob(parts, { type: mimeType });
+        sttBlobPartsRef.current = [];
+        sttSpeechActiveRef.current = false;
+        if (!utteranceBlob || utteranceBlob.size < 512) return;
+        sttRequestInFlightRef.current = true;
         try {
           const form = new FormData();
           const ext = mimeType.includes("ogg") ? "ogg" : "webm";
-          form.append("audio", evt.data, `stt-${Date.now()}.${ext}`);
+          form.append("audio", utteranceBlob, `stt-${Date.now()}.${ext}`);
           const r = await fetch(`${SERVER_URL}/api/stt/transcribe`, { method: "POST", body: form });
           const data = await r.json().catch(() => ({}));
           if (!r.ok) {
@@ -1012,56 +1024,58 @@ export default function Home() {
             return;
           }
           if (data?.text) {
-            const speechRecently = Date.now() - (sttLastSpeechRef.current || 0) < 6000;
-            if (!speechRecently) {
-              setMicStatus("Listening...");
-              return;
-            }
             const transcriptText = String(data.text).trim();
             if (!transcriptText || /^transcription failed\b/i.test(transcriptText) || /^transcription pending\b/i.test(transcriptText)) {
               setMicError("stt_provider_unavailable");
               return;
             }
-            if (!sttTranscriptRef.current.toLowerCase().endsWith(transcriptText.toLowerCase())) {
-              sttTranscriptRef.current = `${sttTranscriptRef.current} ${transcriptText}`.trim();
-              sttChunkCountRef.current += 1;
-              setSttDebug(prev => ({
-                ...prev,
-                chunks: prev.chunks + 1,
-                lastTextAt: Date.now()
-              }));
-            }
-            sttLastDataRef.current = Date.now();
-            latestTranscriptRef.current = sttTranscriptRef.current;
+            latestTranscriptRef.current = transcriptText;
             setMicStatus(`Heard: ${latestTranscriptRef.current}`);
             setUserText(latestTranscriptRef.current);
+            setSttDebug(prev => ({
+              ...prev,
+              chunks: prev.chunks + 1,
+              lastTextAt: Date.now()
+            }));
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = setTimeout(() => {
-              const quietForMs = Date.now() - (sttLastDataRef.current || 0);
-              const quietGateMs = Math.max(700, sttSilenceMs - 250);
-              if (quietForMs < quietGateMs) return;
               const toSend = latestTranscriptRef.current.trim();
-              const wordCount = toSend ? toSend.split(/\s+/).filter(Boolean).length : 0;
-              const enoughText = toSend.length >= 10 || wordCount >= 3 || sttChunkCountRef.current >= 2;
-              if (toSend && enoughText && !isLowSignalUtterance(toSend)) {
-                setMicStatus(`Sending: ${toSend}`);
-                latestTranscriptRef.current = "";
-                sttTranscriptRef.current = "";
-                sttChunkCountRef.current = 0;
-                sttLastDataRef.current = 0;
-                sttLastSpeechRef.current = 0;
-                setSttDebug(prev => ({ ...prev, sent: prev.sent + 1 }));
-                setUserText("");
-                send(toSend);
-              } else if (toSend && isLowSignalUtterance(toSend)) {
-                setMicStatus("Listening... keep speaking");
-              } else {
+              if (!toSend || isLowSignalUtterance(toSend)) {
                 setMicStatus("Listening...");
+                return;
               }
-            }, sttSilenceMs);
+              setMicStatus(`Sending: ${toSend}`);
+              latestTranscriptRef.current = "";
+              sttTranscriptRef.current = "";
+              sttChunkCountRef.current = 0;
+              sttLastDataRef.current = 0;
+              sttLastSpeechRef.current = 0;
+              setSttDebug(prev => ({ ...prev, sent: prev.sent + 1 }));
+              setUserText("");
+              send(toSend);
+            }, 300);
           }
         } catch (err) {
           setMicError(err?.message || "stt_failed");
+        } finally {
+          sttRequestInFlightRef.current = false;
+        }
+      };
+
+      recorder.ondataavailable = async (evt) => {
+        if (ttsActiveRef.current) return;
+        if (!evt.data || evt.data.size < 256) return;
+        const now = Date.now();
+        const speechRecently = now - (sttLastSpeechRef.current || 0) < 1300;
+        if (speechRecently) {
+          sttSpeechActiveRef.current = true;
+          sttBlobPartsRef.current.push(evt.data);
+          sttLastDataRef.current = now;
+        } else if (sttSpeechActiveRef.current) {
+          const quietForMs = now - (sttLastSpeechRef.current || 0);
+          if (quietForMs >= sttSilenceMs) {
+            await sendBufferedUtterance();
+          }
         }
       };
       recorder.onstop = () => {
@@ -1071,7 +1085,7 @@ export default function Home() {
           stream.getTracks().forEach(t => t.stop());
         }
       };
-      recorder.start(1000);
+      recorder.start(500);
       setMicState("listening");
       setMicStatus("Listening (server STT)...");
     } catch (err) {
@@ -1091,6 +1105,9 @@ export default function Home() {
     sttTranscriptRef.current = "";
     sttChunkCountRef.current = 0;
     sttLastSpeechRef.current = 0;
+    sttBlobPartsRef.current = [];
+    sttSpeechActiveRef.current = false;
+    sttRequestInFlightRef.current = false;
     setSttDebug(prev => ({ ...prev, mode: "off" }));
     setMicState("idle");
     setMicStatus("Mic idle");
