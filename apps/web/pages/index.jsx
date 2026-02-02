@@ -249,6 +249,16 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function isLowSignalUtterance(text) {
+  const normalized = String(text || "").toLowerCase().trim();
+  if (!normalized) return true;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const filler = new Set(["you", "yeah", "yep", "yup", "uh", "um", "hmm", "huh", "sigh", "ah", "oh"]);
+  if (words.length === 1 && filler.has(words[0])) return true;
+  if (words.length < 2 && normalized.length < 10) return true;
+  return false;
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState("chat");
   const [integrations, setIntegrations] = useState({});
@@ -1021,8 +1031,9 @@ export default function Home() {
               const quietGateMs = Math.max(700, sttSilenceMs - 250);
               if (quietForMs < quietGateMs) return;
               const toSend = latestTranscriptRef.current.trim();
-              const enoughText = toSend.length >= 4 || sttChunkCountRef.current >= 1;
-              if (toSend && enoughText) {
+              const wordCount = toSend ? toSend.split(/\s+/).filter(Boolean).length : 0;
+              const enoughText = toSend.length >= 10 || wordCount >= 3 || sttChunkCountRef.current >= 2;
+              if (toSend && enoughText && !isLowSignalUtterance(toSend)) {
                 setMicStatus(`Sending: ${toSend}`);
                 latestTranscriptRef.current = "";
                 sttTranscriptRef.current = "";
@@ -1031,6 +1042,8 @@ export default function Home() {
                 setSttDebug(prev => ({ ...prev, sent: prev.sent + 1 }));
                 setUserText("");
                 send(toSend);
+              } else if (toSend && isLowSignalUtterance(toSend)) {
+                setMicStatus("Listening... keep speaking");
               } else {
                 setMicStatus("Listening...");
               }
