@@ -57,7 +57,7 @@ export function resolveVoicePath(rawPath) {
 }
 
 export function resolveAudioPath(id) {
-  if (!/^[a-f0-9]{64}\\.(wav|mp3)$/.test(id)) return null;
+  if (!/^[a-f0-9]{64}\.(wav|mp3)$/.test(id)) return null;
   const filePath = path.join(cacheDir, id);
   if (!filePath.startsWith(cacheDir)) return null;
   return filePath;

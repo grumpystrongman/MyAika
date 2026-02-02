@@ -460,6 +460,9 @@ export default function Home() {
   const sttBlobPartsRef = useRef([]);
   const sttSpeechActiveRef = useRef(false);
   const sttRequestInFlightRef = useRef(false);
+  const sttRmsRef = useRef(0);
+  const sttNoiseFloorRef = useRef(0.0035);
+  const sttThresholdRef = useRef(0.012);
   const micFailCountRef = useRef(0);
   const lastMicStartRef = useRef(0);
   const forceServerSttRef = useRef(false);
@@ -941,7 +944,10 @@ export default function Home() {
           sum += v * v;
         }
         const rms = Math.sqrt(sum / data.length);
-        if (rms > 0.03) sttLastSpeechRef.current = Date.now();
+        sttRmsRef.current = rms;
+        sttNoiseFloorRef.current = sttNoiseFloorRef.current * 0.96 + rms * 0.04;
+        sttThresholdRef.current = Math.max(0.01, Math.min(0.08, sttNoiseFloorRef.current * 2.6));
+        if (rms > sttThresholdRef.current) sttLastSpeechRef.current = Date.now();
         setMicLevel(Math.min(1, rms * 2.2));
         rafRef.current = requestAnimationFrame(tick);
       };
@@ -1066,8 +1072,9 @@ export default function Home() {
         if (ttsActiveRef.current) return;
         if (!evt.data || evt.data.size < 256) return;
         const now = Date.now();
-        const speechRecently = now - (sttLastSpeechRef.current || 0) < 1300;
-        if (speechRecently) {
+        const speechRecently = now - (sttLastSpeechRef.current || 0) < 1800;
+        const weakSpeech = sttRmsRef.current > sttThresholdRef.current * 0.7;
+        if (speechRecently || weakSpeech) {
           sttSpeechActiveRef.current = true;
           sttBlobPartsRef.current.push(evt.data);
           sttLastDataRef.current = now;
@@ -1075,6 +1082,8 @@ export default function Home() {
           const quietForMs = now - (sttLastSpeechRef.current || 0);
           if (quietForMs >= sttSilenceMs) {
             await sendBufferedUtterance();
+          } else {
+            sttBlobPartsRef.current.push(evt.data);
           }
         }
       };
@@ -1174,37 +1183,27 @@ export default function Home() {
   }
 
   function toggleMic() {
-    setMicEnabled(prev => {
-      // If mic is enabled but idle/stuck, one click should start listening (not force two-click toggle).
-      if (prev && micState !== "listening") {
-        setVoiceMode(true);
-        setAutoSpeak(true);
-        setTextOnly(false);
-        startMic();
-        return true;
-      }
-
-      const next = !prev;
-      if (next) {
-        unlockAudio().then(ok => {
-          if (ok) {
-            setAudioUnlocked(true);
-            setTtsError("");
-          } else {
-            setTtsError("audio_locked_click_enable");
-          }
-        });
-        setVoiceMode(true);
-        setAutoSpeak(true);
-        setTextOnly(false);
+    const listening = micEnabled && micState === "listening";
+    if (listening) {
+      setMicEnabled(false);
+      setVoiceMode(false);
+      setAutoSpeak(false);
+      setTextOnly(true);
+      stopMic();
+      return;
+    }
+    setMicEnabled(true);
+    setVoiceMode(true);
+    setAutoSpeak(true);
+    setTextOnly(false);
+    unlockAudio().then(ok => {
+      if (ok) {
+        setAudioUnlocked(true);
+        setTtsError("");
         startMic();
       } else {
-        setVoiceMode(false);
-        setAutoSpeak(false);
-        setTextOnly(true);
-        stopMic();
+        setTtsError("audio_locked_click_enable");
       }
-      return next;
     });
   }
 
@@ -1219,7 +1218,12 @@ export default function Home() {
     if (audioUnlocked) return;
     const tryUnlock = async () => {
       const ok = await unlockAudio();
-      if (ok) setAudioUnlocked(true);
+      if (ok) {
+        setAudioUnlocked(true);
+        if (micEnabled && voiceMode && !textOnly && micState !== "listening") {
+          startMic();
+        }
+      }
     };
     const onFirstGesture = () => {
       tryUnlock();
@@ -1232,7 +1236,7 @@ export default function Home() {
       window.removeEventListener("pointerdown", onFirstGesture);
       window.removeEventListener("keydown", onFirstGesture);
     };
-  }, [audioUnlocked]);
+  }, [audioUnlocked, micEnabled, voiceMode, textOnly, micState]);
 
   useEffect(() => {
     if (!audioUnlocked) return;
@@ -2877,10 +2881,13 @@ export default function Home() {
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Mic: {micEnabled ? "On" : "Off"}</div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  STT: {sttDebug.mode} · chunks {sttDebug.chunks} · sends {sttDebug.sent}
+                  STT: {sttDebug.mode} | chunks {sttDebug.chunks} | sends {sttDebug.sent}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  TTS: {lastTtsMetrics ? `${lastTtsMetrics.ms}ms · ${lastTtsMetrics.bytes} bytes` : "—"}
+                  VAD: rms {sttRmsRef.current.toFixed(3)} | gate {sttThresholdRef.current.toFixed(3)}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  TTS: {lastTtsMetrics ? `${lastTtsMetrics.ms}ms | ${lastTtsMetrics.bytes} bytes` : "-"}
                 </div>
               </div>
                 <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
@@ -3340,12 +3347,12 @@ export default function Home() {
             style={{
               padding: "12px 16px",
               borderRadius: 12,
-              border: micEnabled ? "2px solid #2b6cb0" : "1px solid #ccc",
-              background: micEnabled ? "#e6f0ff" : "white"
+              border: micEnabled && micState === "listening" ? "2px solid #2b6cb0" : "1px solid #ccc",
+              background: micEnabled && micState === "listening" ? "#e6f0ff" : "white"
             }}
-            title={micEnabled ? "Stop listening (Space)" : "Start listening (Space)"}
+            title={micEnabled && micState === "listening" ? "Stop listening (Space)" : "Start listening (Space)"}
           >
-            {micEnabled ? "Mic On" : "Mic Off"}
+            {micEnabled && micState === "listening" ? "Mic Off" : "Mic On"}
           </button>
           <button onClick={() => send()} disabled={meetingLock} style={{ padding: "12px 16px", borderRadius: 12 }}>
             Send

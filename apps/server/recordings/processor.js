@@ -9,9 +9,31 @@ const SUMMARY_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const WORDS_PER_SECOND = Number(process.env.TRANSCRIPT_WPS || 2.5);
 const STT_FORCE_LANGUAGE = (process.env.STT_FORCE_LANGUAGE || "en").trim();
 
+function isSilentWav(audioPath) {
+  try {
+    const fd = fs.openSync(audioPath, "r");
+    const header = Buffer.alloc(44);
+    fs.readSync(fd, header, 0, 44, 0);
+    fs.closeSync(fd);
+    if (header.toString("ascii", 0, 4) !== "RIFF" || header.toString("ascii", 8, 12) !== "WAVE") return false;
+    const pcm = fs.readFileSync(audioPath).subarray(44);
+    if (pcm.length < 4) return true;
+    const sampleWindow = pcm.subarray(0, Math.min(pcm.length, 120000));
+    let nonZero = 0;
+    for (let i = 0; i < sampleWindow.length; i++) {
+      if (sampleWindow[i] !== 0) nonZero += 1;
+    }
+    const ratio = nonZero / Math.max(1, sampleWindow.length);
+    return ratio < 0.01;
+  } catch {
+    return false;
+  }
+}
+
 function isLikelyHallucinatedTranscript(text) {
   const t = String(text || "").trim();
   if (!t) return true;
+  const words = t.toLowerCase().split(/\s+/).filter(Boolean);
   // Common whisper silence hallucination snippets seen in noisy/silent chunks.
   if ((/mbc/i.test(t) && /뉴스|이덕영/.test(t)) || /이덕영입니다/.test(t)) return true;
   const hasCjk = /[\u3040-\u30ff\u3400-\u9fff]/.test(t);
@@ -21,6 +43,7 @@ function isLikelyHallucinatedTranscript(text) {
   if (STT_FORCE_LANGUAGE.startsWith("en") && hasCjk && (cjkCount >= 2 || asciiLetters < 4) && t.length < 80) return true;
   // Repeated punctuation/fillers from silence.
   if (/^(uh+|um+|hmm+|mm+|ah+|oh+)[.!?]?$/.test(t.toLowerCase())) return true;
+  if (/^(thanks for watching|thank you for watching)$/i.test(t)) return true;
   return false;
 }
 
@@ -124,6 +147,15 @@ export async function transcribeAudio(audioPath) {
     return {
       text: "",
       language: "en",
+      provider: "mock",
+      error: "audio_too_short",
+      segments: []
+    };
+  }
+  if (stat.size <= 50000 && isSilentWav(audioPath)) {
+    return {
+      text: "",
+      language: STT_FORCE_LANGUAGE || "en",
       provider: "mock",
       error: "audio_too_short",
       segments: []

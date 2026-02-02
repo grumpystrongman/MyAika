@@ -11,6 +11,7 @@
     "dev:web": "npm run dev -w apps/web",
     "tts": "node apps/server/scripts/tts_sample.js",
     "voice:smoke": "node apps/server/scripts/voice_smoke.js",
+    "voice:test": "node apps/server/scripts/voice_fulltest.js",
     "aika": "node apps/server/cli/aika.js",
     "test": "node --test apps/server/tests/*.test.js",
     "gptsovits": "node apps/server/scripts/start_gptsovits.js",
