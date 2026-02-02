@@ -1144,6 +1144,15 @@ export default function Home() {
 
   function toggleMic() {
     setMicEnabled(prev => {
+      // If mic is enabled but idle/stuck, one click should start listening (not force two-click toggle).
+      if (prev && micState !== "listening") {
+        setVoiceMode(true);
+        setAutoSpeak(true);
+        setTextOnly(false);
+        startMic();
+        return true;
+      }
+
       const next = !prev;
       if (next) {
         unlockAudio().then(ok => {

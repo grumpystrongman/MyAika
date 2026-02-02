@@ -7,6 +7,21 @@ const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPE
 const TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1";
 const SUMMARY_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const WORDS_PER_SECOND = Number(process.env.TRANSCRIPT_WPS || 2.5);
+const STT_FORCE_LANGUAGE = (process.env.STT_FORCE_LANGUAGE || "en").trim();
+
+function isLikelyHallucinatedTranscript(text) {
+  const t = String(text || "").trim();
+  if (!t) return true;
+  // Common whisper silence hallucination snippets seen in noisy/silent chunks.
+  if (/^mbc\s*뉴스/i.test(t) || /이덕영입니다/.test(t)) return true;
+  const hasCjk = /[\u3040-\u30ff\u3400-\u9fff]/.test(t);
+  const asciiLetters = (t.match(/[A-Za-z]/g) || []).length;
+  // In forced English mode, short non-Latin text is usually a false positive.
+  if (STT_FORCE_LANGUAGE.startsWith("en") && hasCjk && asciiLetters < 2 && t.length < 48) return true;
+  // Repeated punctuation/fillers from silence.
+  if (/^(uh+|um+|hmm+|mm+|ah+|oh+)[.!?]?$/.test(t.toLowerCase())) return true;
+  return false;
+}
 
 export function combineChunks(recordingId, recordingsDir) {
   const chunks = listRecordingChunks(recordingId);
@@ -126,9 +141,19 @@ export async function transcribeAudio(audioPath) {
     const file = fs.createReadStream(audioPath);
     const result = await client.audio.transcriptions.create({
       file,
-      model: TRANSCRIBE_MODEL
+      model: TRANSCRIBE_MODEL,
+      language: STT_FORCE_LANGUAGE
     });
-    const text = result?.text || "";
+    const text = String(result?.text || "").trim();
+    if (isLikelyHallucinatedTranscript(text)) {
+      return {
+        text: "",
+        language: STT_FORCE_LANGUAGE || result?.language || "en",
+        provider: "openai",
+        error: "audio_too_short",
+        segments: []
+      };
+    }
     const labeled = await labelSpeakersWithLLM(text);
     const segments = labeled ? applyTimestampsToSegments(labeled) : buildSegmentsFromText(text);
     return {
