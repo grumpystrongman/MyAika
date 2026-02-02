@@ -456,6 +456,7 @@ export default function Home() {
   const sttLastDataRef = useRef(0);
   const sttTranscriptRef = useRef("");
   const sttChunkCountRef = useRef(0);
+  const sttLastSpeechRef = useRef(0);
   const micFailCountRef = useRef(0);
   const lastMicStartRef = useRef(0);
   const forceServerSttRef = useRef(false);
@@ -937,6 +938,7 @@ export default function Home() {
           sum += v * v;
         }
         const rms = Math.sqrt(sum / data.length);
+        if (rms > 0.03) sttLastSpeechRef.current = Date.now();
         setMicLevel(Math.min(1, rms * 2.2));
         rafRef.current = requestAnimationFrame(tick);
       };
@@ -967,11 +969,13 @@ export default function Home() {
   async function startServerStt() {
     if (sttActiveRef.current) return;
     try {
+      await startLevelMeter();
       sttModeRef.current = "server";
       const stream = mediaStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
       sttActiveRef.current = true;
       sttLastDataRef.current = 0;
       sttChunkCountRef.current = 0;
+      sttLastSpeechRef.current = 0;
       setSttDebug({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
@@ -991,6 +995,7 @@ export default function Home() {
         setMicStatus("Mic restarted");
       };
       recorder.ondataavailable = async (evt) => {
+        if (ttsActiveRef.current) return;
         if (!evt.data || evt.data.size < 256) return;
         try {
           const form = new FormData();
@@ -1007,6 +1012,11 @@ export default function Home() {
             return;
           }
           if (data?.text) {
+            const speechRecently = Date.now() - (sttLastSpeechRef.current || 0) < 6000;
+            if (!speechRecently) {
+              setMicStatus("Listening...");
+              return;
+            }
             const transcriptText = String(data.text).trim();
             if (!transcriptText || /^transcription failed\b/i.test(transcriptText) || /^transcription pending\b/i.test(transcriptText)) {
               setMicError("stt_provider_unavailable");
@@ -1039,6 +1049,7 @@ export default function Home() {
                 sttTranscriptRef.current = "";
                 sttChunkCountRef.current = 0;
                 sttLastDataRef.current = 0;
+                sttLastSpeechRef.current = 0;
                 setSttDebug(prev => ({ ...prev, sent: prev.sent + 1 }));
                 setUserText("");
                 send(toSend);
@@ -1079,7 +1090,10 @@ export default function Home() {
     sttLastDataRef.current = 0;
     sttTranscriptRef.current = "";
     sttChunkCountRef.current = 0;
+    sttLastSpeechRef.current = 0;
     setSttDebug(prev => ({ ...prev, mode: "off" }));
+    setMicState("idle");
+    setMicStatus("Mic idle");
   }
 
   async function startMic() {

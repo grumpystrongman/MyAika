@@ -13,11 +13,12 @@ function isLikelyHallucinatedTranscript(text) {
   const t = String(text || "").trim();
   if (!t) return true;
   // Common whisper silence hallucination snippets seen in noisy/silent chunks.
-  if (/^mbc\s*뉴스/i.test(t) || /이덕영입니다/.test(t)) return true;
+  if ((/mbc/i.test(t) && /뉴스|이덕영/.test(t)) || /이덕영입니다/.test(t)) return true;
   const hasCjk = /[\u3040-\u30ff\u3400-\u9fff]/.test(t);
+  const cjkCount = (t.match(/[\u3040-\u30ff\u3400-\u9fff]/g) || []).length;
   const asciiLetters = (t.match(/[A-Za-z]/g) || []).length;
   // In forced English mode, short non-Latin text is usually a false positive.
-  if (STT_FORCE_LANGUAGE.startsWith("en") && hasCjk && asciiLetters < 2 && t.length < 48) return true;
+  if (STT_FORCE_LANGUAGE.startsWith("en") && hasCjk && (cjkCount >= 2 || asciiLetters < 4) && t.length < 80) return true;
   // Repeated punctuation/fillers from silence.
   if (/^(uh+|um+|hmm+|mm+|ah+|oh+)[.!?]?$/.test(t.toLowerCase())) return true;
   return false;
