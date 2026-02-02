@@ -313,6 +313,7 @@ export default function Home() {
   const [micError, setMicError] = useState("");
   const [micLevel, setMicLevel] = useState(0);
   const [micStatus, setMicStatus] = useState("Mic idle");
+  const [sttDebug, setSttDebug] = useState({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
   const [chatError, setChatError] = useState("");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [textOnly, setTextOnly] = useState(false);
@@ -949,8 +950,9 @@ export default function Home() {
       sttModeRef.current = "server";
       const stream = mediaStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
       sttActiveRef.current = true;
-      sttLastDataRef.current = Date.now();
+      sttLastDataRef.current = 0;
       sttChunkCountRef.current = 0;
+      setSttDebug({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
         : MediaRecorder.isTypeSupported("audio/ogg")
@@ -969,7 +971,6 @@ export default function Home() {
         setMicStatus("Mic restarted");
       };
       recorder.ondataavailable = async (evt) => {
-        sttLastDataRef.current = Date.now();
         if (!evt.data || evt.data.size < 256) return;
         try {
           const form = new FormData();
@@ -994,27 +995,35 @@ export default function Home() {
             if (!sttTranscriptRef.current.toLowerCase().endsWith(transcriptText.toLowerCase())) {
               sttTranscriptRef.current = `${sttTranscriptRef.current} ${transcriptText}`.trim();
               sttChunkCountRef.current += 1;
+              setSttDebug(prev => ({
+                ...prev,
+                chunks: prev.chunks + 1,
+                lastTextAt: Date.now()
+              }));
             }
+            sttLastDataRef.current = Date.now();
             latestTranscriptRef.current = sttTranscriptRef.current;
             setMicStatus(`Heard: ${latestTranscriptRef.current}`);
             setUserText(latestTranscriptRef.current);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = setTimeout(() => {
               const quietForMs = Date.now() - (sttLastDataRef.current || 0);
-              if (quietForMs < 3000) return;
+              if (quietForMs < 1100) return;
               const toSend = latestTranscriptRef.current.trim();
-              const enoughText = toSend.length >= 12 || sttChunkCountRef.current >= 2;
+              const enoughText = toSend.length >= 4 || sttChunkCountRef.current >= 1;
               if (toSend && enoughText) {
                 setMicStatus(`Sending: ${toSend}`);
                 latestTranscriptRef.current = "";
                 sttTranscriptRef.current = "";
                 sttChunkCountRef.current = 0;
+                sttLastDataRef.current = 0;
+                setSttDebug(prev => ({ ...prev, sent: prev.sent + 1 }));
                 setUserText("");
                 send(toSend);
               } else {
                 setMicStatus("Listening...");
               }
-            }, 4200);
+            }, 1400);
           }
         } catch (err) {
           setMicError(err?.message || "stt_failed");
@@ -1027,7 +1036,7 @@ export default function Home() {
           stream.getTracks().forEach(t => t.stop());
         }
       };
-      recorder.start(2200);
+      recorder.start(1000);
       setMicState("listening");
       setMicStatus("Listening (server STT)...");
     } catch (err) {
@@ -1046,6 +1055,7 @@ export default function Home() {
     sttLastDataRef.current = 0;
     sttTranscriptRef.current = "";
     sttChunkCountRef.current = 0;
+    setSttDebug(prev => ({ ...prev, mode: "off" }));
   }
 
   async function startMic() {
@@ -2791,6 +2801,9 @@ export default function Home() {
                   {audioUnlocked ? "Enabled" : "Locked"}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Mic: {micEnabled ? "On" : "Off"}</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  STT: {sttDebug.mode} · chunks {sttDebug.chunks} · sends {sttDebug.sent}
+                </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>
                   TTS: {lastTtsMetrics ? `${lastTtsMetrics.ms}ms · ${lastTtsMetrics.bytes} bytes` : "—"}
                 </div>

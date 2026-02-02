@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import os from "node:os";
 import { piperVoicesDir } from "./paths.js";
 import { readWavMeta } from "./wav_meta.js";
 
@@ -90,21 +91,32 @@ export async function generateWithPiper({ text, outputPath, voiceName, rate = 1.
   ];
 
   async function runPiper(inputText) {
+    const tmpInputPath = path.join(
+      os.tmpdir(),
+      `aika-piper-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`
+    );
+    fs.writeFileSync(tmpInputPath, `${inputText}\n`, { encoding: "utf8" });
     return new Promise((resolve, reject) => {
-      const child = spawn(cmd, spawnArgs, {
-        stdio: ["pipe", "pipe", "pipe"]
+      const child = spawn(cmd, [...spawnArgs, "--input_file", tmpInputPath], {
+        stdio: ["ignore", "pipe", "pipe"]
       });
       let errText = "";
       child.stderr.on("data", chunk => {
         errText += chunk.toString();
       });
-      child.on("error", reject);
+      child.on("error", err => {
+        try {
+          if (fs.existsSync(tmpInputPath)) fs.unlinkSync(tmpInputPath);
+        } catch {}
+        reject(err);
+      });
       child.on("close", code => {
+        try {
+          if (fs.existsSync(tmpInputPath)) fs.unlinkSync(tmpInputPath);
+        } catch {}
         if (code === 0) resolve();
         else reject(new Error(errText || `piper_failed_${code}`));
       });
-      child.stdin.write(inputText);
-      child.stdin.end();
     });
   }
 
