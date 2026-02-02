@@ -327,6 +327,7 @@ export default function Home() {
   const [appBackground, setAppBackground] = useState("");
   const [avatarBackground, setAvatarBackground] = useState("none");
   const [meetingCommandListening, setMeetingCommandListening] = useState(false);
+  const [sttSilenceMs, setSttSilenceMs] = useState(1400);
   const [ttsEngineOnline, setTtsEngineOnline] = useState(null);
   const [voicePromptText, setVoicePromptText] = useState("");
   const [ttsStatus, setTtsStatus] = useState("idle");
@@ -363,10 +364,14 @@ export default function Home() {
     const savedBg = window.localStorage.getItem("aika_app_bg") || "";
     const savedAvatarBg = window.localStorage.getItem("aika_avatar_bg") || "none";
     const savedMeetingCommands = window.localStorage.getItem("aika_meeting_commands") || "";
+    const savedSilenceMs = Number(window.localStorage.getItem("aika_stt_silence_ms") || "1400");
     if (savedTheme) setThemeId(savedTheme);
     if (savedBg) setAppBackground(savedBg);
     if (savedAvatarBg) setAvatarBackground(savedAvatarBg);
     if (savedMeetingCommands) setMeetingCommandListening(savedMeetingCommands === "true");
+    if (Number.isFinite(savedSilenceMs)) {
+      setSttSilenceMs(Math.max(800, Math.min(3000, savedSilenceMs)));
+    }
   }, []);
 
   useEffect(() => {
@@ -397,6 +402,11 @@ export default function Home() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("aika_meeting_commands", String(meetingCommandListening));
   }, [meetingCommandListening]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("aika_stt_silence_ms", String(sttSilenceMs));
+  }, [sttSilenceMs]);
 
   useEffect(() => {
     if (activeTab === "settings" && settingsTab === "voice") {
@@ -1008,7 +1018,8 @@ export default function Home() {
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = setTimeout(() => {
               const quietForMs = Date.now() - (sttLastDataRef.current || 0);
-              if (quietForMs < 1100) return;
+              const quietGateMs = Math.max(700, sttSilenceMs - 250);
+              if (quietForMs < quietGateMs) return;
               const toSend = latestTranscriptRef.current.trim();
               const enoughText = toSend.length >= 4 || sttChunkCountRef.current >= 1;
               if (toSend && enoughText) {
@@ -1023,7 +1034,7 @@ export default function Home() {
               } else {
                 setMicStatus("Listening...");
               }
-            }, 1400);
+            }, sttSilenceMs);
           }
         } catch (err) {
           setMicError(err?.message || "stt_failed");
@@ -2762,6 +2773,17 @@ export default function Home() {
               >
                 Open Voice Settings
               </button>
+              <label style={{ display: "grid", gap: 4, maxWidth: 360, fontSize: 12, color: "#374151" }}>
+                Send after silence: {(sttSilenceMs / 1000).toFixed(1)}s
+                <input
+                  type="range"
+                  min={800}
+                  max={3000}
+                  step={100}
+                  value={sttSilenceMs}
+                  onChange={(e) => setSttSilenceMs(Number(e.target.value))}
+                />
+              </label>
             </div>
           )}
 
