@@ -308,6 +308,11 @@ export default function Home() {
   const [integrationActionResult, setIntegrationActionResult] = useState("");
   const [integrationActionError, setIntegrationActionError] = useState("");
   const [amazonQuery, setAmazonQuery] = useState("");
+  const [productResearch, setProductResearch] = useState(null);
+  const [productResearchOpen, setProductResearchOpen] = useState(false);
+  const [productResearchBusy, setProductResearchBusy] = useState(false);
+  const [productResearchNotice, setProductResearchNotice] = useState("");
+  const [cartBusyAsin, setCartBusyAsin] = useState("");
   const meetingCopilotRef = useRef({ start: null, stop: null });
   const meetingRecRef = useRef(null);
   const [meetingRecording, setMeetingRecording] = useState(false);
@@ -527,6 +532,11 @@ export default function Home() {
     if (!r.ok) {
       const detail = data.detail ? ` (${data.detail})` : "";
       setChatError(`${data.error || "chat_failed"}${detail}`);
+    }
+    if (data.productResearch) {
+      setProductResearch(data.productResearch);
+      setProductResearchOpen(true);
+      setProductResearchNotice("");
     }
     const reply = data.text || "";
     if (!reply) {
@@ -1864,15 +1874,51 @@ export default function Home() {
 
   async function runAmazonSearch() {
     try {
+      setProductResearchBusy(true);
+      setProductResearchNotice("");
       setIntegrationActionError("");
       const query = amazonQuery.trim();
       if (!query) return;
-      const r = await fetch(`${SERVER_URL}/api/integrations/amazon/search?q=${encodeURIComponent(query)}`);
+      const r = await fetch(`${SERVER_URL}/api/integrations/amazon/research`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, limit: 8 })
+      });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.error || "amazon_search_failed");
-      setIntegrationActionResult(JSON.stringify(data, null, 2));
+      if (!r.ok) throw new Error(data.error || "amazon_research_failed");
+      const report = data.report || null;
+      setProductResearch(report);
+      setProductResearchOpen(Boolean(report));
+      setIntegrationActionResult(JSON.stringify(report, null, 2));
     } catch (err) {
-      setIntegrationActionError(err?.message || "amazon_search_failed");
+      setIntegrationActionError(err?.message || "amazon_research_failed");
+    } finally {
+      setProductResearchBusy(false);
+    }
+  }
+
+  async function addAmazonToCart(option) {
+    if (!option?.asin) return;
+    try {
+      setCartBusyAsin(option.asin);
+      setProductResearchNotice("");
+      const r = await fetch(`${SERVER_URL}/api/integrations/amazon/cart/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asin: option.asin, quantity: 1 })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "amazon_cart_add_failed");
+      if (data.addToCartUrl) {
+        window.open(data.addToCartUrl, "_blank", "noopener,noreferrer");
+        setProductResearchNotice(`Opened Amazon add-to-cart for ${option.title || option.asin}.`);
+      } else {
+        setProductResearchNotice("Amazon cart URL returned empty.");
+      }
+    } catch (err) {
+      setProductResearchNotice(`Cart action failed: ${err?.message || "amazon_cart_add_failed"}`);
+    } finally {
+      setCartBusyAsin("");
     }
   }
 
@@ -2547,8 +2593,12 @@ export default function Home() {
                     placeholder="Search Amazon for..."
                     style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 220 }}
                   />
-                  <button onClick={runAmazonSearch} style={{ padding: "6px 10px", borderRadius: 8 }}>
-                    Search Amazon
+                  <button
+                    onClick={runAmazonSearch}
+                    disabled={productResearchBusy || !amazonQuery.trim()}
+                    style={{ padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    {productResearchBusy ? "Analyzing..." : "Analyze Product"}
                   </button>
                   <button onClick={fetchFacebookProfile} style={{ padding: "6px 10px", borderRadius: 8 }}>
                     Fetch Facebook Profile
@@ -2567,6 +2617,9 @@ export default function Home() {
                     {integrationActionResult}
                   </pre>
                 )}
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+                  Product analysis opens a recommendation popup with best-value pick and cart actions.
+                </div>
               </div>
             </div>
           )}
@@ -3892,6 +3945,149 @@ export default function Home() {
             Hotkey: Space (when not typing)
           </div>
         </>
+        )}
+        {productResearchOpen && productResearch && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15,23,42,0.55)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 60
+            }}
+          >
+            <div
+              style={{
+                width: "min(900px, 92vw)",
+                maxHeight: "86vh",
+                overflow: "auto",
+                background: "var(--panel-bg)",
+                color: "var(--text-primary)",
+                border: "1px solid var(--panel-border)",
+                borderRadius: 14,
+                padding: 14,
+                boxShadow: "0 24px 44px rgba(0,0,0,0.35)"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 700 }}>Product Decision Report</div>
+                  <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                    Query: {productResearch.query}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setProductResearchOpen(false)}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db" }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 12 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Analysis</div>
+                  <div style={{ fontSize: 13, marginBottom: 8 }}>{productResearch?.analysis?.summary || "(no summary)"}</div>
+                  <div style={{ fontSize: 13, marginBottom: 6 }}>
+                    <b>Recommendation:</b> {productResearch?.analysis?.recommendation || "(none)"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+                    <b>Reasoning:</b> {productResearch?.analysis?.reasoning || "(not provided)"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#92400e" }}>
+                    <b>Watchouts:</b> {productResearch?.analysis?.watchouts || "Verify seller quality and return policy."}
+                  </div>
+                </div>
+
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Top Pick</div>
+                  {productResearch?.recommendationItem ? (
+                    <>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{productResearch.recommendationItem.title}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                        Price: {productResearch.recommendationItem.priceDisplay || "(price unavailable)"}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                        {productResearch.recommendationItem.url && (
+                          <a
+                            href={productResearch.recommendationItem.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", textDecoration: "none" }}
+                          >
+                            Open Listing
+                          </a>
+                        )}
+                        <button
+                          onClick={() => addAmazonToCart(productResearch.recommendationItem)}
+                          disabled={!productResearch.recommendationItem.asin || cartBusyAsin === productResearch.recommendationItem.asin}
+                          style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db" }}
+                        >
+                          {cartBusyAsin === productResearch.recommendationItem.asin ? "Adding..." : "Add to Amazon Cart"}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No top pick yet.</div>
+                  )}
+                  {productResearchNotice && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#2563eb" }}>{productResearchNotice}</div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12, border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Compared Options</div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {(productResearch.options || []).map((option, idx) => (
+                    <div
+                      key={`${option.asin || "opt"}-${idx}`}
+                      style={{
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 10,
+                        padding: 8,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        alignItems: "flex-start"
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{option.title || "(untitled)"}</div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                          {option.priceDisplay || "Price unavailable"}{option.asin ? ` • ASIN ${option.asin}` : ""}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {option.url && (
+                          <a
+                            href={option.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #d1d5db", textDecoration: "none", fontSize: 12 }}
+                          >
+                            Open
+                          </a>
+                        )}
+                        <button
+                          onClick={() => addAmazonToCart(option)}
+                          disabled={!option.asin || cartBusyAsin === option.asin}
+                          style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: 12 }}
+                        >
+                          {cartBusyAsin === option.asin ? "Adding..." : "Add to Cart"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {(productResearch.options || []).length === 0 && (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No options returned for this query.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

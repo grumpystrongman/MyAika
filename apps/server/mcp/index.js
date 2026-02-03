@@ -12,6 +12,8 @@ import {
   firefliesTranscripts,
   weatherCurrent,
   webSearch,
+  shoppingProductResearch,
+  shoppingAmazonAddToCart,
   slackPost,
   telegramSend,
   discordSend
@@ -188,6 +190,26 @@ registry.register(
     riskLevel: "low"
   },
   webSearch
+);
+
+registry.register(
+  {
+    name: "shopping.productResearch",
+    description: "Deep product research with price comparison and recommendation.",
+    paramsSchema: { query: "string", budget: "number", limit: "number", context: "string" },
+    riskLevel: "medium"
+  },
+  shoppingProductResearch
+);
+
+registry.register(
+  {
+    name: "shopping.amazonAddToCart",
+    description: "Prepare an Amazon add-to-cart URL for an ASIN.",
+    paramsSchema: { asin: "string", quantity: "number" },
+    riskLevel: "medium"
+  },
+  shoppingAmazonAddToCart
 );
 
 registry.register(

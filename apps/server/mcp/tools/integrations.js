@@ -3,6 +3,7 @@ import { fetchFirefliesTranscripts } from "../../integrations/fireflies.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "../../integrations/messaging.js";
 import { fetchCurrentWeather } from "../../integrations/weather.js";
 import { searchWeb } from "../../integrations/web_search.js";
+import { buildAmazonAddToCartUrl, runProductResearch } from "../../integrations/product_research.js";
 import { writeOutbox } from "../../storage/outbox.js";
 
 export async function plexIdentity({ mode = "localStub", token } = {}) {
@@ -65,4 +66,23 @@ export async function weatherCurrent({ location }) {
 export async function webSearch({ query, limit = 5 }) {
   const result = await searchWeb(query, limit);
   return result;
+}
+
+export async function shoppingProductResearch({ query, budget = null, limit = 8, context = "" }) {
+  return runProductResearch({
+    query: context ? `${query} ${context}`.trim() : query,
+    budget,
+    limit
+  });
+}
+
+export async function shoppingAmazonAddToCart({ asin, quantity = 1 }) {
+  const addToCartUrl = buildAmazonAddToCartUrl({ asin, quantity });
+  const qty = Math.max(1, Math.min(10, Math.floor(Number(quantity) || 1)));
+  return {
+    asin,
+    quantity: qty,
+    addToCartUrl,
+    note: "Open this URL while signed in to Amazon to add to cart."
+  };
 }

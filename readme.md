@@ -137,6 +137,23 @@ Optional env:
 - Recall:
   - `what do you remember about Jeff`
 
+### Product Decision Agent (Amazon research)
+Aika can run product research and return a recommendation popup with compared options.
+
+Chat prompts:
+- `find best price for wireless gaming mouse`
+- `research best budget laptop stand`
+- `compare prices for air purifier`
+
+API:
+- `POST /api/integrations/amazon/research` `{ query, budget?, limit? }`
+- `POST /api/integrations/amazon/cart/add` `{ asin, quantity }` (prepares add-to-cart URL)
+
+Notes:
+- If Amazon Product Advertising keys are configured, Aika uses live Amazon listings.
+- If not configured, Aika still returns a research panel from web sources.
+- Cart behavior is add-to-cart only (no purchase flow).
+
 ### Slack
 Set `SLACK_BOT_TOKEN`, then call:
 - `POST /api/integrations/slack/post` `{ channel, text }`

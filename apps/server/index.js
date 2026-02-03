@@ -43,6 +43,7 @@ import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
 import { fetchCurrentWeather } from "./integrations/weather.js";
 import { searchWeb } from "./integrations/web_search.js";
+import { buildAmazonAddToCartUrl, runProductResearch } from "./integrations/product_research.js";
 import { getProvider, setProvider } from "./integrations/store.js";
 import { searchAmazonItems } from "./integrations/amazon_paapi.js";
 import { buildMetaAuthUrl, exchangeMetaCode, getMetaToken, storeMetaToken } from "./integrations/meta.js";
@@ -448,6 +449,26 @@ function parseWebQuery(userText) {
   return null;
 }
 
+function parseProductResearchQuery(userText) {
+  const text = String(userText || "").trim();
+  const hasCommerceCue = /\b(price|deal|product|amazon|buy|purchase|shopping|cart|compare)\b/i.test(text);
+  if (!hasCommerceCue && !/\bbest\b/i.test(text)) return null;
+  const direct = text.match(
+    /^(?:find|research|compare|analyze)\s+(?:the\s+)?(?:best\s+price\s+for\s+|best\s+|price\s+for\s+|shopping\s+for\s+)?(.+)$/i
+  );
+  if (direct?.[1]) return direct[1].trim();
+  const priceIntent = /\b(best price|cheapest|lowest price|price compare|compare prices|deal on)\b/i.test(text);
+  const amazonIntent = /\bamazon|product\b/i.test(text);
+  if (priceIntent || amazonIntent) {
+    const cleaned = text
+      .replace(/\b(can you|please|aika|hey aika|find|research|compare|analyze|for me|on amazon|at amazon|best price|cheapest|lowest price|price compare|compare prices|deal on)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (cleaned.length >= 3) return cleaned;
+  }
+  return null;
+}
+
 function formatWeatherText(weather) {
   const place = [weather.location?.name, weather.location?.admin1, weather.location?.country]
     .filter(Boolean)
@@ -473,6 +494,21 @@ function formatSearchResults(searchResult) {
     return `${idx + 1}. ${title}${snippet ? ` - ${snippet}` : ""}${url ? `\n   ${url}` : ""}`;
   });
   return `Top web results for "${searchResult.query}":\n${lines.join("\n")}`;
+}
+
+function formatProductResearchText(report) {
+  const best = report?.recommendationItem;
+  const fallback = `I finished the product research for "${report?.query || "your request"}".`;
+  if (!best) {
+    return `${fallback} I need more pricing data before recommending a top pick.`;
+  }
+  const lines = [
+    `I ran a product analysis for "${report.query}".`,
+    `Recommendation: ${best.title}${best.priceDisplay ? ` at ${best.priceDisplay}` : ""}.`,
+    report?.analysis?.reasoning ? `Why: ${report.analysis.reasoning}` : "",
+    "I opened the detailed comparison panel so you can review options and add one to Amazon cart."
+  ].filter(Boolean);
+  return lines.join(" ");
 }
 
 function parseMemoryWrite(userText) {
@@ -687,6 +723,28 @@ app.post("/chat", async (req, res) => {
         makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 }),
         { memories: displayMatches }
       );
+    }
+
+    const productQuery = parseProductResearchQuery(userText);
+    if (productQuery) {
+      try {
+        const report = await runProductResearch({
+          query: productQuery,
+          limit: 8,
+          openaiClient: process.env.OPENAI_API_KEY ? client : null,
+          model: OPENAI_MODEL
+        });
+        return sendAssistantReply(
+          formatProductResearchText(report),
+          makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.5 }),
+          { productResearch: report, tool: "shopping.productResearch" }
+        );
+      } catch (err) {
+        return sendAssistantReply(
+          `I could not complete product research right now (${err?.message || "product_research_failed"}).`,
+          makeBehavior({ emotion: Emotion.SAD, intensity: 0.45 })
+        );
+      }
     }
 
     const weatherRequested = /\b(weather|forecast|temperature)\b/i.test(userText);
@@ -2266,6 +2324,43 @@ app.get("/api/integrations/amazon/search", (req, res) => {
   searchAmazonItems({ keywords: q })
     .then(data => res.json({ results: data.items || [], raw: data.raw || null }))
     .catch(err => res.status(500).json({ error: err?.message || "amazon_paapi_failed" }));
+});
+
+app.post("/api/integrations/amazon/research", async (req, res) => {
+  try {
+    const query = String(req.body?.query || "").trim();
+    const budget = req.body?.budget;
+    const limit = Number(req.body?.limit || 8);
+    if (!query) return res.status(400).json({ error: "query_required" });
+    const report = await runProductResearch({
+      query,
+      budget,
+      limit,
+      openaiClient: process.env.OPENAI_API_KEY ? client : null,
+      model: OPENAI_MODEL
+    });
+    res.json({ ok: true, report });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "amazon_research_failed" });
+  }
+});
+
+app.post("/api/integrations/amazon/cart/add", (req, res) => {
+  try {
+    const asin = String(req.body?.asin || "").trim();
+    const quantity = Number(req.body?.quantity || 1);
+    if (!asin) return res.status(400).json({ error: "asin_required" });
+    const addToCartUrl = buildAmazonAddToCartUrl({ asin, quantity });
+    res.json({
+      ok: true,
+      asin,
+      quantity: Math.max(1, Math.min(10, Math.floor(quantity) || 1)),
+      addToCartUrl,
+      note: "Open this URL while signed in to Amazon to add to cart."
+    });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "amazon_cart_add_failed" });
+  }
 });
 
 app.get("/api/integrations/weather/current", async (req, res) => {
