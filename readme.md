@@ -115,6 +115,9 @@ Aika can now use live internet helpers directly from chat:
 - Weather examples:
   - `what is the weather in Seattle`
   - `forecast in Dallas`
+  - Set once, then ask without city:
+    - `my city is Tampa, FL`
+    - `what is the weather`
 - Web search examples:
   - `search web for best noise canceling headphones`
   - `look up latest NASA news`
@@ -129,6 +132,8 @@ Optional env:
 ### Persistent chat memory quick commands
 - Save an explicit memory:
   - `remember that Jeff prefers concise summaries`
+- Save location memory:
+  - `my city is Seattle, WA`
 - Recall:
   - `what do you remember about Jeff`
 

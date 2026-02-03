@@ -38,10 +38,7 @@ function weatherText(code) {
   return WEATHER_CODE_TEXT[Number(code)] || "Unknown";
 }
 
-export async function fetchCurrentWeather(location) {
-  const query = String(location || "").trim();
-  if (!query) throw new Error("location_required");
-
+async function geocodeFirstPlace(query) {
   const geoUrl = new URL("https://geocoding-api.open-meteo.com/v1/search");
   geoUrl.searchParams.set("name", query);
   geoUrl.searchParams.set("count", "1");
@@ -50,7 +47,27 @@ export async function fetchCurrentWeather(location) {
   const geoResp = await fetch(geoUrl.toString());
   if (!geoResp.ok) throw new Error(`weather_geocode_failed_${geoResp.status}`);
   const geoData = await geoResp.json();
-  const place = Array.isArray(geoData?.results) ? geoData.results[0] : null;
+  return Array.isArray(geoData?.results) ? geoData.results[0] : null;
+}
+
+export async function fetchCurrentWeather(location) {
+  const query = String(location || "").trim();
+  if (!query) throw new Error("location_required");
+
+  const candidates = [query];
+  if (query.includes(",")) {
+    candidates.push(query.split(",")[0].trim());
+    candidates.push(query.replace(/,/g, " ").replace(/\s+/g, " ").trim());
+  }
+  const withoutStateAbbrev = query.replace(/\b[A-Z]{2}\b/g, "").replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  if (withoutStateAbbrev && !candidates.includes(withoutStateAbbrev)) candidates.push(withoutStateAbbrev);
+
+  let place = null;
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    place = await geocodeFirstPlace(candidate);
+    if (place) break;
+  }
   if (!place) throw new Error("weather_location_not_found");
 
   const lat = toNumber(place.latitude);

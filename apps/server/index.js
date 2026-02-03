@@ -382,14 +382,61 @@ function getUiBaseUrl() {
   return process.env.WEB_UI_URL || "http://localhost:3000";
 }
 
-function parseWeatherLocation(userText) {
+function normalizeLocation(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^[,.\s]+|[,.\s]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function extractLocationFromText(text) {
+  const input = String(text || "").trim();
+  if (!input) return null;
+  const patterns = [
+    /\b(?:i live in|my city is|my location is|i'm based in|i am based in|home base is)\s+([a-z0-9 ,.'-]{2,})$/i,
+    /\b(?:location|city|home)\s*[:=-]\s*([a-z0-9 ,.'-]{2,})$/i
+  ];
+  for (const re of patterns) {
+    const m = input.match(re);
+    if (m?.[1]) return normalizeLocation(m[1]);
+  }
+  return null;
+}
+
+function getStoredHomeLocation(db) {
+  try {
+    const rows = db
+      .prepare(
+        `SELECT content, tags
+         FROM memories
+         WHERE lower(tags) LIKE '%location%'
+            OR lower(content) LIKE '%live in%'
+            OR lower(content) LIKE '%city is%'
+            OR lower(content) LIKE 'home location:%'
+         ORDER BY id DESC
+         LIMIT 30`
+      )
+      .all();
+    for (const row of rows) {
+      const fromMemory = extractLocationFromText(row?.content || "");
+      if (fromMemory) return fromMemory;
+      const labeled = String(row?.content || "").match(/^home location:\s*(.+)$/i);
+      if (labeled?.[1]) return normalizeLocation(labeled[1]);
+    }
+  } catch {
+    // ignore lookup errors and fall back
+  }
+  return null;
+}
+
+function parseWeatherLocation(userText, fallbackLocation = null) {
   const text = String(userText || "").trim();
   if (!/\b(weather|forecast|temperature)\b/i.test(text)) return null;
   const m1 = text.match(/\b(?:in|at|for)\s+([a-z0-9 ,.'-]{2,})$/i);
-  if (m1?.[1]) return m1[1].trim();
+  if (m1?.[1]) return normalizeLocation(m1[1]);
   const m2 = text.match(/\bweather\s+([a-z0-9 ,.'-]{2,})$/i);
-  if (m2?.[1]) return m2[1].trim();
-  return process.env.DEFAULT_WEATHER_LOCATION || null;
+  if (m2?.[1]) return normalizeLocation(m2[1]);
+  return normalizeLocation(fallbackLocation || process.env.DEFAULT_WEATHER_LOCATION || "");
 }
 
 function parseWebQuery(userText) {
@@ -432,7 +479,7 @@ function parseMemoryWrite(userText) {
   const text = String(userText || "").trim();
   const m = text.match(/^(?:remember|save this|store this)\s*(?:that)?\s*[:,-]?\s*(.+)$/i);
   if (!m?.[1]) return null;
-  const fact = m[1].trim();
+  const fact = normalizeLocation(m[1]);
   return fact.length ? fact : null;
 }
 
@@ -582,15 +629,38 @@ app.post("/chat", async (req, res) => {
       return res.json({ text, behavior, ...extra });
     };
 
+    const statedLocation = extractLocationFromText(userText);
+    if (statedLocation) {
+      addMemory(db, {
+        role: "system",
+        content: `Home location: ${statedLocation}`,
+        tags: "fact,location,profile"
+      });
+      return sendAssistantReply(
+        `Got it. I will remember your location as ${statedLocation}, and use it when you ask for weather.`,
+        makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 })
+      );
+    }
+
     const explicitMemory = parseMemoryWrite(userText);
     if (explicitMemory) {
+      const locationInMemory = extractLocationFromText(explicitMemory);
       addMemory(db, {
         role: "system",
         content: explicitMemory,
-        tags: "fact,explicit"
+        tags: locationInMemory ? "fact,explicit,location" : "fact,explicit"
       });
+      if (locationInMemory) {
+        addMemory(db, {
+          role: "system",
+          content: `Home location: ${locationInMemory}`,
+          tags: "fact,location,profile"
+        });
+      }
       return sendAssistantReply(
-        `Got it. I'll remember this: "${explicitMemory}"`,
+        locationInMemory
+          ? `Got it. I will remember your location as ${locationInMemory}, and use it for weather.`
+          : `Got it. I'll remember this: "${explicitMemory}"`,
         makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 })
       );
     }
@@ -619,7 +689,14 @@ app.post("/chat", async (req, res) => {
       );
     }
 
-    const weatherLocation = parseWeatherLocation(userText);
+    const weatherRequested = /\b(weather|forecast|temperature)\b/i.test(userText);
+    const weatherLocation = parseWeatherLocation(userText, getStoredHomeLocation(db));
+    if (weatherRequested && !weatherLocation) {
+      return sendAssistantReply(
+        "I can do that. Tell me your location once (for example: \"my city is Seattle, WA\"), and after that just ask \"what is the weather\".",
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+      );
+    }
     if (weatherLocation) {
       try {
         const weather = await fetchCurrentWeather(weatherLocation);
