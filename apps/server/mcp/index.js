@@ -10,6 +10,8 @@ import { writeMemoryTool, searchMemoryTool, rotateKeyTool } from "./tools/memory
 import {
   plexIdentity,
   firefliesTranscripts,
+  weatherCurrent,
+  webSearch,
   slackPost,
   telegramSend,
   discordSend
@@ -166,6 +168,26 @@ registry.register(
     riskLevel: "medium"
   },
   firefliesTranscripts
+);
+
+registry.register(
+  {
+    name: "weather.current",
+    description: "Get current weather for a location.",
+    paramsSchema: { location: "string" },
+    riskLevel: "low"
+  },
+  weatherCurrent
+);
+
+registry.register(
+  {
+    name: "web.search",
+    description: "Search the web and return top results.",
+    paramsSchema: { query: "string", limit: "number" },
+    riskLevel: "low"
+  },
+  webSearch
 );
 
 registry.register(

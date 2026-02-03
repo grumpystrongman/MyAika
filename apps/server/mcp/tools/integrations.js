@@ -1,6 +1,8 @@
 import { fetchPlexIdentity } from "../../integrations/plex.js";
 import { fetchFirefliesTranscripts } from "../../integrations/fireflies.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "../../integrations/messaging.js";
+import { fetchCurrentWeather } from "../../integrations/weather.js";
+import { searchWeb } from "../../integrations/web_search.js";
 import { writeOutbox } from "../../storage/outbox.js";
 
 export async function plexIdentity({ mode = "localStub", token } = {}) {
@@ -53,4 +55,14 @@ export async function discordSend({ channelId, message }) {
     const outbox = writeOutbox({ type: "discord", channelId, message, transport: "stub", error: String(err) });
     return { data: outbox.record, transport: "stub" };
   }
+}
+
+export async function weatherCurrent({ location }) {
+  const weather = await fetchCurrentWeather(location);
+  return weather;
+}
+
+export async function webSearch({ query, limit = 5 }) {
+  const result = await searchWeb(query, limit);
+  return result;
 }

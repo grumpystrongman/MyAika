@@ -110,6 +110,28 @@ Set `FIREFLIES_API_KEY` and restart the server, then call:
 
 Fireflies GraphQL API docs. citeturn0search2
 
+### Weather + Web Search (chat-enabled)
+Aika can now use live internet helpers directly from chat:
+- Weather examples:
+  - `what is the weather in Seattle`
+  - `forecast in Dallas`
+- Web search examples:
+  - `search web for best noise canceling headphones`
+  - `look up latest NASA news`
+
+Endpoints:
+- `GET /api/integrations/weather/current?location=Seattle`
+- `GET /api/integrations/web/search?q=latest%20nasa%20news&limit=5`
+
+Optional env:
+- `DEFAULT_WEATHER_LOCATION` (used when a weather prompt has no location)
+
+### Persistent chat memory quick commands
+- Save an explicit memory:
+  - `remember that Jeff prefers concise summaries`
+- Recall:
+  - `what do you remember about Jeff`
+
 ### Slack
 Set `SLACK_BOT_TOKEN`, then call:
 - `POST /api/integrations/slack/post` `{ channel, text }`

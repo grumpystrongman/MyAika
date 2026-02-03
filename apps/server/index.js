@@ -41,6 +41,8 @@ import {
 } from "./integrations/fireflies.js";
 import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
+import { fetchCurrentWeather } from "./integrations/weather.js";
+import { searchWeb } from "./integrations/web_search.js";
 import { getProvider, setProvider } from "./integrations/store.js";
 import { searchAmazonItems } from "./integrations/amazon_paapi.js";
 import { buildMetaAuthUrl, exchangeMetaCode, getMetaToken, storeMetaToken } from "./integrations/meta.js";
@@ -380,6 +382,68 @@ function getUiBaseUrl() {
   return process.env.WEB_UI_URL || "http://localhost:3000";
 }
 
+function parseWeatherLocation(userText) {
+  const text = String(userText || "").trim();
+  if (!/\b(weather|forecast|temperature)\b/i.test(text)) return null;
+  const m1 = text.match(/\b(?:in|at|for)\s+([a-z0-9 ,.'-]{2,})$/i);
+  if (m1?.[1]) return m1[1].trim();
+  const m2 = text.match(/\bweather\s+([a-z0-9 ,.'-]{2,})$/i);
+  if (m2?.[1]) return m2[1].trim();
+  return process.env.DEFAULT_WEATHER_LOCATION || null;
+}
+
+function parseWebQuery(userText) {
+  const text = String(userText || "").trim();
+  let m = text.match(/^(?:search(?: the)? web for|look up|find online)\s+(.+)$/i);
+  if (m?.[1]) return m[1].trim();
+  m = text.match(/^google\s+(.+)$/i);
+  if (m?.[1]) return m[1].trim();
+  return null;
+}
+
+function formatWeatherText(weather) {
+  const place = [weather.location?.name, weather.location?.admin1, weather.location?.country]
+    .filter(Boolean)
+    .join(", ");
+  const c = weather.current || {};
+  return [
+    `Current weather for ${place || "requested location"}:`,
+    `${c.weatherText || "Unknown conditions"}, ${c.temperatureC ?? "?"}°C (feels like ${c.apparentTemperatureC ?? "?"}°C).`,
+    `Humidity ${c.humidityPct ?? "?"}% · Wind ${c.windSpeedKmh ?? "?"} km/h · Precipitation ${c.precipitationMm ?? "?"} mm.`,
+    c.observedAt ? `Observed at ${c.observedAt}.` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function formatSearchResults(searchResult) {
+  const items = Array.isArray(searchResult?.results) ? searchResult.results : [];
+  if (!items.length) return `I couldn't find strong results for "${searchResult?.query || "that query"}".`;
+  const lines = items.slice(0, 5).map((item, idx) => {
+    const title = item.title || `Result ${idx + 1}`;
+    const snippet = item.snippet || "";
+    const url = item.url || "";
+    return `${idx + 1}. ${title}${snippet ? ` - ${snippet}` : ""}${url ? `\n   ${url}` : ""}`;
+  });
+  return `Top web results for "${searchResult.query}":\n${lines.join("\n")}`;
+}
+
+function parseMemoryWrite(userText) {
+  const text = String(userText || "").trim();
+  const m = text.match(/^(?:remember|save this|store this)\s*(?:that)?\s*[:,-]?\s*(.+)$/i);
+  if (!m?.[1]) return null;
+  const fact = m[1].trim();
+  return fact.length ? fact : null;
+}
+
+function parseMemoryRecall(userText) {
+  const text = String(userText || "").trim();
+  if (!/\b(remember|recall|memory|what do you know about|what do you remember)\b/i.test(text)) return null;
+  const m = text.match(/\b(?:about|regarding|on)\s+(.+)$/i);
+  if (m?.[1]) return m[1].trim();
+  return text;
+}
+
 function isAdmin(req) {
   return String(req.headers["x-user-role"] || "").toLowerCase() === "admin";
 }
@@ -502,18 +566,99 @@ app.post("/chat", async (req, res) => {
     if (!userText || typeof userText !== "string") {
       return res.status(400).json({ error: "userText required" });
     }
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: "missing_openai_api_key" });
+    const lowerText = userText.toLowerCase();
+    addMemory(db, {
+      role: "user",
+      content: userText,
+      tags: "message"
+    });
+
+    const sendAssistantReply = (text, behavior = makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }), extra = {}) => {
+      addMemory(db, {
+        role: "assistant",
+        content: text,
+        tags: "reply"
+      });
+      return res.json({ text, behavior, ...extra });
+    };
+
+    const explicitMemory = parseMemoryWrite(userText);
+    if (explicitMemory) {
+      addMemory(db, {
+        role: "system",
+        content: explicitMemory,
+        tags: "fact,explicit"
+      });
+      return sendAssistantReply(
+        `Got it. I'll remember this: "${explicitMemory}"`,
+        makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 })
+      );
     }
 
-    const lowerText = userText.toLowerCase();
+    if (/\b(what do you remember|what do you know about|do you remember|recall)\b/i.test(userText)) {
+      const recallQuery = parseMemoryRecall(userText) || userText;
+      const matches = searchMemories(db, recallQuery, 12);
+      const explicitFacts = matches.filter(m => String(m.tags || "").toLowerCase().includes("fact"));
+      const filtered = matches.filter(
+        m => !/^(remember|save this|store this|what do you remember|what do you know about|do you remember|recall)\b/i.test(String(m.content || "").toLowerCase())
+      );
+      const displayMatches = (explicitFacts.length ? explicitFacts : filtered.length ? filtered : matches).slice(0, 8);
+      if (!displayMatches.length) {
+        return sendAssistantReply(
+          "I don't have a stored memory for that yet. You can say: Remember that ...",
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 })
+        );
+      }
+      const memoryText = displayMatches
+        .map(m => `- [${new Date(m.created_at).toLocaleString()}] (${m.role}) ${m.content}`)
+        .join("\n");
+      return sendAssistantReply(
+        `Here's what I remember:\n${memoryText}`,
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 }),
+        { memories: displayMatches }
+      );
+    }
+
+    const weatherLocation = parseWeatherLocation(userText);
+    if (weatherLocation) {
+      try {
+        const weather = await fetchCurrentWeather(weatherLocation);
+        return sendAssistantReply(
+          formatWeatherText(weather),
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+          { tool: "weather.current", data: weather }
+        );
+      } catch (err) {
+        return sendAssistantReply(
+          `I couldn't fetch weather for "${weatherLocation}" right now (${err?.message || "request_failed"}).`,
+          makeBehavior({ emotion: Emotion.SAD, intensity: 0.45 })
+        );
+      }
+    }
+
+    const webQuery = parseWebQuery(userText);
+    if (webQuery) {
+      try {
+        const searchResult = await searchWeb(webQuery, 5);
+        return sendAssistantReply(
+          formatSearchResults(searchResult),
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 }),
+          { tool: "web.search", data: searchResult }
+        );
+      } catch (err) {
+        return sendAssistantReply(
+          `I couldn't complete that web search right now (${err?.message || "request_failed"}).`,
+          makeBehavior({ emotion: Emotion.SAD, intensity: 0.45 })
+        );
+      }
+    }
+
     if (lowerText.includes("fireflies")) {
       if (!process.env.FIREFLIES_API_KEY) {
-        return res.json({
-          text:
-            "Fireflies is not configured yet. Please set FIREFLIES_API_KEY in apps/server/.env and restart the server.",
-          behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
-        });
+        return sendAssistantReply(
+          "Fireflies is not configured yet. Please set FIREFLIES_API_KEY in apps/server/.env and restart the server.",
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+        );
       }
 
       const urlMatch = userText.match(/https?:\/\/[^\s]+/i);
@@ -532,20 +677,19 @@ app.post("/chat", async (req, res) => {
           if (latest?.id) transcriptId = latest.id;
         }
         if (!transcriptId) {
-          return res.json({
-            text:
-              "I couldn't find a Fireflies transcript yet. Share a Fireflies view link or make sure Fireflies has transcripts in your account.",
-            behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
-          });
+          return sendAssistantReply(
+            "I couldn't find a Fireflies transcript yet. Share a Fireflies view link or make sure Fireflies has transcripts in your account.",
+            makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+          );
         }
 
         const detail = await fetchFirefliesTranscript(transcriptId);
         transcript = detail?.data?.transcript;
         if (!transcript) {
-          return res.json({
-            text: "I couldn't access that transcript. Please confirm the link is valid and your API key has access.",
-            behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
-          });
+          return sendAssistantReply(
+            "I couldn't access that transcript. Please confirm the link is valid and your API key has access.",
+            makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+          );
         }
 
         const summary = transcript.summary || {};
@@ -593,34 +737,27 @@ app.post("/chat", async (req, res) => {
           docLink ? `Google Doc: ${docLink}` : "Google Doc: (connect Google Docs to enable)"
         ].filter(Boolean).join("\n");
 
-        return res.json({
-          text: responseText,
-          behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 })
-        });
+        return sendAssistantReply(responseText, makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 }));
       } catch (err) {
-        return res.json({
-          text:
-            "Fireflies request failed. Please check your FIREFLIES_API_KEY and ensure the transcript is accessible.",
-          behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
-        });
+        return sendAssistantReply(
+          "Fireflies request failed. Please check your FIREFLIES_API_KEY and ensure the transcript is accessible.",
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 })
+        );
       }
     }
 
     const skillResult = await handleSkillMessage(userText);
     if (skillResult) {
-      return res.json({
-        text: skillResult.text,
-        behavior: makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
-        skill: skillResult.skill
-      });
+      return sendAssistantReply(
+        skillResult.text,
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
+        { skill: skillResult.skill }
+      );
     }
 
-    // Save user message
-    addMemory(db, {
-      role: "user",
-      content: userText,
-      tags: "message"
-    });
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: "missing_openai_api_key" });
+    }
 
     // Retrieve relevant memories
     const memories = searchMemories(db, userText, 8);
@@ -1708,6 +1845,17 @@ app.get("/api/status", async (_req, res) => {
   } catch {
     piperVoices = 0;
   }
+  let memoryCount = 0;
+  let lastMemoryAt = null;
+  try {
+    const countRow = db.prepare("SELECT COUNT(*) AS c FROM memories").get();
+    memoryCount = Number(countRow?.c || 0);
+    const lastRow = db.prepare("SELECT created_at FROM memories ORDER BY id DESC LIMIT 1").get();
+    lastMemoryAt = lastRow?.created_at || null;
+  } catch {
+    memoryCount = 0;
+    lastMemoryAt = null;
+  }
 
   res.json({
     server: { ok: true, uptimeSec: Math.floor(process.uptime()) },
@@ -1728,6 +1876,10 @@ app.get("/api/status", async (_req, res) => {
     openai: {
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 220)
+    },
+    memory: {
+      count: memoryCount,
+      lastAt: lastMemoryAt
     },
     system: {
       platform: process.platform,
@@ -2037,6 +2189,29 @@ app.get("/api/integrations/amazon/search", (req, res) => {
   searchAmazonItems({ keywords: q })
     .then(data => res.json({ results: data.items || [], raw: data.raw || null }))
     .catch(err => res.status(500).json({ error: err?.message || "amazon_paapi_failed" }));
+});
+
+app.get("/api/integrations/weather/current", async (req, res) => {
+  try {
+    const location = String(req.query.location || process.env.DEFAULT_WEATHER_LOCATION || "").trim();
+    if (!location) return res.status(400).json({ error: "location_required" });
+    const weather = await fetchCurrentWeather(location);
+    res.json(weather);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "weather_fetch_failed" });
+  }
+});
+
+app.get("/api/integrations/web/search", async (req, res) => {
+  try {
+    const query = String(req.query.q || req.query.query || "").trim();
+    const limit = Number(req.query.limit || 5);
+    if (!query) return res.status(400).json({ error: "query_required" });
+    const results = await searchWeb(query, limit);
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "web_search_failed" });
+  }
 });
 
 app.get("/api/integrations/meta/connect", (req, res) => {
