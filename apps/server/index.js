@@ -431,12 +431,24 @@ function getStoredHomeLocation(db) {
 }
 
 function parseWeatherLocation(userText, fallbackLocation = null) {
-  const text = String(userText || "").trim();
+  const text = String(userText || "")
+    .replace(/[?!]+$/g, "")
+    .trim();
   if (!/\b(weather|forecast|temperature)\b/i.test(text)) return null;
   const m1 = text.match(/\b(?:in|at|for)\s+([a-z0-9 ,.'-]{2,})$/i);
-  if (m1?.[1]) return normalizeLocation(m1[1]);
+  if (m1?.[1]) {
+    const explicit = normalizeLocation(
+      m1[1].replace(/\b(?:right now|today|now|please)\b/gi, " ")
+    );
+    if (explicit) return explicit;
+  }
   const m2 = text.match(/\bweather\s+([a-z0-9 ,.'-]{2,})$/i);
-  if (m2?.[1]) return normalizeLocation(m2[1]);
+  if (m2?.[1]) {
+    const explicit = normalizeLocation(
+      m2[1].replace(/\b(?:right now|today|now|please)\b/gi, " ")
+    );
+    if (explicit) return explicit;
+  }
   return normalizeLocation(fallbackLocation || process.env.DEFAULT_WEATHER_LOCATION || "");
 }
 
@@ -454,9 +466,9 @@ function parseProductResearchQuery(userText) {
   const hasCommerceCue = /\b(price|deal|product|amazon|buy|purchase|shopping|cart|compare)\b/i.test(text);
   if (!hasCommerceCue && !/\bbest\b/i.test(text)) return null;
   const direct = text.match(
-    /^(?:find|research|compare|analyze)\s+(?:the\s+)?(?:best\s+price\s+for\s+|best\s+|price\s+for\s+|shopping\s+for\s+)?(.+)$/i
+    /^(?:find|research|compare|analyze)(?:\s+me)?\s+(?:the\s+)?(?:best\s+price\s+for\s+|best\s+|price\s+for\s+|shopping\s+for\s+)?(.+)$/i
   );
-  if (direct?.[1]) return direct[1].trim();
+  if (direct?.[1]) return normalizeLocation(direct[1]);
   const priceIntent = /\b(best price|cheapest|lowest price|price compare|compare prices|deal on)\b/i.test(text);
   const amazonIntent = /\bamazon|product\b/i.test(text);
   if (priceIntent || amazonIntent) {
@@ -464,7 +476,8 @@ function parseProductResearchQuery(userText) {
       .replace(/\b(can you|please|aika|hey aika|find|research|compare|analyze|for me|on amazon|at amazon|best price|cheapest|lowest price|price compare|compare prices|deal on)\b/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
-    if (cleaned.length >= 3) return cleaned;
+    const normalized = normalizeLocation(cleaned.replace(/^(?:me|the)\s+/i, ""));
+    if (normalized.length >= 3) return normalized;
   }
   return null;
 }
