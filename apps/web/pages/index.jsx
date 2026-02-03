@@ -268,6 +268,9 @@ export default function Home() {
   const [lastTtsMetrics, setLastTtsMetrics] = useState(null);
   const [ttsDiagnostics, setTtsDiagnostics] = useState(null);
   const [ttsDiagError, setTtsDiagError] = useState("");
+  const [voiceFullTest, setVoiceFullTest] = useState(null);
+  const [voiceFullTestRunning, setVoiceFullTestRunning] = useState(false);
+  const [voiceFullTestError, setVoiceFullTestError] = useState("");
   const [skills, setSkills] = useState([]);
   const [skillEvents, setSkillEvents] = useState([]);
   const [skillsError, setSkillsError] = useState("");
@@ -946,7 +949,7 @@ export default function Home() {
         const rms = Math.sqrt(sum / data.length);
         sttRmsRef.current = rms;
         sttNoiseFloorRef.current = sttNoiseFloorRef.current * 0.96 + rms * 0.04;
-        sttThresholdRef.current = Math.max(0.01, Math.min(0.08, sttNoiseFloorRef.current * 2.6));
+        sttThresholdRef.current = Math.max(0.006, Math.min(0.05, sttNoiseFloorRef.current * 1.8));
         if (rms > sttThresholdRef.current) sttLastSpeechRef.current = Date.now();
         setMicLevel(Math.min(1, rms * 2.2));
         rafRef.current = requestAnimationFrame(tick);
@@ -1072,18 +1075,20 @@ export default function Home() {
         if (ttsActiveRef.current) return;
         if (!evt.data || evt.data.size < 256) return;
         const now = Date.now();
-        const speechRecently = now - (sttLastSpeechRef.current || 0) < 1800;
-        const weakSpeech = sttRmsRef.current > sttThresholdRef.current * 0.7;
-        if (speechRecently || weakSpeech) {
+        sttBlobPartsRef.current.push(evt.data);
+        if (sttBlobPartsRef.current.length > 40) {
+          sttBlobPartsRef.current.shift();
+        }
+        if (sttRmsRef.current > 0.008) {
+          sttLastSpeechRef.current = now;
+        }
+        const hasSpeech = sttLastSpeechRef.current > 0;
+        if (hasSpeech) {
           sttSpeechActiveRef.current = true;
-          sttBlobPartsRef.current.push(evt.data);
           sttLastDataRef.current = now;
-        } else if (sttSpeechActiveRef.current) {
-          const quietForMs = now - (sttLastSpeechRef.current || 0);
+          const quietForMs = now - sttLastSpeechRef.current;
           if (quietForMs >= sttSilenceMs) {
             await sendBufferedUtterance();
-          } else {
-            sttBlobPartsRef.current.push(evt.data);
           }
         }
       };
@@ -1426,6 +1431,30 @@ export default function Home() {
     const id = setInterval(loadStatus, 4000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "debug") return;
+    let cancelled = false;
+    async function loadVoiceFullTestState() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/voice/fulltest`);
+        const data = await r.json();
+        if (!cancelled) {
+          setVoiceFullTest(data?.report || null);
+          setVoiceFullTestRunning(Boolean(data?.running));
+          setVoiceFullTestError("");
+        }
+      } catch (err) {
+        if (!cancelled) setVoiceFullTestError(err?.message || "voice_fulltest_state_failed");
+      }
+    }
+    loadVoiceFullTestState();
+    const id = setInterval(loadVoiceFullTestState, 6000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab !== "debug") return;
@@ -1868,6 +1897,22 @@ export default function Home() {
       setIntegrationActionResult(JSON.stringify(data, null, 2));
     } catch (err) {
       setIntegrationActionError(err?.message || "facebook_posts_failed");
+    }
+  }
+
+  async function runVoiceFullTestNow() {
+    try {
+      setVoiceFullTestError("");
+      setVoiceFullTestRunning(true);
+      const r = await fetch(`${SERVER_URL}/api/voice/fulltest`, { method: "POST" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "voice_fulltest_failed");
+      setVoiceFullTest(data?.state?.report || null);
+      setVoiceFullTestRunning(Boolean(data?.state?.running));
+    } catch (err) {
+      setVoiceFullTestError(err?.message || "voice_fulltest_failed");
+    } finally {
+      setVoiceFullTestRunning(false);
     }
   }
 
@@ -2911,6 +2956,43 @@ export default function Home() {
                     Last: {statusInfo?.skills?.lastEvent?.skill || "—"}
                   </div>
                 </div>
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Voice Pipeline Check
+              </div>
+              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white", fontSize: 12, color: "#374151" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: voiceFullTest?.ok ? "#059669" : "#111827" }}>
+                      {voiceFullTest ? (voiceFullTest.ok ? "Ready" : "Failed") : "Not run yet"}
+                    </div>
+                    <div style={{ color: "#6b7280" }}>
+                      {voiceFullTest
+                        ? `${voiceFullTest.passed}/${voiceFullTest.total} checks passed`
+                        : "Run full voice checks before handoff."}
+                    </div>
+                  </div>
+                  <button
+                    onClick={runVoiceFullTestNow}
+                    disabled={voiceFullTestRunning}
+                    style={{ padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    {voiceFullTestRunning ? "Running..." : "Run Full Test"}
+                  </button>
+                </div>
+                {voiceFullTest?.tests?.length > 0 && (
+                  <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+                    {voiceFullTest.tests.map((t, idx) => (
+                      <div key={`${t.name}-${idx}`} style={{ color: t.ok ? "#059669" : "#b91c1c" }}>
+                        {t.ok ? "OK" : "FAIL"} {t.name}{t.detail ? ` - ${t.detail}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {voiceFullTestError && (
+                  <div style={{ color: "#b91c1c", marginTop: 8 }}>Voice test error: {voiceFullTestError}</div>
+                )}
               </div>
 
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>

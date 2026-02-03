@@ -74,6 +74,7 @@ import {
 } from "./storage/agent_actions.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
+import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -102,6 +103,11 @@ initDb();
 runMigrations();
 
 const rateMap = new Map();
+let voiceFullTestState = {
+  running: false,
+  lastRunAt: null,
+  report: null
+};
 function rateLimit(req, res, next) {
   const key = req.ip || "local";
   const now = Date.now();
@@ -1726,8 +1732,65 @@ app.get("/api/status", async (_req, res) => {
     system: {
       platform: process.platform,
       node: process.version
+    },
+    voiceTest: {
+      running: voiceFullTestState.running,
+      lastRunAt: voiceFullTestState.lastRunAt,
+      ok: voiceFullTestState.report?.ok ?? null,
+      passed: voiceFullTestState.report?.passed ?? null,
+      total: voiceFullTestState.report?.total ?? null
     }
   });
+});
+
+app.get("/api/voice/fulltest", (_req, res) => {
+  res.json({
+    running: voiceFullTestState.running,
+    lastRunAt: voiceFullTestState.lastRunAt,
+    report: voiceFullTestState.report
+  });
+});
+
+app.post("/api/voice/fulltest", async (_req, res) => {
+  if (voiceFullTestState.running) {
+    return res.status(409).json({
+      error: "voice_test_running",
+      state: voiceFullTestState
+    });
+  }
+  voiceFullTestState = {
+    ...voiceFullTestState,
+    running: true
+  };
+  try {
+    const base = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 8790}`;
+    const report = await runVoiceFullTest(base);
+    voiceFullTestState = {
+      running: false,
+      lastRunAt: new Date().toISOString(),
+      report
+    };
+    res.json({
+      ok: report.ok,
+      state: voiceFullTestState
+    });
+  } catch (err) {
+    voiceFullTestState = {
+      running: false,
+      lastRunAt: new Date().toISOString(),
+      report: {
+        ok: false,
+        total: 0,
+        passed: 0,
+        failed: 1,
+        tests: [{ name: "runner", ok: false, detail: err?.message || "voice_test_failed" }]
+      }
+    };
+    res.status(500).json({
+      error: err?.message || "voice_test_failed",
+      state: voiceFullTestState
+    });
+  }
 });
 
 // MCP-lite Tool Control Plane
