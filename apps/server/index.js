@@ -31,7 +31,8 @@ import {
   getSlidesPresentation,
   listMeetSpaces,
   createMeetSpace,
-  fetchGoogleUserInfo
+  fetchGoogleUserInfo,
+  sendGmailMessage
 } from "./integrations/google.js";
 import {
   fetchFirefliesTranscripts,
@@ -75,6 +76,7 @@ import {
   deleteAgentActionsForRecording,
   listAgentActions
 } from "./storage/agent_actions.js";
+import { writeOutbox } from "./storage/outbox.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
@@ -153,6 +155,26 @@ const recordingUpload = multer({
       const ext = path.extname(file.originalname || "") || ".webm";
       const name = `${String(seq).padStart(6, "0")}${ext}`;
       cb(null, name);
+    }
+  })
+});
+const recordingFinalUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const id = req.params.id;
+      const dir = ensureRecordingDir(id);
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+      const extFromName = path.extname(file.originalname || "").toLowerCase();
+      const ext =
+        extFromName ||
+        (String(file.mimetype || "").includes("ogg")
+          ? ".ogg"
+          : String(file.mimetype || "").includes("wav")
+            ? ".wav"
+            : ".webm");
+      cb(null, `recording${ext}`);
     }
   })
 });
@@ -559,6 +581,69 @@ function updateProcessingState(recordingId, patch) {
   return next;
 }
 
+async function transcribeRecordingWithFallback(recordingId, audioPath) {
+  let primaryResult = null;
+  if (audioPath) {
+    primaryResult = await transcribeAudio(audioPath);
+    if (!primaryResult?.error && String(primaryResult?.text || "").trim()) {
+      return primaryResult;
+    }
+  }
+
+  const chunks = listRecordingChunks(recordingId);
+  if (!chunks.length) {
+    return primaryResult || {
+      text: "",
+      language: "en",
+      provider: "error",
+      error: "audio_missing",
+      segments: []
+    };
+  }
+
+  let cursor = 0;
+  const allSegments = [];
+  const texts = [];
+  for (const chunk of chunks) {
+    const part = await transcribeAudio(chunk.storagePath);
+    if (part?.error || !String(part?.text || "").trim()) continue;
+    texts.push(String(part.text).trim());
+    const segs = Array.isArray(part.segments) && part.segments.length
+      ? part.segments
+      : [{ speaker: "Speaker 1", start: 0, end: Math.max(1, String(part.text).trim().split(/\s+/).length / 2.5), text: part.text }];
+    for (const seg of segs) {
+      const start = Number(seg.start || 0) + cursor;
+      const endBase = Number(seg.end || start + 1);
+      const end = Math.max(start + 0.2, endBase + cursor);
+      allSegments.push({
+        speaker: seg.speaker || "Speaker",
+        start,
+        end,
+        text: String(seg.text || "").trim()
+      });
+    }
+    const last = allSegments[allSegments.length - 1];
+    cursor = last ? last.end + 0.25 : cursor + 2;
+  }
+
+  if (!texts.length) {
+    return primaryResult || {
+      text: "",
+      language: "en",
+      provider: "error",
+      error: "transcription_failed",
+      segments: []
+    };
+  }
+
+  return {
+    text: texts.join(" ").replace(/\s+/g, " ").trim(),
+    language: "en",
+    provider: "openai_chunk_fallback",
+    segments: allSegments
+  };
+}
+
 async function processRecordingPipeline(recordingId, opts = {}) {
   const recording = getRecording(recordingId);
   if (!recording) return;
@@ -568,7 +653,7 @@ async function processRecordingPipeline(recordingId, opts = {}) {
   if (audioPath && audioPath !== recording.storage_path) {
     updateRecording(recordingId, { storage_path: audioPath, storage_url: `/api/recordings/${recordingId}/audio` });
   }
-  const transcriptResult = await transcribeAudio(audioPath);
+  const transcriptResult = await transcribeRecordingWithFallback(recordingId, audioPath);
   if (transcriptResult?.error) {
     updateRecording(recordingId, {
       status: "failed",
@@ -598,36 +683,12 @@ async function processRecordingPipeline(recordingId, opts = {}) {
   });
 
   updateProcessingState(recordingId, { stage: "summarizing" });
-  const summary = await summarizeTranscript(transcriptResult.text || "", recording.title);
-  let summaryPayload = {
-    overview: summary.overview,
-    decisions: summary.decisions,
-    actionItems: summary.actionItems,
-    risks: summary.risks,
-    nextSteps: summary.nextSteps,
-    recommendations: summary.recommendations || []
-  };
-  if (recording.redaction_enabled) {
-    summaryPayload = redactStructured(summaryPayload);
-  }
-
-  updateRecording(recordingId, {
-    summary_json: JSON.stringify(summaryPayload),
-    decisions_json: JSON.stringify(summaryPayload.decisions || []),
-    tasks_json: JSON.stringify(summaryPayload.actionItems || []),
-    risks_json: JSON.stringify(summaryPayload.risks || []),
-    next_steps_json: JSON.stringify(summaryPayload.nextSteps || [])
+  const summary = await summarizeAndPersistRecording({
+    recordingId,
+    transcriptText: transcriptResult.text || "",
+    title: recording.title,
+    redactionEnabled: recording.redaction_enabled
   });
-
-  updateProcessingState(recordingId, { stage: "extracting" });
-  const entities = extractEntities(summaryPayload);
-  addMemoryEntities(
-    entities.map(entity => ({
-      ...entity,
-      workspaceId: recording.workspace_id || "default",
-      recordingId
-    }))
-  );
 
   const artifacts = [];
   if (opts.createArtifacts) {
@@ -648,6 +709,45 @@ async function processRecordingPipeline(recordingId, opts = {}) {
 
   updateProcessingState(recordingId, { stage: "ready", doneAt: new Date().toISOString() });
   updateRecording(recordingId, { status: "ready" });
+}
+
+async function summarizeAndPersistRecording({ recordingId, transcriptText, title, redactionEnabled }) {
+  const summary = await summarizeTranscript(transcriptText || "", title);
+  let summaryPayload = {
+    tldr: summary.tldr,
+    attendees: summary.attendees,
+    overview: summary.overview,
+    decisions: summary.decisions,
+    actionItems: summary.actionItems,
+    risks: summary.risks,
+    nextSteps: summary.nextSteps,
+    discussionPoints: summary.discussionPoints,
+    nextMeeting: summary.nextMeeting,
+    summaryMarkdown: summary.summaryMarkdown,
+    recommendations: summary.recommendations || []
+  };
+  if (redactionEnabled) {
+    summaryPayload = redactStructured(summaryPayload);
+  }
+
+  updateRecording(recordingId, {
+    summary_json: JSON.stringify(summaryPayload),
+    decisions_json: JSON.stringify(summaryPayload.decisions || []),
+    tasks_json: JSON.stringify(summaryPayload.actionItems || []),
+    risks_json: JSON.stringify(summaryPayload.risks || []),
+    next_steps_json: JSON.stringify(summaryPayload.nextSteps || [])
+  });
+
+  updateProcessingState(recordingId, { stage: "extracting" });
+  const entities = extractEntities(summaryPayload);
+  addMemoryEntities(
+    entities.map(entity => ({
+      ...entity,
+      workspaceId: recording.workspace_id || "default",
+      recordingId
+    }))
+  );
+  return summary;
 }
 
 // Health check
@@ -1418,8 +1518,7 @@ function buildTranscriptText(recording) {
 function buildMeetingNotesMarkdown(recording) {
   const title = recording?.title || "Meeting";
   const started = recording?.started_at ? new Date(recording.started_at).toLocaleString() : "Unknown";
-  const ended = recording?.ended_at ? new Date(recording.ended_at).toLocaleString() : "Unknown";
-  const duration = recording?.duration ? `${recording.duration}s` : "Unknown";
+  const meetingDate = recording?.started_at ? new Date(recording.started_at).toLocaleDateString() : "Unknown";
   const summary = recording?.summary_json || {};
   const decisions = recording?.decisions_json || summary.decisions || [];
   const tasks = recording?.tasks_json || summary.actionItems || [];
@@ -1432,53 +1531,89 @@ function buildMeetingNotesMarkdown(recording) {
   const nextMeeting = summary.nextMeeting || {};
   const transcriptText = buildTranscriptText(recording);
   return [
-    `# ${title}`,
+    `# Meeting Notes - ${title}`,
     "",
-    "## Meeting Info",
-    `- Start: ${started}`,
-    `- End: ${ended}`,
-    `- Duration: ${duration}`,
-    `- Workspace: ${recording?.workspace_id || "default"}`,
-    `- Created by: ${recording?.created_by || "local"}`,
-    "",
-    "## ⚡ TL;DR / Executive Summary",
+    `Meeting Title & Date: ${title} - ${meetingDate}`,
+    `Attendees: ${attendees.length ? attendees.join(", ") : "Not captured"}`,
+    "TL;DR / Executive Summary:",
     tldr || (overview.length ? overview.slice(0, 2).join(" ") : "Summary pending."),
     "",
-    "## Attendees",
-    attendees.length ? attendees.map(a => `- ${a}`).join("\n") : "- Not captured.",
-    "",
-    "## Decisions",
+    "Key Decisions Made:",
     decisions.length ? decisions.map(item => `- ${item}`).join("\n") : "- None captured.",
     "",
-    "## Action Items / Tasks",
+    "Action Items:",
     tasks.length
       ? tasks.map(item => {
           const task = item.task || item.title || item.text || "";
           const owner = item.owner || "Unassigned";
-          const due = item.due ? `, Due: ${item.due}` : "";
-          return `- ${task} (Owner: ${owner}${due})`;
+          const due = item.due || "Unspecified";
+          return `- ${owner}: ${task} (Due: ${due})`;
         }).join("\n")
       : "- None captured.",
     "",
-    "## Risks",
-    risks.length ? risks.map(item => `- ${item}`).join("\n") : "- None captured.",
-    "",
-    "## 💡 Key Discussion Points/Insights",
+    "Key Discussion Points/Insights:",
     discussionPoints.length
       ? discussionPoints.map(p => `- ${p.topic || "Discussion"}: ${p.summary || ""}`).join("\n")
       : "- Not captured.",
+    risks.length ? `\nRisks/Issues:\n${risks.map(item => `- ${item}`).join("\n")}` : "",
     "",
-    "## 📅 Next Steps/Follow-up",
-    nextSteps.length ? nextSteps.map(item => `- ${item}`).join("\n") : "- Follow up to confirm next steps.",
+    "Next Steps/Follow-up:",
     nextMeeting?.date || nextMeeting?.goal
-      ? `Next meeting: ${nextMeeting.date || "TBD"} — ${nextMeeting.goal || "TBD"}`
-      : "",
+      ? `- ${nextMeeting.date || "TBD"}: ${nextMeeting.goal || "Follow-up meeting"}`
+      : (nextSteps.length ? nextSteps.map(item => `- ${item}`).join("\n") : "- Follow up to confirm next steps."),
     "",
-    "## Transcript (Timestamped)",
+    `Meeting metadata: started ${started}, created by ${recording?.created_by || "local"}, workspace ${recording?.workspace_id || "default"}.`,
+    "",
+    "Transcript (Timestamped):",
     transcriptText || "Transcript not available yet."
   ].join("\n");
 }
 
+function buildAbsoluteUrl(req, maybeUrl) {
+  if (!maybeUrl) return "";
+  const url = String(maybeUrl);
+  if (/^https?:\/\//i.test(url)) return url;
+  const base = (process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+  return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+function buildMeetingEmailText({ recording, notesUrl, transcriptUrl, audioUrl, googleDocUrl }) {
+  const summary = recording?.summary_json || {};
+  const tasks = recording?.tasks_json || summary.actionItems || [];
+  const decisions = recording?.decisions_json || summary.decisions || [];
+  const nextSteps = recording?.next_steps_json || summary.nextSteps || [];
+  const lines = [
+    `Meeting: ${recording?.title || "Meeting"}`,
+    `Date: ${recording?.started_at ? new Date(recording.started_at).toLocaleString() : "Unknown"}`,
+    "",
+    "Executive Summary:",
+    String(summary.tldr || (summary.overview || []).slice(0, 2).join(" ") || "Summary pending."),
+    "",
+    "Key Decisions:"
+  ];
+  if (decisions.length) decisions.forEach(d => lines.push(`- ${d}`));
+  else lines.push("- None captured.");
+  lines.push("", "Action Items:");
+  if (tasks.length) {
+    tasks.forEach(task => {
+      const owner = task.owner || "Unassigned";
+      const text = task.task || task.title || task.text || "Task";
+      const due = task.due || "Unspecified";
+      lines.push(`- ${owner}: ${text} (Due: ${due})`);
+    });
+  } else {
+    lines.push("- None captured.");
+  }
+  lines.push("", "Next Steps:");
+  if (nextSteps.length) nextSteps.forEach(s => lines.push(`- ${s}`));
+  else lines.push("- Follow up and confirm owners.");
+  lines.push("", "Links:");
+  if (googleDocUrl) lines.push(`- Google Doc: ${googleDocUrl}`);
+  if (notesUrl) lines.push(`- Meeting Notes (markdown): ${notesUrl}`);
+  if (transcriptUrl) lines.push(`- Transcript (txt): ${transcriptUrl}`);
+  if (audioUrl) lines.push(`- Recording Audio: ${audioUrl}`);
+  return lines.join("\n");
+}
 app.post("/api/recordings/start", (req, res) => {
   try {
     const { title, redactionEnabled, retentionDays } = req.body || {};
@@ -1521,6 +1656,22 @@ app.post("/api/recordings/:id/chunk", recordingUpload.single("chunk"), (req, res
   }
 });
 
+app.post("/api/recordings/:id/final", recordingFinalUpload.single("audio"), (req, res) => {
+  try {
+    const recording = getRecording(req.params.id);
+    if (!recording) return res.status(404).json({ error: "recording_not_found" });
+    if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+    if (!req.file?.path) return res.status(400).json({ error: "audio_missing" });
+    updateRecording(recording.id, {
+      storage_path: req.file.path,
+      storage_url: `/api/recordings/${recording.id}/audio`
+    });
+    res.json({ ok: true, path: req.file.path });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "recording_final_failed" });
+  }
+});
+
 app.post("/api/recordings/:id/pause", (req, res) => {
   const recording = getRecording(req.params.id);
   if (!recording) return res.status(404).json({ error: "recording_not_found" });
@@ -1545,7 +1696,7 @@ app.post("/api/recordings/:id/stop", (req, res) => {
   if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
   const { durationSec } = req.body || {};
   const endedAt = new Date().toISOString();
-  const audioPath = combineChunks(recording.id, recordingsDir);
+  const audioPath = recording.storage_path || combineChunks(recording.id, recordingsDir);
   const updates = {
     ended_at: endedAt,
     duration: durationSec ? Math.round(Number(durationSec)) : null,
@@ -1601,6 +1752,43 @@ app.get("/api/recordings/:id", (req, res) => {
   });
 });
 
+app.post("/api/recordings/:id/resummarize", async (req, res) => {
+  try {
+    const recording = getRecording(req.params.id);
+    if (!recording) return res.status(404).json({ error: "recording_not_found" });
+    if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+    if (!String(recording.transcript_text || "").trim()) {
+      return res.status(400).json({ error: "transcript_required" });
+    }
+
+    updateRecording(recording.id, { status: "processing" });
+    updateProcessingState(recording.id, { stage: "summarizing" });
+    const summary = await summarizeAndPersistRecording({
+      recordingId: recording.id,
+      transcriptText: recording.transcript_text,
+      title: recording.title,
+      redactionEnabled: recording.redaction_enabled
+    });
+
+    if (summary?.summaryMarkdown) {
+      const filePath = writeArtifact(recording.id, "summary.md", summary.summaryMarkdown);
+      const prev = Array.isArray(recording.artifacts_json) ? recording.artifacts_json : [];
+      const kept = prev.filter(a => !(a?.type === "local" && a?.name === "summary.md"));
+      kept.push({ type: "local", name: "summary.md", path: filePath });
+      updateRecording(recording.id, { artifacts_json: JSON.stringify(kept) });
+    }
+
+    updateRecording(recording.id, { status: "ready" });
+    updateProcessingState(recording.id, { stage: "ready", doneAt: new Date().toISOString() });
+    res.json({ ok: true, recording: getRecording(recording.id) });
+  } catch (err) {
+    console.error("Recording resummarize failed:", err);
+    updateRecording(req.params.id, { status: "failed" });
+    updateProcessingState(req.params.id, { stage: "failed", error: "resummarize_failed", doneAt: new Date().toISOString() });
+    res.status(500).json({ error: err?.message || "resummarize_failed" });
+  }
+});
+
 app.post("/api/recordings/:id/tasks", (req, res) => {
   const recording = getRecording(req.params.id);
   if (!recording) return res.status(404).json({ error: "recording_not_found" });
@@ -1619,7 +1807,11 @@ app.get("/api/recordings/:id/audio", (req, res) => {
   if (!recording.storage_path || !fs.existsSync(recording.storage_path)) {
     return res.status(404).json({ error: "audio_not_found" });
   }
-  res.type("audio/webm").sendFile(recording.storage_path);
+  const ext = path.extname(recording.storage_path || "").toLowerCase();
+  if (ext === ".ogg" || ext === ".oga") res.type("audio/ogg");
+  else if (ext === ".wav") res.type("audio/wav");
+  else res.type("audio/webm");
+  res.sendFile(recording.storage_path);
 });
 
 app.post("/api/stt/transcribe", sttUpload.single("audio"), async (req, res) => {
@@ -1698,6 +1890,93 @@ app.get("/api/recordings/:id/export", (req, res) => {
     notesPath,
     transcriptPath
   });
+});
+
+app.post("/api/recordings/:id/email", async (req, res) => {
+  try {
+    const recording = getRecording(req.params.id);
+    if (!recording) return res.status(404).json({ error: "recording_not_found" });
+    if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+    const toRaw = String(req.body?.to || "").trim();
+    if (!toRaw) return res.status(400).json({ error: "email_to_required" });
+    const recipients = toRaw.split(/[;,]/).map(v => v.trim()).filter(Boolean);
+    if (!recipients.length) return res.status(400).json({ error: "email_to_required" });
+    const bad = recipients.find(v => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v));
+    if (bad) return res.status(400).json({ error: "email_to_invalid", detail: bad });
+
+    const notes = buildMeetingNotesMarkdown(recording);
+    const notesUrl = buildAbsoluteUrl(req, `/api/recordings/${recording.id}/notes`);
+    const transcriptUrl = buildAbsoluteUrl(req, `/api/recordings/${recording.id}/transcript`);
+    const audioUrl = recording.storage_path ? buildAbsoluteUrl(req, getRecordingAudioUrl(recording.id, recording)) : "";
+    let googleDocUrl = "";
+    const artifacts = Array.isArray(recording.artifacts_json) ? recording.artifacts_json : [];
+    const docArtifact = artifacts.find(a => a?.type === "google_doc" && a?.url);
+    if (docArtifact?.url) googleDocUrl = String(docArtifact.url);
+    if (!googleDocUrl) {
+      try {
+        const doc = await createGoogleDoc(`${recording.title || "Meeting"} Notes`, notes);
+        if (doc?.documentId) googleDocUrl = `https://docs.google.com/document/d/${doc.documentId}/edit`;
+      } catch {
+        // ignore; email can still include local links
+      }
+    }
+
+    const subject = String(req.body?.subject || `Meeting Notes: ${recording.title || "Meeting"}`);
+    const text = buildMeetingEmailText({ recording, notesUrl, transcriptUrl, audioUrl, googleDocUrl });
+    const fromName = String(process.env.EMAIL_FROM_NAME || "Aika Meeting Copilot");
+    const allowOutboxFallback = String(process.env.EMAIL_OUTBOX_FALLBACK || "0").toLowerCase() === "1";
+    const googleStatus = getGoogleStatus();
+    const scopes = new Set(Array.isArray(googleStatus.scopes) ? googleStatus.scopes : []);
+    const hasGmailSendScope = scopes.has("https://www.googleapis.com/auth/gmail.send");
+    if (!googleStatus.connected || !hasGmailSendScope) {
+      return res.status(409).json({
+        error: "gmail_send_scope_missing",
+        detail: "Google needs reconnect with gmail.send scope to send email.",
+        reconnectUrl: "/api/integrations/google/connect?preset=core"
+      });
+    }
+    try {
+      const sent = await sendGmailMessage({
+        to: recipients,
+        subject,
+        text,
+        fromName
+      });
+      return res.json({
+        ok: true,
+        transport: "gmail",
+        to: recipients,
+        messageId: sent?.id || null,
+        links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
+      });
+    } catch (err) {
+      if (!allowOutboxFallback) {
+        return res.status(502).json({
+          error: "gmail_send_failed",
+          detail: String(err?.message || "gmail_send_failed"),
+          reconnectUrl: "/api/integrations/google/connect?preset=core"
+        });
+      }
+      const outbox = writeOutbox({
+        type: "meeting_email",
+        to: recipients,
+        subject,
+        text,
+        recordingId: recording.id,
+        reason: String(err?.message || "gmail_not_configured")
+      });
+      return res.json({
+        ok: true,
+        transport: "stub",
+        to: recipients,
+        outboxId: outbox.id,
+        warning: "gmail_send_unavailable_saved_to_outbox",
+        links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "recording_email_failed" });
+  }
 });
 
 app.delete("/api/recordings/:id", (req, res) => {

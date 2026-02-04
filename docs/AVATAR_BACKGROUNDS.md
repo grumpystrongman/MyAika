@@ -19,3 +19,9 @@ These animated backgrounds are downloaded from Wikimedia Commons and used in the
 - Source: https://commons.wikimedia.org/wiki/File:Filharmonia_Poznańska_-_neon_Poznańskie_Słowiki.gif
 
 If you replace these assets, update this file with the new sources and licenses.
+
+## Pixabay fantasy pack (30 videos)
+- Files: `apps/web/public/assets/aika/backgrounds/pixabay/pixabay-fantasy-01.mp4` ... `pixabay-fantasy-30.mp4`
+- Source listing: `apps/web/public/assets/aika/backgrounds/pixabay/SOURCES.md`
+- Search source: https://pixabay.com/videos/search/fantasy+background/?order=popular
+- Usage: rendered behind the avatar layer (video loop background), never replacing the avatar.

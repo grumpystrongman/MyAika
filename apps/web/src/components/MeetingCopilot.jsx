@@ -23,15 +23,23 @@ function formatStamp(seconds) {
 }
 
 function buildCommand(text) {
-  const t = String(text || "").toLowerCase();
-  if (!t.includes("hey aika") && !t.includes("aika,")) return null;
-  if (t.includes("start recording")) return "start";
-  if (t.includes("start recording meeting")) return "start";
-  if (t.includes("record") && !t.includes("recording stopped")) return "start";
-  if (t.includes("stop recording")) return "stop";
-  if (t.includes("pause recording")) return "pause";
-  if (t.includes("resume recording")) return "resume";
+  const t = String(text || "").toLowerCase().trim();
+  if (!/(^|\s)(hey\s+aika|aika,?)/i.test(t)) return null;
+  if (/\b(start recording|start recording meeting|record meeting|record)\b/i.test(t)) return "start";
+  if (/\bstop recording\b/i.test(t)) return "stop";
+  if (/\bpause recording\b/i.test(t)) return "pause";
+  if (/\bresume recording\b/i.test(t)) return "resume";
   return null;
+}
+
+function getRecorderUnavailableReason() {
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    return "Recording requires HTTPS on iPad/Safari (or localhost).";
+  }
+  if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return "Recorder unavailable in this browser.";
+  }
+  return "";
 }
 
 export default function MeetingCopilot({
@@ -53,6 +61,8 @@ export default function MeetingCopilot({
   const [detailTab, setDetailTab] = useState("summary");
   const [recordingTitle, setRecordingTitle] = useState("Meeting Recording");
   const [recordingActive, setRecordingActive] = useState(false);
+  const [recordingStarting, setRecordingStarting] = useState(false);
+  const [recordingError, setRecordingError] = useState("");
   const [recordingPaused, setRecordingPaused] = useState(false);
   const [recordingId, setRecordingId] = useState("");
   const [elapsed, setElapsed] = useState(0);
@@ -64,6 +74,11 @@ export default function MeetingCopilot({
   const [askMeetingAnswer, setAskMeetingAnswer] = useState("");
   const [askMemory, setAskMemory] = useState("");
   const [askMemoryAnswer, setAskMemoryAnswer] = useState("");
+  const [emailTo, setEmailTo] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailResult, setEmailResult] = useState("");
+  const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [taskEdits, setTaskEdits] = useState([]);
   const [actionResult, setActionResult] = useState("");
   const [exportInfo, setExportInfo] = useState(null);
@@ -81,6 +96,8 @@ export default function MeetingCopilot({
   const elapsedRef = useRef(null);
   const waveformRef = useRef(null);
   const chunkSeqRef = useRef(0);
+  const finalChunksRef = useRef([]);
+  const finalMimeTypeRef = useRef("audio/webm");
   const commandRecRef = useRef(null);
 
   async function refreshRecordings() {
@@ -124,6 +141,18 @@ export default function MeetingCopilot({
     const id = setTimeout(() => refreshRecordings(), 400);
     return () => clearTimeout(id);
   }, [recordingQuery]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedTo = window.localStorage.getItem("aika_meeting_email_to") || "";
+    if (savedTo) setEmailTo(savedTo);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (emailTo) window.localStorage.setItem("aika_meeting_email_to", emailTo);
+    else window.localStorage.removeItem("aika_meeting_email_to");
+  }, [emailTo]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -185,7 +214,10 @@ export default function MeetingCopilot({
 
   async function startRecording() {
     try {
-      if (recordingActive) return;
+      if (recordingActive || recordingStarting) return;
+      setRecordingStarting(true);
+      setRecordingError("");
+      setRecordingNotice("Starting recorder...");
       if (onActivateTab) onActivateTab();
       const resp = await fetch(`${serverUrl}/api/recordings/start`, {
         method: "POST",
@@ -197,6 +229,9 @@ export default function MeetingCopilot({
       const id = data.recording.id;
       setRecordingId(id);
       chunkSeqRef.current = 0;
+      finalChunksRef.current = [];
+      const unavailableReason = getRecorderUnavailableReason();
+      if (unavailableReason) throw new Error(unavailableReason);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -213,19 +248,31 @@ export default function MeetingCopilot({
         : MediaRecorder.isTypeSupported("audio/ogg")
           ? "audio/ogg"
           : "";
+      finalMimeTypeRef.current = mimeType || "audio/webm";
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
       recorder.ondataavailable = async (evt) => {
         if (!evt.data || evt.data.size === 0) return;
+        finalChunksRef.current.push(evt.data);
         const seq = chunkSeqRef.current++;
         const form = new FormData();
-        form.append("chunk", evt.data, `chunk-${seq}.webm`);
+        const ext = finalMimeTypeRef.current.includes("ogg") ? "ogg" : "webm";
+        form.append("chunk", evt.data, `chunk-${seq}.${ext}`);
         await fetch(`${serverUrl}/api/recordings/${id}/chunk?seq=${seq}`, {
           method: "POST",
           body: form
         });
       };
       recorder.onstop = async () => {
+        try {
+          if (finalChunksRef.current.length) {
+            const ext = finalMimeTypeRef.current.includes("ogg") ? "ogg" : "webm";
+            const finalBlob = new Blob(finalChunksRef.current, { type: finalMimeTypeRef.current });
+            const form = new FormData();
+            form.append("audio", finalBlob, `recording.${ext}`);
+            await fetch(`${serverUrl}/api/recordings/${id}/final`, { method: "POST", body: form });
+          }
+        } catch {}
         await fetch(`${serverUrl}/api/recordings/${id}/stop`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -234,22 +281,30 @@ export default function MeetingCopilot({
         cleanupAudio();
         stopStream();
         setRecordingActive(false);
+        setRecordingStarting(false);
+        setRecordingError("");
         if (onRecordingStateChange) onRecordingStateChange(false);
         setRecordingPaused(false);
         setRecordingNotice("Processing transcript and summaries...");
+        finalChunksRef.current = [];
         refreshRecordings();
       };
       recorder.start(1000);
       setRecordingActive(true);
+      setRecordingStarting(false);
       if (onRecordingStateChange) onRecordingStateChange(true);
       setRecordingPaused(false);
       setElapsed(0);
       elapsedRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
       setRecordingNotice("Recording...");
     } catch (err) {
-      setRecordingNotice(err?.message || "recording_start_failed");
+      setRecordingError(err?.message || "recording_start_failed");
+      setRecordingNotice("Recorder failed to start.");
       cleanupAudio();
       stopStream();
+      setRecordingActive(false);
+      setRecordingStarting(false);
+      if (onRecordingStateChange) onRecordingStateChange(false);
     }
   }
 
@@ -287,7 +342,8 @@ export default function MeetingCopilot({
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setCommandStatus("Voice commands unsupported");
-      setCommandListening(false);
+      if (onCommandListeningChange) onCommandListeningChange(false);
+      else setCommandListeningInternal(false);
       return;
     }
     const rec = new SpeechRecognition();
@@ -388,6 +444,51 @@ export default function MeetingCopilot({
     setExportInfo(data);
   }
 
+  async function regenerateSummary() {
+    if (!selectedId) return;
+    setSummaryRefreshing(true);
+    try {
+      const resp = await fetch(`${serverUrl}/api/recordings/${selectedId}/resummarize`, {
+        method: "POST"
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "resummarize_failed");
+      setSelected(data.recording || null);
+      refreshRecordings();
+    } catch (err) {
+      setRecordingsError(err?.message || "resummarize_failed");
+    } finally {
+      setSummaryRefreshing(false);
+    }
+  }
+
+  async function emailRecording(id) {
+    if (!id || !emailTo.trim()) return;
+    setEmailSending(true);
+    setEmailResult("");
+    try {
+      const resp = await fetch(`${serverUrl}/api/recordings/${id}/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: emailTo.trim(),
+          subject: emailSubject.trim() || undefined
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || "recording_email_failed");
+      if (data.transport === "gmail") {
+        setEmailResult(`Sent via Gmail to ${data.to.join(", ")}.`);
+      } else {
+        setEmailResult(`Saved to outbox (Gmail unavailable). Outbox ID: ${data.outboxId}`);
+      }
+    } catch (err) {
+      setEmailResult(err?.message || "recording_email_failed");
+    } finally {
+      setEmailSending(false);
+    }
+  }
+
   const statusChip = (status) => (
     <span style={{
       padding: "2px 8px",
@@ -403,8 +504,18 @@ export default function MeetingCopilot({
     <div style={{ display: "grid", gap: 16 }}>
       {visible && (
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <button onClick={startRecording} style={{ padding: "10px 16px", borderRadius: 10, background: "#111827", color: "#fff" }}>
-            Start recording
+          <button
+            onClick={startRecording}
+            disabled={recordingActive || recordingStarting}
+            style={{
+              padding: "10px 16px",
+              borderRadius: 10,
+              background: "#111827",
+              color: "#fff",
+              opacity: recordingActive || recordingStarting ? 0.7 : 1
+            }}
+          >
+            {recordingStarting ? "Starting..." : recordingActive ? "Recording active" : "Start recording"}
           </button>
           <input value={recordingTitle} onChange={(e) => setRecordingTitle(e.target.value)} style={{ padding: 8, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 220 }} />
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
@@ -427,26 +538,54 @@ export default function MeetingCopilot({
         </div>
       )}
 
-      {recordingActive && (
+      {(recordingActive || recordingStarting || recordingError) && (
         <div style={{ position: "fixed", right: 24, bottom: 24, width: 320, background: "#fff", borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,0.15)", padding: 16, zIndex: 40 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 12, height: 12, borderRadius: 999, background: "#dc2626", boxShadow: "0 0 12px rgba(220,38,38,0.8)" }} />
-            <strong>Recording...</strong>
+            <div
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 999,
+                background: recordingError ? "#b91c1c" : recordingActive ? "#dc2626" : "#d97706",
+                boxShadow: recordingError
+                  ? "0 0 12px rgba(185,28,28,0.8)"
+                  : recordingActive
+                    ? "0 0 12px rgba(220,38,38,0.8)"
+                    : "0 0 12px rgba(217,119,6,0.8)"
+              }}
+            />
+            <strong>{recordingError ? "Recorder error" : recordingActive ? "Recording..." : "Preparing recorder..."}</strong>
             <div style={{ marginLeft: "auto", fontSize: 12 }}>{formatDuration(elapsed)}</div>
           </div>
           <div style={{ marginTop: 10 }}>
             <canvas ref={waveformRef} width={280} height={60} style={{ width: "100%", background: "#f8fafc", borderRadius: 8 }} />
           </div>
+          {recordingError && (
+            <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 8 }}>
+              {recordingError}
+            </div>
+          )}
           <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>
             Recording audio. Please ensure participant consent.
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             {!recordingPaused ? (
-              <button onClick={pauseRecording} style={{ flex: 1, padding: 8, borderRadius: 8 }}>Pause</button>
+              <button onClick={pauseRecording} style={{ flex: 1, padding: 8, borderRadius: 8 }} disabled={!recordingActive}>
+                Pause
+              </button>
             ) : (
-              <button onClick={resumeRecording} style={{ flex: 1, padding: 8, borderRadius: 8 }}>Resume</button>
+              <button onClick={resumeRecording} style={{ flex: 1, padding: 8, borderRadius: 8 }}>
+                Resume
+              </button>
             )}
-            <button onClick={stopRecording} style={{ flex: 1, padding: 8, borderRadius: 8, background: "#111827", color: "#fff" }}>Stop</button>
+            <button onClick={stopRecording} style={{ flex: 1, padding: 8, borderRadius: 8, background: "#111827", color: "#fff" }} disabled={!recordingActive}>
+              Stop
+            </button>
+            {recordingError && (
+              <button onClick={startRecording} style={{ flex: 1, padding: 8, borderRadius: 8 }}>
+                Retry
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -497,7 +636,7 @@ export default function MeetingCopilot({
               <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
                 Recording file:{" "}
                 {selected.audioUrl ? (
-                  <a href={toAbsolute(selected.audioUrl)} target="_blank" rel="noreferrer">download audio (webm/opus)</a>
+                  <a href={toAbsolute(selected.audioUrl)} target="_blank" rel="noreferrer">download audio file</a>
                 ) : (
                   "pending"
                 )}
@@ -512,6 +651,31 @@ export default function MeetingCopilot({
                 <a href={`${serverUrl}/api/recordings/${selected.id}/notes`} target="_blank" rel="noreferrer">
                   Download meeting_notes.md
                 </a>
+              </div>
+              <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email this meeting</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr auto", gap: 8 }}>
+                  <input
+                    value={emailTo}
+                    onChange={(e) => setEmailTo(e.target.value)}
+                    placeholder="work@email.com"
+                    style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                  />
+                  <input
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    placeholder={`Meeting Notes: ${selected.title}`}
+                    style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                  />
+                  <button
+                    onClick={() => emailRecording(selected.id)}
+                    disabled={!emailTo.trim() || emailSending}
+                    style={{ padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    {emailSending ? "Sending..." : "Email"}
+                  </button>
+                </div>
+                {emailResult && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>{emailResult}</div>}
               </div>
               {exportInfo && (
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
@@ -533,6 +697,11 @@ export default function MeetingCopilot({
 
               {detailTab === "summary" && (
                 <div style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                    <button onClick={regenerateSummary} disabled={summaryRefreshing || !selected?.transcript_text} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                      {summaryRefreshing ? "Refreshing summary..." : "Regenerate summary"}
+                    </button>
+                  </div>
                   <div style={{ fontWeight: 600 }}>Meeting Info</div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
                     Started: {selected.started_at ? new Date(selected.started_at).toLocaleString() : "unknown"}{" "}
@@ -540,7 +709,15 @@ export default function MeetingCopilot({
                   </div>
                   <div style={{ fontWeight: 600, marginTop: 10 }}>⚡ TL;DR / Executive Summary</div>
                   <div style={{ fontSize: 13 }}>
-                    {selected.summary_json?.tldr || (selected.summary_json?.overview || []).slice(0, 2).join(" ") || "Summary pending."}
+                    {selected.summary_json?.tldr
+                      || (selected.summary_json?.overview || []).slice(0, 2).join(" ")
+                      || (selected.transcript_text || "")
+                        .split(/[.!?]/)
+                        .map(s => s.trim())
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .join(". ")
+                      || "Summary pending."}
                   </div>
                   <div style={{ fontWeight: 600, marginTop: 10 }}>Attendees</div>
                   <ul>{(selected.summary_json?.attendees || []).map((item, i) => <li key={i}>{item}</li>)}</ul>

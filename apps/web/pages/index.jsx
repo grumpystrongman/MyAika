@@ -4,7 +4,13 @@ import AikaAvatar from "../src/components/AikaAvatar";
 import AikaToolsWorkbench from "../src/components/AikaToolsWorkbench";
 import MeetingCopilot from "../src/components/MeetingCopilot";
 
-const SERVER_URL = "http://localhost:8790";
+function resolveServerUrl() {
+  if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
+  // Default: same-origin web app + Next.js rewrites proxy to backend.
+  return "";
+}
+
+const SERVER_URL = resolveServerUrl();
 const ALWAYS_SERVER_STT = true;
 
 const THINKING_CUES = [
@@ -103,7 +109,15 @@ const AVATAR_BACKGROUNDS = [
   { id: "heaven", label: "Heaven (clouds)", src: "/assets/aika/backgrounds/heaven.gif" },
   { id: "hell", label: "Hell (fire)", src: "/assets/aika/backgrounds/hell.gif" },
   { id: "office", label: "Office", src: "/assets/aika/backgrounds/office.gif" },
-  { id: "gamer", label: "Gamer (neon)", src: "/assets/aika/backgrounds/gamer.gif" }
+  { id: "gamer", label: "Gamer (neon)", src: "/assets/aika/backgrounds/gamer.gif" },
+  ...Array.from({ length: 30 }, (_, idx) => {
+    const n = String(idx + 1).padStart(2, "0");
+    return {
+      id: `pixabay-fantasy-${n}`,
+      label: `Pixabay Fantasy ${n}`,
+      src: `/assets/aika/backgrounds/pixabay/pixabay-fantasy-${n}.mp4`
+    };
+  })
 ];
 
 function pickThinkingCue() {
@@ -466,6 +480,7 @@ export default function Home() {
   const sttChunkCountRef = useRef(0);
   const sttLastSpeechRef = useRef(0);
   const sttBlobPartsRef = useRef([]);
+  const sttInitChunkRef = useRef(null);
   const sttSpeechActiveRef = useRef(false);
   const sttRequestInFlightRef = useRef(false);
   const sttRmsRef = useRef(0);
@@ -930,7 +945,7 @@ export default function Home() {
   async function startLevelMeter() {
     try {
       if (mediaStreamRef.current) return;
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await requestMicStream({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -990,15 +1005,23 @@ export default function Home() {
 
   async function startServerStt() {
     if (sttActiveRef.current) return;
+    const micReason = getMicUnavailableReason();
+    if (micReason) {
+      setMicState("error");
+      setMicError(`${micReason} Use an HTTPS URL for Aika on iPad.`);
+      setMicStatus("Mic unavailable");
+      return;
+    }
     try {
       await startLevelMeter();
       sttModeRef.current = "server";
-      const stream = mediaStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = mediaStreamRef.current || await requestMicStream({ audio: true });
       sttActiveRef.current = true;
       sttLastDataRef.current = 0;
       sttChunkCountRef.current = 0;
       sttLastSpeechRef.current = 0;
       sttBlobPartsRef.current = [];
+      sttInitChunkRef.current = null;
       sttSpeechActiveRef.current = false;
       sttRequestInFlightRef.current = false;
       setSttDebug({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
@@ -1023,8 +1046,14 @@ export default function Home() {
         if (sttRequestInFlightRef.current) return;
         const parts = sttBlobPartsRef.current;
         if (!parts || !parts.length) return;
-        const utteranceBlob = new Blob(parts, { type: mimeType });
+        const initChunk = sttInitChunkRef.current;
+        const payloadParts =
+          initChunk && parts[0] !== initChunk
+            ? [initChunk, ...parts]
+            : parts;
+        const utteranceBlob = new Blob(payloadParts, { type: mimeType });
         sttBlobPartsRef.current = [];
+        sttLastSpeechRef.current = 0;
         sttSpeechActiveRef.current = false;
         if (!utteranceBlob || utteranceBlob.size < 512) return;
         sttRequestInFlightRef.current = true;
@@ -1037,7 +1066,7 @@ export default function Home() {
           if (!r.ok) {
             if (data?.error === "unsupported_audio_format") {
               setMicError("unsupported_audio_format");
-            } else if (data?.error === "audio_too_short") {
+            } else if (data?.error === "audio_too_short" || data?.error === "transcription_failed") {
               setMicStatus("Listening...");
             }
             return;
@@ -1085,17 +1114,18 @@ export default function Home() {
         if (ttsActiveRef.current) return;
         if (!evt.data || evt.data.size < 256) return;
         const now = Date.now();
+        if (!sttInitChunkRef.current) sttInitChunkRef.current = evt.data;
         sttBlobPartsRef.current.push(evt.data);
-        if (sttBlobPartsRef.current.length > 40) {
+        if (sttBlobPartsRef.current.length > 60) {
           sttBlobPartsRef.current.shift();
         }
+        sttLastDataRef.current = now;
         if (sttRmsRef.current > 0.008) {
           sttLastSpeechRef.current = now;
         }
         const hasSpeech = sttLastSpeechRef.current > 0;
         if (hasSpeech) {
           sttSpeechActiveRef.current = true;
-          sttLastDataRef.current = now;
           const quietForMs = now - sttLastSpeechRef.current;
           if (quietForMs >= sttSilenceMs) {
             await sendBufferedUtterance();
@@ -1130,6 +1160,7 @@ export default function Home() {
     sttChunkCountRef.current = 0;
     sttLastSpeechRef.current = 0;
     sttBlobPartsRef.current = [];
+    sttInitChunkRef.current = null;
     sttSpeechActiveRef.current = false;
     sttRequestInFlightRef.current = false;
     setSttDebug(prev => ({ ...prev, mode: "off" }));
@@ -1139,6 +1170,13 @@ export default function Home() {
 
   async function startMic() {
     if (micState === "listening" || micStartingRef.current || ttsActiveRef.current) return;
+    const micReason = getMicUnavailableReason();
+    if (micReason) {
+      setMicState("error");
+      setMicError(`${micReason} Use an HTTPS URL for Aika on iPad.`);
+      setMicStatus("Mic unavailable");
+      return;
+    }
     if (ALWAYS_SERVER_STT) {
       forceServerSttRef.current = true;
       await startServerStt();
@@ -1197,7 +1235,7 @@ export default function Home() {
     stopLevelMeter();
   }
 
-  function toggleMic() {
+  async function toggleMic() {
     const listening = micEnabled && micState === "listening";
     if (listening) {
       setMicEnabled(false);
@@ -1211,15 +1249,15 @@ export default function Home() {
     setVoiceMode(true);
     setAutoSpeak(true);
     setTextOnly(false);
-    unlockAudio().then(ok => {
-      if (ok) {
-        setAudioUnlocked(true);
-        setTtsError("");
-        startMic();
-      } else {
-        setTtsError("audio_locked_click_enable");
-      }
-    });
+    setMicStatus("Starting mic...");
+    const ok = await unlockAudio();
+    if (ok) {
+      setAudioUnlocked(true);
+      setTtsError("");
+      await startMic();
+    } else {
+      setTtsError("audio_locked_click_enable");
+    }
   }
 
   useEffect(() => {
@@ -4092,4 +4130,20 @@ export default function Home() {
       </div>
     </div>
   );
+}
+
+function getMicUnavailableReason() {
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    return "Microphone requires HTTPS on iPad/Safari (or localhost).";
+  }
+  if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return "Microphone API unavailable in this browser.";
+  }
+  return "";
+}
+
+async function requestMicStream(constraints) {
+  const reason = getMicUnavailableReason();
+  if (reason) throw new Error(reason);
+  return navigator.mediaDevices.getUserMedia(constraints);
 }

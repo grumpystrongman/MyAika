@@ -35,15 +35,19 @@ function isLikelyHallucinatedTranscript(text) {
   if (!t) return true;
   const words = t.toLowerCase().split(/\s+/).filter(Boolean);
   // Common whisper silence hallucination snippets seen in noisy/silent chunks.
-  if ((/mbc/i.test(t) && /뉴스|이덕영/.test(t)) || /이덕영입니다/.test(t)) return true;
+  if ((/mbc/i.test(t) && /(?:\uB274\uC2A4|\uC774\uB355\uC601)/.test(t)) || /\uC774\uB355\uC601\uC785\uB2C8\uB2E4/.test(t)) return true;
+  if (/ignore background noise/i.test(t) || /return only spoken words/i.test(t)) return true;
   const hasCjk = /[\u3040-\u30ff\u3400-\u9fff]/.test(t);
   const cjkCount = (t.match(/[\u3040-\u30ff\u3400-\u9fff]/g) || []).length;
   const asciiLetters = (t.match(/[A-Za-z]/g) || []).length;
+  const ratioCjk = cjkCount / Math.max(1, t.length);
   // In forced English mode, short non-Latin text is usually a false positive.
   if (STT_FORCE_LANGUAGE.startsWith("en") && hasCjk && (cjkCount >= 2 || asciiLetters < 4) && t.length < 80) return true;
+  if (STT_FORCE_LANGUAGE.startsWith("en") && ratioCjk > 0.2 && asciiLetters < 10) return true;
   // Repeated punctuation/fillers from silence.
   if (/^(uh+|um+|hmm+|mm+|ah+|oh+)[.!?]?$/.test(t.toLowerCase())) return true;
   if (/^(thanks for watching|thank you for watching)$/i.test(t)) return true;
+  if (words.length <= 2 && t.length < 12) return true;
   return false;
 }
 
@@ -172,14 +176,31 @@ export async function transcribeAudio(audioPath) {
   }
   try {
     const file = fs.createReadStream(audioPath);
-    const result = await client.audio.transcriptions.create({
-      file,
-      model: TRANSCRIBE_MODEL,
-      language: STT_FORCE_LANGUAGE,
-      temperature: 0,
-      prompt:
-        "Transcribe natural conversational English. Ignore silence/background noise/music and return only spoken words."
-    });
+    let result;
+    try {
+      result = await client.audio.transcriptions.create({
+        file,
+        model: TRANSCRIBE_MODEL,
+        language: STT_FORCE_LANGUAGE,
+        temperature: 0,
+        response_format: "verbose_json",
+        timestamp_granularities: ["segment"],
+        prompt:
+          "Transcribe natural conversational English. Ignore silence/background noise/music and return only spoken words."
+      });
+    } catch (primaryErr) {
+      const msg = String(primaryErr?.message || "").toLowerCase();
+      if (!msg.includes("timestamp") && !msg.includes("response_format")) throw primaryErr;
+      const fallbackFile = fs.createReadStream(audioPath);
+      result = await client.audio.transcriptions.create({
+        file: fallbackFile,
+        model: TRANSCRIBE_MODEL,
+        language: STT_FORCE_LANGUAGE,
+        temperature: 0,
+        prompt:
+          "Transcribe natural conversational English. Ignore silence/background noise/music and return only spoken words."
+      });
+    }
     const text = String(result?.text || "").trim();
     if (isLikelyHallucinatedTranscript(text)) {
       return {
@@ -190,8 +211,27 @@ export async function transcribeAudio(audioPath) {
         segments: []
       };
     }
-    const labeled = await labelSpeakersWithLLM(text);
-    const segments = labeled ? applyTimestampsToSegments(labeled) : buildSegmentsFromText(text);
+    let segments = [];
+    if (Array.isArray(result?.segments) && result.segments.length) {
+      segments = result.segments
+        .map((seg, idx) => {
+          const start = Number(seg?.start);
+          const end = Number(seg?.end);
+          const segText = String(seg?.text || "").trim();
+          if (!segText) return null;
+          return {
+            speaker: `Speaker ${(idx % 2) + 1}`,
+            start: Number.isFinite(start) ? start : 0,
+            end: Number.isFinite(end) ? end : Math.max(0.2, (Number.isFinite(start) ? start : 0) + segText.split(/\s+/).length / WORDS_PER_SECOND),
+            text: segText
+          };
+        })
+        .filter(Boolean);
+    }
+    if (!segments.length) {
+      const labeled = await labelSpeakersWithLLM(text);
+      segments = labeled ? applyTimestampsToSegments(labeled) : buildSegmentsFromText(text);
+    }
     return {
       text,
       language: result?.language || "en",
@@ -278,12 +318,13 @@ ${transcript}`;
 }
 
 function toSummaryPayload(data, title) {
-  const tldr = typeof data.tldr === "string" ? data.tldr.trim() : "";
+  const baseTldr = typeof data.tldr === "string" ? data.tldr.trim() : "";
   const attendees = Array.isArray(data.attendees) ? data.attendees : [];
-  const overview = Array.isArray(data.overview) ? data.overview : [];
+  let overview = Array.isArray(data.overview) ? data.overview.filter(Boolean) : [];
   const decisions = Array.isArray(data.decisions) ? data.decisions : [];
   const risks = Array.isArray(data.risks) ? data.risks : [];
   const nextSteps = Array.isArray(data.nextSteps) ? data.nextSteps : [];
+  const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
   const actionItems = Array.isArray(data.actionItems)
     ? data.actionItems.map(item => ({
         task: item.task || item.title || item.text || "",
@@ -297,6 +338,13 @@ function toSummaryPayload(data, title) {
         summary: item.summary || item.text || ""
       }))
     : [];
+  if (!overview.length && discussionPoints.length) {
+    overview = discussionPoints
+      .map(item => String(item.summary || "").trim())
+      .filter(Boolean)
+      .slice(0, 4);
+  }
+  const tldr = baseTldr || (overview.length ? overview.slice(0, 2).join(" ") : "");
   const nextMeeting = data.nextMeeting && typeof data.nextMeeting === "object"
     ? {
         date: data.nextMeeting.date || "",
@@ -344,6 +392,7 @@ function toSummaryPayload(data, title) {
     nextSteps,
     discussionPoints,
     nextMeeting,
+    recommendations,
     summaryMarkdown
   };
 }

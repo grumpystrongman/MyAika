@@ -21,6 +21,11 @@ Open:
 - Web: http://localhost:3000
 - Server health: http://localhost:8787/health
 
+iPad/Safari microphone note:
+- `getUserMedia` requires a secure context on iOS.
+- Easiest path: `npm run dev:ipad` (starts server + web + HTTPS tunnel and prints a `https://...trycloudflare.com` URL for iPad, then falls back to localtunnel if needed).
+- If running without tunnel, use HTTPS dev mode: `npm run dev:web:https`.
+
 Default UI behavior:
 - Voice Mode is on by default (auto-listen + auto-speak).
 - Settings and advanced voice controls are behind the "Settings" button.
@@ -38,6 +43,7 @@ UI:
 Backend endpoints:
 - `POST /api/recordings/start` `{ title?, redactionEnabled?, retentionDays? }`
 - `POST /api/recordings/:id/chunk` (multipart form-data, `chunk` file, `seq` query param)
+- `POST /api/recordings/:id/final` (multipart form-data, `audio` file)
 - `POST /api/recordings/:id/pause`
 - `POST /api/recordings/:id/resume`
 - `POST /api/recordings/:id/stop` `{ durationSec? }`
@@ -48,6 +54,13 @@ Backend endpoints:
 - `POST /api/memory/ask` `{ question }`
 - `POST /api/recordings/:id/actions` `{ actionType, input? }`
 - `POST /api/recordings/:id/tasks` `{ tasks: [] }`
+- `POST /api/recordings/:id/email` `{ to, subject? }` (sends via Gmail when connected; falls back to local outbox)
+
+Emailing meeting notes:
+- In the Recording Detail view, use **Email this meeting** to send notes/links to your work email.
+- Includes links to notes, transcript, audio, and Google Doc (if available).
+- Gmail send requires Google OAuth scope `https://www.googleapis.com/auth/gmail.send`. If your Google connection was created before this scope was added, reconnect Google once.
+- By default, failed Gmail sends return an error (no outbox fallback). Set `EMAIL_OUTBOX_FALLBACK=1` only if you explicitly want local outbox fallback.
 
 Retention:
 - Set `RECORDING_RETENTION_DAYS` in `apps/server/.env` (default 30).
@@ -59,7 +72,7 @@ Transcription:
 ## Appearance (Themes + Backgrounds)
 - Open **Settings** in the Chat tab to select a theme (Light, Dracula, One Dark, Nord, Catppuccin).
 - Upload an app background image (stored locally in browser storage).
-- Choose an **Avatar background** (animated GIFs included under `apps/web/public/assets/aika/backgrounds/`).
+- Choose an **Avatar background** (animated GIF + MP4 loops under `apps/web/public/assets/aika/backgrounds/`, including a 30-video Pixabay fantasy pack).
 - Credits for bundled backgrounds live in `docs/AVATAR_BACKGROUNDS.md`.
 
 ## Integrations (beta)

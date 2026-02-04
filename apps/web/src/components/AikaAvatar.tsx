@@ -110,6 +110,8 @@ export default function AikaAvatar({
     return () => observer.disconnect();
   }, []);
 
+  const isVideoBackground = Boolean(backgroundSrc && /\.(mp4|webm|ogg)$/i.test(backgroundSrc));
+
   useEffect(() => {
     function onMessage(ev: MessageEvent) {
       if (ev?.data?.type === "live2d_error") {
@@ -133,19 +135,40 @@ export default function AikaAvatar({
       }}
     >
       {backgroundSrc && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            borderRadius: 20,
-            backgroundImage: `url(${backgroundSrc})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            filter: "saturate(1.05)",
-            zIndex: 1,
-            pointerEvents: "none"
-          }}
-        />
+        isVideoBackground ? (
+          <video
+            src={backgroundSrc}
+            autoPlay
+            loop
+            muted
+            playsInline
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              borderRadius: 20,
+              filter: "saturate(1.05)",
+              zIndex: 1,
+              pointerEvents: "none"
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: 20,
+              backgroundImage: `url(${backgroundSrc})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              filter: "saturate(1.05)",
+              zIndex: 1,
+              pointerEvents: "none"
+            }}
+          />
+        )
       )}
       {engineType === "live2d" ? (
         <iframe

@@ -12,6 +12,7 @@ export const GOOGLE_SCOPE_PRESETS = {
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/presentations",
+    "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/meetings.space.readonly",
     "https://www.googleapis.com/auth/meetings.space.created",
     "https://www.googleapis.com/auth/meetings.space.settings"
@@ -513,6 +514,42 @@ export async function createMeetSpace(payload = {}) {
   if (!r.ok) {
     const text = await r.text();
     throw new Error(text || "google_meet_create_failed");
+  }
+  return await r.json();
+}
+
+function toBase64Url(value) {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+export async function sendGmailMessage({ to, subject, text, fromName = "" }) {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.send"]);
+  const toLine = Array.isArray(to) ? to.join(", ") : String(to || "");
+  const safeSubject = String(subject || "Aika Meeting Notes");
+  const safeText = String(text || "");
+  const headers = [
+    `To: ${toLine}`,
+    safeSubject ? `Subject: ${safeSubject}` : "",
+    fromName ? `From: ${fromName}` : "",
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8"
+  ].filter(Boolean);
+  const raw = toBase64Url(`${headers.join("\r\n")}\r\n\r\n${safeText}`);
+  const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ raw })
+  });
+  if (!r.ok) {
+    const detail = await r.text();
+    throw new Error(detail || "gmail_send_failed");
   }
   return await r.json();
 }
