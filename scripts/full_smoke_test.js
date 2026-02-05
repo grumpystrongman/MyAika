@@ -1,6 +1,6 @@
 // Full smoke test runner
 // Usage: node scripts/full_smoke_test.js
-import { spawn } from "node:child_process";
+const { spawn } = require("node:child_process");
 
 const BASE = process.env.MCP_BASE_URL || "http://127.0.0.1:8790";
 
@@ -22,6 +22,7 @@ function runStep(step) {
 addStep("unit tests", "npm", ["test"]);
 addStep("mcp smoke", "node", ["scripts/mcp_smoke_test.js"]);
 addStep("mcp features smoke", "node", ["scripts/mcp_features_smoke.js"]);
+addStep("ui smoke", "node", ["scripts/ui_smoke.js"]);
 addStep("recordings smoke", "node", ["scripts/recordings_smoke.js"]);
 addStep("voice smoke", "npm", ["run", "voice:smoke"]);
 addStep("voice fulltest", "npm", ["run", "voice:test"]);

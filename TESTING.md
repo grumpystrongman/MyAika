@@ -7,6 +7,7 @@
 
 ## Automated smoke (recommended)
 - `npm run smoke`
+- Requires Playwright browsers: `npx playwright install`
 
 ## UI smoke checks (Aika Tools tab)
 1) Meetings

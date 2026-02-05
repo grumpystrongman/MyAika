@@ -17,9 +17,13 @@
     "aika": "node apps/server/cli/aika.js",
     "test": "node --test apps/server/tests/*.test.js",
     "smoke": "node scripts/full_smoke_test.js",
+    "ui:smoke": "node scripts/ui_smoke.js",
     "gptsovits": "node apps/server/scripts/start_gptsovits.js",
     "piper:voices": "powershell -ExecutionPolicy Bypass -File scripts/install_piper_voices.ps1",
     "live2d:import": "powershell -ExecutionPolicy Bypass -File scripts/import_live2d_samples.ps1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.41.2"
   },
   "dependencies": {
     "tts": "^0.1.0"
