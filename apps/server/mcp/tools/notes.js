@@ -1,17 +1,18 @@
 import { createNoteRecord, searchNotes } from "../../storage/notes.js";
 import { createGoogleDocInFolder, ensureDriveFolderPath } from "../../integrations/google.js";
 
-export async function createNote({ title, body, tags = [], store = { googleDocs: true, localMarkdown: true } }) {
+export async function createNote({ title, body, tags = [], store = { googleDocs: true, localMarkdown: true } }, context = {}) {
   if (!title || !body) {
     const err = new Error("title_body_required");
     err.status = 400;
     throw err;
   }
+  const userId = context.userId || "local";
   let doc = null;
   if (store?.googleDocs) {
     try {
-      const folderId = await ensureDriveFolderPath(["Aika", "Notes"]);
-      doc = await createGoogleDocInFolder(title, `# ${title}\n\n${body}\n`, folderId);
+      const folderId = await ensureDriveFolderPath(["Aika", "Notes"], userId);
+      doc = await createGoogleDocInFolder(title, `# ${title}\n\n${body}\n`, folderId, userId);
     } catch {
       doc = null;
     }
@@ -21,7 +22,8 @@ export async function createNote({ title, body, tags = [], store = { googleDocs:
     body,
     tags,
     googleDocId: doc?.documentId || null,
-    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null,
+    userId
   });
   return {
     id: record.id,
@@ -31,6 +33,6 @@ export async function createNote({ title, body, tags = [], store = { googleDocs:
   };
 }
 
-export function searchNotesTool({ query, tags = [], limit = 20 }) {
-  return searchNotes({ query, tags, limit });
+export function searchNotesTool({ query, tags = [], limit = 20 }, context = {}) {
+  return searchNotes({ query, tags, limit, userId: context.userId || "local" });
 }

@@ -6,7 +6,7 @@ import { repoRoot, ensureDir, nowIso } from "./utils.js";
 
 const cacheDir = path.join(repoRoot, "data", "cache", "spreadsheet_patches");
 
-export function createSpreadsheetPatch({ targetType, targetRef, changes, diffMarkdown, googleDocId = null, googleDocUrl = null }) {
+export function createSpreadsheetPatch({ targetType, targetRef, changes, diffMarkdown, googleDocId = null, googleDocUrl = null, userId = "local" }) {
   const db = getDb();
   ensureDir(cacheDir);
   const id = crypto.randomBytes(8).toString("hex");
@@ -14,8 +14,8 @@ export function createSpreadsheetPatch({ targetType, targetRef, changes, diffMar
   const cachePath = path.join(cacheDir, `${id}.md`);
   fs.writeFileSync(cachePath, diffMarkdown);
   db.prepare(
-    `INSERT INTO spreadsheet_patches (id, target_type, target_ref, changes_json, diff_markdown, google_doc_id, google_doc_url, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO spreadsheet_patches (id, target_type, target_ref, changes_json, diff_markdown, google_doc_id, google_doc_url, status, created_at, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     targetType,
@@ -25,7 +25,8 @@ export function createSpreadsheetPatch({ targetType, targetRef, changes, diffMar
     googleDocId,
     googleDocUrl,
     "draft",
-    createdAt
+    createdAt,
+    userId
   );
   return { id, cachePath, diffMarkdown };
 }

@@ -11,7 +11,7 @@ function toneTemplate(tone) {
   return "Friendly and helpful";
 }
 
-export function draftReply({ originalEmail, tone = "friendly", context = "", signOffName = "" }) {
+export function draftReply({ originalEmail, tone = "friendly", context = "", signOffName = "" }, contextData = {}) {
   if (!originalEmail?.subject || !originalEmail?.body) {
     const err = new Error("original_email_required");
     err.status = 400;
@@ -29,13 +29,14 @@ export function draftReply({ originalEmail, tone = "friendly", context = "", sig
     draftBody: body,
     to: originalEmail.to || [],
     cc: [],
-    bcc: []
+    bcc: [],
+    userId: contextData.userId || "local"
   });
   return { id: draft.id, subject, body };
 }
 
-export function sendEmail({ draftId, sendTo = null, cc = [], bcc = [] }) {
-  const draft = getEmailDraft(draftId);
+export function sendEmail({ draftId, sendTo = null, cc = [], bcc = [] }, contextData = {}) {
+  const draft = getEmailDraft(draftId, contextData.userId || "local");
   if (!draft) {
     const err = new Error("draft_not_found");
     err.status = 404;

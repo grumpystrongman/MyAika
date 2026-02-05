@@ -50,8 +50,8 @@ export async function exchangeMetaCode({ code, product }) {
   return data;
 }
 
-export function storeMetaToken(product, data) {
-  const existing = getProvider("meta") || {};
+export function storeMetaToken(product, data, userId = "") {
+  const existing = getProvider("meta", userId) || {};
   setProvider("meta", {
     ...existing,
     [product]: {
@@ -60,10 +60,10 @@ export function storeMetaToken(product, data) {
       expires_in: data.expires_in || null
     },
     connectedAt: new Date().toISOString()
-  });
+  }, userId);
 }
 
-export function getMetaToken(product) {
-  const existing = getProvider("meta") || {};
+export function getMetaToken(product, userId = "") {
+  const existing = getProvider("meta", userId) || {};
   return existing?.[product]?.access_token || null;
 }

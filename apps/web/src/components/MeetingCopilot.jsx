@@ -62,6 +62,7 @@ export default function MeetingCopilot({
   const [recordingTitle, setRecordingTitle] = useState("Meeting Recording");
   const [recordingActive, setRecordingActive] = useState(false);
   const [recordingStarting, setRecordingStarting] = useState(false);
+  const [recordingStopping, setRecordingStopping] = useState(false);
   const [recordingError, setRecordingError] = useState("");
   const [recordingPaused, setRecordingPaused] = useState(false);
   const [recordingId, setRecordingId] = useState("");
@@ -98,6 +99,8 @@ export default function MeetingCopilot({
   const chunkSeqRef = useRef(0);
   const finalChunksRef = useRef([]);
   const finalMimeTypeRef = useRef("audio/webm");
+  const pendingUploadsRef = useRef([]);
+  const totalBytesRef = useRef(0);
   const commandRecRef = useRef(null);
 
   async function refreshRecordings() {
@@ -217,6 +220,7 @@ export default function MeetingCopilot({
       if (recordingActive || recordingStarting) return;
       setRecordingStarting(true);
       setRecordingError("");
+      setRecordingStopping(false);
       setRecordingNotice("Starting recorder...");
       if (onActivateTab) onActivateTab();
       const resp = await fetch(`${serverUrl}/api/recordings/start`, {
@@ -230,6 +234,8 @@ export default function MeetingCopilot({
       setRecordingId(id);
       chunkSeqRef.current = 0;
       finalChunksRef.current = [];
+      totalBytesRef.current = 0;
+      pendingUploadsRef.current = [];
       const unavailableReason = getRecorderUnavailableReason();
       if (unavailableReason) throw new Error(unavailableReason);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -253,35 +259,54 @@ export default function MeetingCopilot({
       mediaRecorderRef.current = recorder;
       recorder.ondataavailable = async (evt) => {
         if (!evt.data || evt.data.size === 0) return;
-        finalChunksRef.current.push(evt.data);
+        totalBytesRef.current += evt.data.size;
+        const maxFinalBytes = 25 * 1024 * 1024;
+        if (totalBytesRef.current <= maxFinalBytes) {
+          finalChunksRef.current.push(evt.data);
+        } else if (finalChunksRef.current.length) {
+          finalChunksRef.current = [];
+        }
         const seq = chunkSeqRef.current++;
         const form = new FormData();
         const ext = finalMimeTypeRef.current.includes("ogg") ? "ogg" : "webm";
         form.append("chunk", evt.data, `chunk-${seq}.${ext}`);
-        await fetch(`${serverUrl}/api/recordings/${id}/chunk?seq=${seq}`, {
+        const upload = fetch(`${serverUrl}/api/recordings/${id}/chunk?seq=${seq}`, {
           method: "POST",
           body: form
+        }).catch(() => {});
+        pendingUploadsRef.current.push(upload);
+        upload.finally(() => {
+          pendingUploadsRef.current = pendingUploadsRef.current.filter(p => p !== upload);
         });
       };
       recorder.onstop = async () => {
         try {
-          if (finalChunksRef.current.length) {
+          const pending = pendingUploadsRef.current.slice();
+          if (pending.length) {
+            await Promise.allSettled(pending);
+          }
+          const maxFinalBytes = 25 * 1024 * 1024;
+          const shouldUploadFinal = finalChunksRef.current.length && totalBytesRef.current <= maxFinalBytes;
+          if (shouldUploadFinal) {
             const ext = finalMimeTypeRef.current.includes("ogg") ? "ogg" : "webm";
             const finalBlob = new Blob(finalChunksRef.current, { type: finalMimeTypeRef.current });
             const form = new FormData();
             form.append("audio", finalBlob, `recording.${ext}`);
             await fetch(`${serverUrl}/api/recordings/${id}/final`, { method: "POST", body: form });
           }
-        } catch {}
-        await fetch(`${serverUrl}/api/recordings/${id}/stop`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ durationSec: elapsed })
-        });
+        } catch {
+        } finally {
+          await fetch(`${serverUrl}/api/recordings/${id}/stop`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ durationSec: elapsed })
+          }).catch(() => {});
+        }
         cleanupAudio();
         stopStream();
         setRecordingActive(false);
         setRecordingStarting(false);
+        setRecordingStopping(false);
         setRecordingError("");
         if (onRecordingStateChange) onRecordingStateChange(false);
         setRecordingPaused(false);
@@ -292,6 +317,7 @@ export default function MeetingCopilot({
       recorder.start(1000);
       setRecordingActive(true);
       setRecordingStarting(false);
+      setRecordingStopping(false);
       if (onRecordingStateChange) onRecordingStateChange(true);
       setRecordingPaused(false);
       setElapsed(0);
@@ -324,6 +350,11 @@ export default function MeetingCopilot({
 
   function stopRecording() {
     if (!mediaRecorderRef.current) return;
+    try {
+      mediaRecorderRef.current.requestData();
+    } catch {}
+    setRecordingStopping(true);
+    setRecordingNotice("Finalizing recording...");
     mediaRecorderRef.current.stop();
   }
 
@@ -554,7 +585,7 @@ export default function MeetingCopilot({
                     : "0 0 12px rgba(217,119,6,0.8)"
               }}
             />
-            <strong>{recordingError ? "Recorder error" : recordingActive ? "Recording..." : "Preparing recorder..."}</strong>
+            <strong>{recordingError ? "Recorder error" : recordingStopping ? "Finalizing..." : recordingActive ? "Recording..." : "Preparing recorder..."}</strong>
             <div style={{ marginLeft: "auto", fontSize: 12 }}>{formatDuration(elapsed)}</div>
           </div>
           <div style={{ marginTop: 10 }}>
@@ -578,8 +609,8 @@ export default function MeetingCopilot({
                 Resume
               </button>
             )}
-            <button onClick={stopRecording} style={{ flex: 1, padding: 8, borderRadius: 8, background: "#111827", color: "#fff" }} disabled={!recordingActive}>
-              Stop
+            <button onClick={stopRecording} style={{ flex: 1, padding: 8, borderRadius: 8, background: "#111827", color: "#fff" }} disabled={!recordingActive || recordingStopping}>
+              {recordingStopping ? "Stopping..." : "Stop"}
             </button>
             {recordingError && (
               <button onClick={startRecording} style={{ flex: 1, padding: 8, borderRadius: 8 }}>

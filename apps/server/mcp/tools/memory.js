@@ -8,15 +8,16 @@ function tierFolderPath(tier) {
   return ["Aika", "MemoryVault", "Tier3"];
 }
 
-export async function writeMemoryTool({ tier = 1, title, content, tags = [], containsPHI = false }) {
+export async function writeMemoryTool({ tier = 1, title, content, tags = [], containsPHI = false }, context = {}) {
   if (!title || !content) {
     const err = new Error("title_and_content_required");
     err.status = 400;
     throw err;
   }
+  const userId = context.userId || "local";
   let folderId = null;
   try {
-    folderId = await ensureDriveFolderPath(tierFolderPath(Number(tier)));
+    folderId = await ensureDriveFolderPath(tierFolderPath(Number(tier)), userId);
   } catch {
     folderId = null;
   }
@@ -29,7 +30,7 @@ export async function writeMemoryTool({ tier = 1, title, content, tags = [], con
   let doc = null;
   if (folderId) {
     try {
-      doc = await createGoogleDocInFolder(docTitle, docContent, folderId);
+      doc = await createGoogleDocInFolder(docTitle, docContent, folderId, userId);
     } catch {
       doc = null;
     }
@@ -42,7 +43,8 @@ export async function writeMemoryTool({ tier = 1, title, content, tags = [], con
     containsPHI,
     contentCiphertext: ciphertext,
     googleDocId: doc?.documentId || null,
-    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null,
+    userId
   });
   return {
     id: record.id,
@@ -51,8 +53,8 @@ export async function writeMemoryTool({ tier = 1, title, content, tags = [], con
   };
 }
 
-export function searchMemoryTool({ tier = 1, query, tags = [], limit = 20 }) {
-  return searchMemory({ tier: Number(tier), query, tags, limit });
+export function searchMemoryTool({ tier = 1, query, tags = [], limit = 20 }, context = {}) {
+  return searchMemory({ tier: Number(tier), query, tags, limit, userId: context.userId || "local" });
 }
 
 export function rotateKeyTool({ confirm }) {

@@ -39,15 +39,19 @@ function generateState() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-function storeState(state) {
-  setProvider("google_oauth_state", { state, createdAt: Date.now() });
+function storeState(state, meta = {}) {
+  const current = getProvider("google_oauth_state") || {};
+  current[state] = { ...meta, createdAt: Date.now() };
+  setProvider("google_oauth_state", current);
 }
 
 function consumeState(state) {
-  const stored = getProvider("google_oauth_state");
-  if (!stored || stored.state !== state) return false;
-  setProvider("google_oauth_state", null);
-  return true;
+  const stored = getProvider("google_oauth_state") || {};
+  const meta = stored[state];
+  if (!meta) return null;
+  delete stored[state];
+  setProvider("google_oauth_state", stored);
+  return meta;
 }
 
 function parseScopes(scopeStr) {
@@ -78,9 +82,9 @@ function scopeSatisfied(current, required) {
   return aliases.some(a => current.has(a));
 }
 
-export function connectGoogle(preset = "core") {
+export function connectGoogle(preset = "core", meta = {}) {
   const state = generateState();
-  storeState(state);
+  storeState(state, meta);
   return getGoogleAuthUrl(state, preset);
 }
 
@@ -100,7 +104,8 @@ export function getGoogleAuthUrl(state, preset = "core") {
 }
 
 export async function exchangeGoogleCode(code, state) {
-  if (!consumeState(state)) {
+  const meta = consumeState(state);
+  if (!meta) {
     const err = new Error("google_state_invalid");
     err.status = 400;
     throw err;
@@ -130,7 +135,8 @@ export async function exchangeGoogleCode(code, state) {
     refresh_token: data.refresh_token,
     expires_at: expiresAt,
     scope: data.scope,
-    token_type: data.token_type
+    token_type: data.token_type,
+    meta
   };
 }
 
@@ -173,8 +179,8 @@ async function refreshGoogleToken(refreshToken) {
   };
 }
 
-export async function getGoogleAccessToken(requiredScopes = []) {
-  const stored = getProvider("google");
+export async function getGoogleAccessToken(requiredScopes = [], userId = "") {
+  const stored = getProvider("google", userId);
   if (!stored) throw new Error("google_not_connected");
   if (requiredScopes?.length) {
     const current = new Set(parseScopes(stored.scope));
@@ -192,12 +198,12 @@ export async function getGoogleAccessToken(requiredScopes = []) {
   if (!stored.refresh_token) throw new Error("google_refresh_token_missing");
   const refreshed = await refreshGoogleToken(stored.refresh_token);
   const updated = { ...stored, ...refreshed };
-  setProvider("google", updated);
+  setProvider("google", updated, userId);
   return updated.access_token;
 }
 
-export function getGoogleStatus() {
-  const stored = getProvider("google");
+export function getGoogleStatus(userId = "") {
+  const stored = getProvider("google", userId);
   if (!stored || !stored.access_token) {
     return { connected: false, scopes: [], email: null, expiresAt: null };
   }
@@ -209,20 +215,20 @@ export function getGoogleStatus() {
   };
 }
 
-export async function disconnectGoogle() {
-  const stored = getProvider("google");
+export async function disconnectGoogle(userId = "") {
+  const stored = getProvider("google", userId);
   if (stored?.access_token) {
     await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(stored.access_token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" }
     }).catch(() => {});
   }
-  setProvider("google", null);
+  setProvider("google", null, userId);
   return { ok: true };
 }
 
-export async function createGoogleDoc(title, content) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents"]);
+export async function createGoogleDoc(title, content, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents"], userId);
   const r = await fetch("https://docs.googleapis.com/v1/documents", {
     method: "POST",
     headers: {
@@ -237,13 +243,13 @@ export async function createGoogleDoc(title, content) {
   }
   const doc = await r.json();
   if (content) {
-    await appendGoogleDoc(doc.documentId, content);
+    await appendGoogleDoc(doc.documentId, content, userId);
   }
   return doc;
 }
 
-export async function appendGoogleDoc(documentId, content) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents"]);
+export async function appendGoogleDoc(documentId, content, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents"], userId);
   const r = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
     method: "POST",
     headers: {
@@ -263,8 +269,8 @@ export async function appendGoogleDoc(documentId, content) {
   return await r.json();
 }
 
-export async function getGoogleDoc(documentId) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents.readonly"]);
+export async function getGoogleDoc(documentId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents.readonly"], userId);
   const r = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -275,8 +281,8 @@ export async function getGoogleDoc(documentId) {
   return await r.json();
 }
 
-export async function uploadDriveFile(name, content, mimeType = "text/plain") {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/drive.file"]);
+export async function uploadDriveFile(name, content, mimeType = "text/plain", userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/drive.file"], userId);
   const boundary = "aika_boundary";
   const metadata = { name, mimeType };
   const multipart = [
@@ -306,8 +312,8 @@ export async function uploadDriveFile(name, content, mimeType = "text/plain") {
   return await r.json();
 }
 
-export async function listDriveFiles(q, limit = 20) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/drive.metadata.readonly"]);
+export async function listDriveFiles(q, limit = 20, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/drive.metadata.readonly"], userId);
   const params = new URLSearchParams({
     pageSize: String(limit),
     fields: "files(id,name,mimeType,modifiedTime)",
@@ -324,8 +330,8 @@ export async function listDriveFiles(q, limit = 20) {
   return await r.json();
 }
 
-async function createDriveFolder(name, parentId) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/drive.file"]);
+async function createDriveFolder(name, parentId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/drive.file"], userId);
   const body = {
     name,
     mimeType: "application/vnd.google-apps.folder"
@@ -346,8 +352,8 @@ async function createDriveFolder(name, parentId) {
   return await r.json();
 }
 
-export async function ensureDriveFolderPath(pathParts) {
-  const stored = getProvider("google") || {};
+export async function ensureDriveFolderPath(pathParts, userId = "") {
+  const stored = getProvider("google", userId) || {};
   const cache = stored.folder_cache || {};
   let parentId = "root";
   let currentPath = "";
@@ -358,23 +364,23 @@ export async function ensureDriveFolderPath(pathParts) {
       continue;
     }
     const q = `mimeType='application/vnd.google-apps.folder' and name='${part.replace(/'/g, "\\'")}' and '${parentId}' in parents and trashed=false`;
-    const list = await listDriveFiles(q, 1);
+    const list = await listDriveFiles(q, 1, userId);
     const found = list.files?.[0];
     if (found) {
       cache[currentPath] = found.id;
       parentId = found.id;
       continue;
     }
-    const created = await createDriveFolder(part, parentId === "root" ? null : parentId);
+    const created = await createDriveFolder(part, parentId === "root" ? null : parentId, userId);
     cache[currentPath] = created.id;
     parentId = created.id;
   }
-  setProvider("google", { ...stored, folder_cache: cache });
+  setProvider("google", { ...stored, folder_cache: cache }, userId);
   return parentId;
 }
 
-export async function createGoogleDocInFolder(title, content, folderId) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents"]);
+export async function createGoogleDocInFolder(title, content, folderId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/documents"], userId);
   const r = await fetch("https://docs.googleapis.com/v1/documents", {
     method: "POST",
     headers: {
@@ -403,13 +409,13 @@ export async function createGoogleDocInFolder(title, content, folderId) {
     });
   }
   if (content) {
-    await appendGoogleDoc(doc.documentId, content);
+    await appendGoogleDoc(doc.documentId, content, userId);
   }
   return doc;
 }
 
-export async function getSheetValues(spreadsheetId, range) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/spreadsheets.readonly"]);
+export async function getSheetValues(spreadsheetId, range, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/spreadsheets.readonly"], userId);
   const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -420,8 +426,8 @@ export async function getSheetValues(spreadsheetId, range) {
   return await r.json();
 }
 
-export async function appendSheetValues(spreadsheetId, range, values) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/spreadsheets"]);
+export async function appendSheetValues(spreadsheetId, range, values, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/spreadsheets"], userId);
   const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`, {
     method: "POST",
     headers: {
@@ -437,8 +443,8 @@ export async function appendSheetValues(spreadsheetId, range, values) {
   return await r.json();
 }
 
-export async function listCalendarEvents(max = 10) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events.readonly"]);
+export async function listCalendarEvents(max = 10, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events.readonly"], userId);
   const params = new URLSearchParams({
     maxResults: String(max),
     timeMin: new Date().toISOString(),
@@ -455,8 +461,8 @@ export async function listCalendarEvents(max = 10) {
   return await r.json();
 }
 
-export async function createCalendarEvent(payload) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events"]);
+export async function createCalendarEvent(payload, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events"], userId);
   const r = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
     headers: {
@@ -472,8 +478,8 @@ export async function createCalendarEvent(payload) {
   return await r.json();
 }
 
-export async function getSlidesPresentation(presentationId) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/presentations.readonly"]);
+export async function getSlidesPresentation(presentationId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/presentations.readonly"], userId);
   const r = await fetch(`https://slides.googleapis.com/v1/presentations/${presentationId}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -484,10 +490,10 @@ export async function getSlidesPresentation(presentationId) {
   return await r.json();
 }
 
-export async function listMeetSpaces() {
+export async function listMeetSpaces(userId = "") {
   const token = await getGoogleAccessToken([
     "https://www.googleapis.com/auth/meetings.space.readonly"
-  ]);
+  ], userId);
   const r = await fetch("https://meet.googleapis.com/v2/spaces", {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -498,11 +504,11 @@ export async function listMeetSpaces() {
   return await r.json();
 }
 
-export async function createMeetSpace(payload = {}) {
+export async function createMeetSpace(payload = {}, userId = "") {
   const token = await getGoogleAccessToken([
     "https://www.googleapis.com/auth/meetings.space.created",
     "https://www.googleapis.com/auth/meetings.space.settings"
-  ]);
+  ], userId);
   const r = await fetch("https://meet.googleapis.com/v2/spaces", {
     method: "POST",
     headers: {
@@ -526,8 +532,8 @@ function toBase64Url(value) {
     .replace(/=+$/g, "");
 }
 
-export async function sendGmailMessage({ to, subject, text, fromName = "" }) {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.send"]);
+export async function sendGmailMessage({ to, subject, text, fromName = "", userId = "" }) {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.send"], userId);
   const toLine = Array.isArray(to) ? to.join(", ") : String(to || "");
   const safeSubject = String(subject || "Aika Meeting Notes");
   const safeText = String(text || "");

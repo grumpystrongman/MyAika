@@ -197,6 +197,31 @@ const migrations = [
       created_at TEXT
     );
     `
+  },
+  {
+    id: 4,
+    sql: `
+    ALTER TABLE notes ADD COLUMN user_id TEXT;
+    UPDATE notes SET user_id = 'local' WHERE user_id IS NULL;
+
+    ALTER TABLE meetings ADD COLUMN user_id TEXT;
+    UPDATE meetings SET user_id = 'local' WHERE user_id IS NULL;
+
+    ALTER TABLE todos ADD COLUMN user_id TEXT;
+    UPDATE todos SET user_id = 'local' WHERE user_id IS NULL;
+
+    ALTER TABLE calendar_holds ADD COLUMN user_id TEXT;
+    UPDATE calendar_holds SET user_id = 'local' WHERE user_id IS NULL;
+
+    ALTER TABLE email_drafts ADD COLUMN user_id TEXT;
+    UPDATE email_drafts SET user_id = 'local' WHERE user_id IS NULL;
+
+    ALTER TABLE spreadsheet_patches ADD COLUMN user_id TEXT;
+    UPDATE spreadsheet_patches SET user_id = 'local' WHERE user_id IS NULL;
+
+    ALTER TABLE memory_entries ADD COLUMN user_id TEXT;
+    UPDATE memory_entries SET user_id = 'local' WHERE user_id IS NULL;
+    `
   }
 ];
 
