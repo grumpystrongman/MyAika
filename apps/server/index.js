@@ -2390,7 +2390,7 @@ app.get("/api/status", async (_req, res) => {
         piper: { enabled: engine === "piper", ready: Boolean(piperBin) && piperVoices > 0, voices: piperVoices }
       }
     },
-    integrations: buildIntegrationsState(getUserId(req)),
+    integrations: buildIntegrationsState(getUserId(_req)),
     skills: {
       enabled: getSkillsState().filter(s => s.enabled).length,
       total: getSkillsState().length,
