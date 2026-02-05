@@ -23,13 +23,27 @@ export function writeStore(data) {
   fs.writeFileSync(storePath, JSON.stringify(data, null, 2));
 }
 
-export function getProvider(provider) {
+export function getProvider(provider, userId = "") {
   const store = readStore();
+  if (userId) {
+    return store.users?.[userId]?.[provider] || null;
+  }
   return store[provider] || null;
 }
 
-export function setProvider(provider, value) {
+export function setProvider(provider, value, userId = "") {
   const store = readStore();
+  if (userId) {
+    if (!store.users) store.users = {};
+    if (!store.users[userId]) store.users[userId] = {};
+    if (value === null) {
+      delete store.users[userId][provider];
+    } else {
+      store.users[userId][provider] = value;
+    }
+    writeStore(store);
+    return store.users[userId][provider] || null;
+  }
   store[provider] = value;
   writeStore(store);
   return store[provider];

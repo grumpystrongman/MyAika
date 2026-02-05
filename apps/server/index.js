@@ -54,6 +54,7 @@ import { listApprovals, denyApproval } from "./mcp/approvals.js";
 import { listToolHistory } from "./storage/history.js";
 import { initDb } from "./storage/db.js";
 import { runMigrations } from "./storage/schema.js";
+import { getSession, createSession, setSessionCookie, clearSessionCookie, destroySession } from "./auth/session.js";
 import {
   createRecording,
   updateRecording,
@@ -77,7 +78,7 @@ import {
   listAgentActions
 } from "./storage/agent_actions.js";
 import { writeOutbox } from "./storage/outbox.js";
-import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities } from "./recordings/processor.js";
+import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
 import {
@@ -102,6 +103,12 @@ import {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+app.use((req, _res, next) => {
+  const session = getSession(req);
+  req.aikaUser = session?.user || null;
+  req.aikaSessionId = session?.id || null;
+  next();
+});
 startReminderScheduler();
 
 initDb();
@@ -259,52 +266,54 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const integrationsState = {
-  google_docs: { connected: false },
-  google_drive: { connected: false },
-  fireflies: { connected: false },
-  amazon: { connected: false },
-  walmart: { connected: false },
-  facebook: { connected: false },
-  instagram: { connected: false },
-  whatsapp: { connected: false },
-  telegram: { connected: false },
-  slack: { connected: false },
-  discord: { connected: false },
-  plex: { connected: false }
-};
-
-const googleStored = getProvider("google");
-if (googleStored) {
-  integrationsState.google_docs.connected = true;
-  integrationsState.google_drive.connected = true;
-  integrationsState.google_docs.connectedAt = googleStored.connectedAt || new Date().toISOString();
-  integrationsState.google_drive.connectedAt = googleStored.connectedAt || new Date().toISOString();
-}
-const slackStored = getProvider("slack");
-if (slackStored?.access_token || slackStored?.bot_token) {
-  integrationsState.slack.connected = true;
-  integrationsState.slack.connectedAt = slackStored.connectedAt || new Date().toISOString();
-}
-const discordStored = getProvider("discord");
-if (discordStored?.access_token || discordStored?.bot_token || discordStored?.webhook) {
-  integrationsState.discord.connected = true;
-  integrationsState.discord.connectedAt = discordStored.connectedAt || new Date().toISOString();
-}
-const telegramStored = getProvider("telegram");
-if (telegramStored?.token) {
-  integrationsState.telegram.connected = true;
-  integrationsState.telegram.connectedAt = telegramStored.connectedAt || new Date().toISOString();
-}
-const firefliesStored = getProvider("fireflies");
-if (firefliesStored?.connected) {
-  integrationsState.fireflies.connected = true;
-  integrationsState.fireflies.connectedAt = firefliesStored.connectedAt || new Date().toISOString();
-}
-const plexStored = getProvider("plex");
-if (plexStored?.connected) {
-  integrationsState.plex.connected = true;
-  integrationsState.plex.connectedAt = plexStored.connectedAt || new Date().toISOString();
+function buildIntegrationsState(userId = "") {
+  const state = {
+    google_docs: { connected: false },
+    google_drive: { connected: false },
+    fireflies: { connected: false },
+    amazon: { connected: false },
+    walmart: { connected: false },
+    facebook: { connected: false },
+    instagram: { connected: false },
+    whatsapp: { connected: false },
+    telegram: { connected: false },
+    slack: { connected: false },
+    discord: { connected: false },
+    plex: { connected: false }
+  };
+  const googleStored = getProvider("google", userId);
+  if (googleStored) {
+    state.google_docs.connected = true;
+    state.google_drive.connected = true;
+    state.google_docs.connectedAt = googleStored.connectedAt || new Date().toISOString();
+    state.google_drive.connectedAt = googleStored.connectedAt || new Date().toISOString();
+  }
+  const slackStored = getProvider("slack", userId);
+  if (slackStored?.access_token || slackStored?.bot_token) {
+    state.slack.connected = true;
+    state.slack.connectedAt = slackStored.connectedAt || new Date().toISOString();
+  }
+  const discordStored = getProvider("discord", userId);
+  if (discordStored?.access_token || discordStored?.bot_token || discordStored?.webhook) {
+    state.discord.connected = true;
+    state.discord.connectedAt = discordStored.connectedAt || new Date().toISOString();
+  }
+  const telegramStored = getProvider("telegram", userId);
+  if (telegramStored?.token) {
+    state.telegram.connected = true;
+    state.telegram.connectedAt = telegramStored.connectedAt || new Date().toISOString();
+  }
+  const firefliesStored = getProvider("fireflies", userId);
+  if (firefliesStored?.connected) {
+    state.fireflies.connected = true;
+    state.fireflies.connectedAt = firefliesStored.connectedAt || new Date().toISOString();
+  }
+  const plexStored = getProvider("plex", userId);
+  if (plexStored?.connected) {
+    state.plex.connected = true;
+    state.plex.connectedAt = plexStored.connectedAt || new Date().toISOString();
+  }
+  return state;
 }
 
 // Heuristic fallback behavior
@@ -390,11 +399,20 @@ function encodeForm(data) {
 }
 
 function getWorkspaceId(req) {
-  return req.headers["x-workspace-id"] || "default";
+  return (
+    req.aikaUser?.workspaceId
+    || req.headers["x-workspace-id"]
+    || req.aikaUser?.id
+    || "default"
+  );
 }
 
 function getUserId(req) {
-  return req.headers["x-user-id"] || "local";
+  return (
+    req.aikaUser?.id
+    || req.headers["x-user-id"]
+    || "local"
+  );
 }
 
 function getBaseUrl() {
@@ -563,7 +581,10 @@ function parseMemoryRecall(userText) {
 }
 
 function isAdmin(req) {
-  return String(req.headers["x-user-role"] || "").toLowerCase() === "admin";
+  return (
+    String(req.headers["x-user-role"] || "").toLowerCase() === "admin"
+    || String(req.aikaUser?.role || "").toLowerCase() === "admin"
+  );
 }
 
 function canAccessRecording(req, recording) {
@@ -581,14 +602,66 @@ function updateProcessingState(recordingId, patch) {
   return next;
 }
 
-async function transcribeRecordingWithFallback(recordingId, audioPath) {
-  let primaryResult = null;
-  if (audioPath) {
-    primaryResult = await transcribeAudio(audioPath);
-    if (!primaryResult?.error && String(primaryResult?.text || "").trim()) {
-      return primaryResult;
+  async function transcribeRecordingWithFallback(recordingId, audioPath) {
+    let primaryResult = null;
+    if (audioPath) {
+      try {
+        const stat = fs.statSync(audioPath);
+        const maxBytes = Number(process.env.STT_MAX_MB || 20) * 1024 * 1024;
+        if (stat.size <= maxBytes) {
+          primaryResult = await transcribeAudio(audioPath);
+          if (!primaryResult?.error && String(primaryResult?.text || "").trim()) {
+            return primaryResult;
+          }
+        } else {
+          const segmentDir = path.join(recordingsDir, recordingId, "segments");
+          const segmentSeconds = Number(process.env.STT_SEGMENT_SECONDS || 600);
+          const segments = splitAudioForTranscription(audioPath, segmentDir, segmentSeconds);
+          if (segments.length) {
+            const texts = [];
+            const allSegments = [];
+            let cursor = 0;
+            for (const segmentPath of segments) {
+              const part = await transcribeAudio(segmentPath);
+              if (part?.error || !String(part?.text || "").trim()) {
+                cursor += segmentSeconds;
+                continue;
+              }
+              texts.push(String(part.text).trim());
+              const segs = Array.isArray(part.segments) && part.segments.length
+                ? part.segments
+                : [{ speaker: "Speaker 1", start: 0, end: Math.max(1, String(part.text).trim().split(/\s+/).length / 2.5), text: part.text }];
+              for (const seg of segs) {
+                const start = Number(seg.start || 0) + cursor;
+                const endBase = Number(seg.end || start + 1);
+                const end = Math.max(start + 0.2, endBase + cursor);
+                allSegments.push({
+                  speaker: seg.speaker || "Speaker",
+                  start,
+                  end,
+                  text: String(seg.text || "").trim()
+                });
+              }
+              const last = allSegments[allSegments.length - 1];
+              cursor = last ? last.end + 0.25 : cursor + segmentSeconds;
+            }
+            if (texts.length) {
+              return {
+                text: texts.join(" ").replace(/\s+/g, " ").trim(),
+                language: "en",
+                provider: "openai_segmented",
+                segments: allSegments
+              };
+            }
+          }
+        }
+      } catch (err) {
+        primaryResult = await transcribeAudio(audioPath);
+        if (!primaryResult?.error && String(primaryResult?.text || "").trim()) {
+          return primaryResult;
+        }
+      }
     }
-  }
 
   const chunks = listRecordingChunks(recordingId);
   if (!chunks.length) {
@@ -695,12 +768,12 @@ async function processRecordingPipeline(recordingId, opts = {}) {
     const content = summary.summaryMarkdown || "";
     const filePath = writeArtifact(recordingId, "summary.md", content);
     artifacts.push({ type: "local", name: "summary.md", path: filePath });
-    try {
-      const doc = await createGoogleDoc(`${recording.title} Summary`, content);
-      const url = doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}/edit` : null;
-      artifacts.push({ type: "google_doc", docId: doc.documentId, url });
-    } catch (err) {
-      // ignore if Google is not configured
+      try {
+        const doc = await createGoogleDoc(`${recording.title} Summary`, content, recording.created_by || "local");
+        const url = doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}/edit` : null;
+        artifacts.push({ type: "google_doc", docId: doc.documentId, url });
+      } catch (err) {
+        // ignore if Google is not configured
     }
   }
   if (artifacts.length) {
@@ -752,6 +825,29 @@ async function summarizeAndPersistRecording({ recordingId, transcriptText, title
 
 // Health check
 app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  if (!req.aikaUser) {
+    return res.json({ authenticated: false });
+  }
+  res.json({
+    authenticated: true,
+    user: {
+      id: req.aikaUser.id,
+      email: req.aikaUser.email || null,
+      name: req.aikaUser.name || null,
+      picture: req.aikaUser.picture || null
+    }
+  });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  if (req.aikaSessionId) {
+    destroySession(req.aikaSessionId);
+  }
+  clearSessionCookie(res);
   res.json({ ok: true });
 });
 
@@ -953,26 +1049,26 @@ app.post("/chat", async (req, res) => {
         const transcriptUrl = transcript.transcript_url || firefliesUrl;
         const title = transcript.title || "Fireflies Meeting";
 
-        let docLink = "";
-        try {
-          const doc = await createGoogleDoc(`Aika Notes - ${title}`, [
-            `Title: ${title}`,
-            `Date: ${transcript.dateString || ""}`,
-            `Transcript: ${transcriptUrl}`,
-            "",
-            "Summary:",
-            summaryText,
-            "",
-            "Key Topics:",
-            topics.length ? topics.map(t => `- ${t}`).join("\n") : "- (none)",
-            "",
-            "Action Items:",
-            actionItems.length ? actionItems.map(t => `- ${t}`).join("\n") : "- (none)"
-          ].join("\n"));
-          if (doc?.documentId) {
-            docLink = `https://docs.google.com/document/d/${doc.documentId}/edit`;
-          }
-        } catch {
+          let docLink = "";
+          try {
+            const doc = await createGoogleDoc(`Aika Notes - ${title}`, [
+              `Title: ${title}`,
+              `Date: ${transcript.dateString || ""}`,
+              `Transcript: ${transcriptUrl}`,
+              "",
+              "Summary:",
+              summaryText,
+              "",
+              "Key Topics:",
+              topics.length ? topics.map(t => `- ${t}`).join("\n") : "- (none)",
+              "",
+              "Action Items:",
+              actionItems.length ? actionItems.map(t => `- ${t}`).join("\n") : "- (none)"
+            ].join("\n"), getUserId(req));
+            if (doc?.documentId) {
+              docLink = `https://docs.google.com/document/d/${doc.documentId}/edit`;
+            }
+          } catch {
           // Google not connected; skip doc creation
         }
 
@@ -1690,24 +1786,22 @@ app.post("/api/recordings/:id/resume", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/recordings/:id/stop", (req, res) => {
-  const recording = getRecording(req.params.id);
-  if (!recording) return res.status(404).json({ error: "recording_not_found" });
-  if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
-  const { durationSec } = req.body || {};
-  const endedAt = new Date().toISOString();
-  const audioPath = recording.storage_path || combineChunks(recording.id, recordingsDir);
-  const updates = {
-    ended_at: endedAt,
-    duration: durationSec ? Math.round(Number(durationSec)) : null,
-    status: "processing"
-  };
-  if (audioPath) {
-    updates.storage_path = audioPath;
-    updates.storage_url = `/api/recordings/${recording.id}/audio`;
-  }
-  updateRecording(recording.id, updates);
-  updateProcessingState(recording.id, { stage: "processing", endedAt });
+  app.post("/api/recordings/:id/stop", (req, res) => {
+    const recording = getRecording(req.params.id);
+    if (!recording) return res.status(404).json({ error: "recording_not_found" });
+    if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
+    const { durationSec } = req.body || {};
+    const endedAt = new Date().toISOString();
+    const updates = {
+      ended_at: endedAt,
+      duration: durationSec ? Math.round(Number(durationSec)) : null,
+      status: "processing"
+    };
+    if (recording.storage_path) {
+      updates.storage_url = `/api/recordings/${recording.id}/audio`;
+    }
+    updateRecording(recording.id, updates);
+    updateProcessingState(recording.id, { stage: "processing", endedAt });
   setTimeout(() => {
     processRecordingPipeline(recording.id, { createArtifacts: true }).catch(err => {
       console.error("Recording pipeline failed:", err);
@@ -1912,20 +2006,20 @@ app.post("/api/recordings/:id/email", async (req, res) => {
     const artifacts = Array.isArray(recording.artifacts_json) ? recording.artifacts_json : [];
     const docArtifact = artifacts.find(a => a?.type === "google_doc" && a?.url);
     if (docArtifact?.url) googleDocUrl = String(docArtifact.url);
-    if (!googleDocUrl) {
-      try {
-        const doc = await createGoogleDoc(`${recording.title || "Meeting"} Notes`, notes);
-        if (doc?.documentId) googleDocUrl = `https://docs.google.com/document/d/${doc.documentId}/edit`;
-      } catch {
-        // ignore; email can still include local links
+      if (!googleDocUrl) {
+        try {
+          const doc = await createGoogleDoc(`${recording.title || "Meeting"} Notes`, notes, recording.created_by || "local");
+          if (doc?.documentId) googleDocUrl = `https://docs.google.com/document/d/${doc.documentId}/edit`;
+        } catch {
+          // ignore; email can still include local links
+        }
       }
-    }
 
     const subject = String(req.body?.subject || `Meeting Notes: ${recording.title || "Meeting"}`);
     const text = buildMeetingEmailText({ recording, notesUrl, transcriptUrl, audioUrl, googleDocUrl });
     const fromName = String(process.env.EMAIL_FROM_NAME || "Aika Meeting Copilot");
     const allowOutboxFallback = String(process.env.EMAIL_OUTBOX_FALLBACK || "0").toLowerCase() === "1";
-    const googleStatus = getGoogleStatus();
+      const googleStatus = getGoogleStatus(recording.created_by || getUserId(req));
     const scopes = new Set(Array.isArray(googleStatus.scopes) ? googleStatus.scopes : []);
     const hasGmailSendScope = scopes.has("https://www.googleapis.com/auth/gmail.send");
     if (!googleStatus.connected || !hasGmailSendScope) {
@@ -1936,12 +2030,13 @@ app.post("/api/recordings/:id/email", async (req, res) => {
       });
     }
     try {
-      const sent = await sendGmailMessage({
-        to: recipients,
-        subject,
-        text,
-        fromName
-      });
+        const sent = await sendGmailMessage({
+          to: recipients,
+          subject,
+          text,
+          fromName,
+          userId: recording.created_by || getUserId(req)
+        });
       return res.json({
         ok: true,
         transport: "gmail",
@@ -2052,7 +2147,7 @@ app.post("/api/recordings/:id/actions", async (req, res) => {
         description: input?.description || "Follow-up meeting generated by Aika."
       };
       try {
-        const event = await createCalendarEvent(fallback);
+          const event = await createCalendarEvent(fallback, recording.created_by || getUserId(req));
         output = { event, provider: "google" };
         status = "completed";
       } catch {
@@ -2075,11 +2170,11 @@ app.post("/api/recordings/:id/actions", async (req, res) => {
       status = "completed";
     } else if (actionType === "create_doc") {
       const markdown = (recording.summary_json && JSON.stringify(recording.summary_json, null, 2)) || "";
-      try {
-        const doc = await createGoogleDoc(`${recording.title} Recap`, markdown);
-        const url = doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}/edit` : null;
-        output = { docId: doc.documentId, url };
-        status = "completed";
+        try {
+          const doc = await createGoogleDoc(`${recording.title} Recap`, markdown, recording.created_by || "local");
+          const url = doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}/edit` : null;
+          output = { docId: doc.documentId, url };
+          status = "completed";
       } catch {
         const filePath = writeArtifact(recording.id, "recap.md", markdown);
         output = { localPath: filePath };
@@ -2115,7 +2210,7 @@ app.get("/api/aika/config", (_req, res) => {
   res.json(cfg);
 });
 
-app.get("/api/integrations", (_req, res) => {
+app.get("/api/integrations", (req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const firefliesConfigured = Boolean(process.env.FIREFLIES_API_KEY);
   const plexConfigured = Boolean(process.env.PLEX_URL && process.env.PLEX_TOKEN);
@@ -2127,6 +2222,7 @@ app.get("/api/integrations", (_req, res) => {
   const facebookConfigured = Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
   const instagramConfigured = Boolean(process.env.INSTAGRAM_APP_ID && process.env.INSTAGRAM_APP_SECRET);
   const whatsappConfigured = Boolean(process.env.WHATSAPP_APP_ID && process.env.WHATSAPP_APP_SECRET);
+  const integrationsState = buildIntegrationsState(getUserId(req));
   res.json({
     integrations: {
       ...integrationsState,
@@ -2294,7 +2390,7 @@ app.get("/api/status", async (_req, res) => {
         piper: { enabled: engine === "piper", ready: Boolean(piperBin) && piperVoices > 0, voices: piperVoices }
       }
     },
-    integrations: integrationsState,
+    integrations: buildIntegrationsState(getUserId(req)),
     skills: {
       enabled: getSkillsState().filter(s => s.enabled).length,
       total: getSkillsState().length,
@@ -2397,7 +2493,7 @@ app.post("/api/tools/call", rateLimit, async (req, res) => {
       params,
       context: {
         ...(context || {}),
-        userId: context?.userId || req.headers["x-user-id"] || req.ip,
+        userId: context?.userId || getUserId(req),
         correlationId: context?.correlationId || req.headers["x-correlation-id"] || ""
       }
     });
@@ -2418,7 +2514,7 @@ app.post("/api/approvals", rateLimit, async (req, res) => {
       params: redactedParams,
       humanSummary: humanSummary || `Request to run ${toolName}`,
       riskLevel: riskLevel || "medium",
-      createdBy: req.headers["x-user-id"] || req.ip,
+      createdBy: getUserId(req),
       correlationId: correlationId || req.headers["x-correlation-id"] || ""
     };
     const { createApproval } = await import("./mcp/approvals.js");
@@ -2460,7 +2556,7 @@ app.post("/api/approvals/:id/execute", rateLimit, async (req, res) => {
     const { token, context } = req.body || {};
     const result = await executor.execute(req.params.id, token, {
       ...(context || {}),
-      userId: context?.userId || req.headers["x-user-id"] || req.ip
+      userId: context?.userId || getUserId(req)
     });
     res.json(result);
   } catch (err) {
@@ -2471,22 +2567,28 @@ app.post("/api/approvals/:id/execute", rateLimit, async (req, res) => {
 
 app.post("/api/integrations/connect", (req, res) => {
   const { provider } = req.body || {};
+  const integrationsState = buildIntegrationsState(getUserId(req));
   if (!provider || !integrationsState[provider]) {
     return res.status(400).json({ error: "invalid_provider" });
   }
-  integrationsState[provider].connected = true;
-  integrationsState[provider].connectedAt = new Date().toISOString();
+  setProvider(provider, { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
   res.json({ ok: true, provider });
 });
 
 app.post("/api/integrations/disconnect", (req, res) => {
   const { provider } = req.body || {};
+  const integrationsState = buildIntegrationsState(getUserId(req));
   if (!provider || !integrationsState[provider]) {
     return res.status(400).json({ error: "invalid_provider" });
   }
-  integrationsState[provider].connected = false;
-  delete integrationsState[provider].connectedAt;
+  setProvider(provider, null, getUserId(req));
   res.json({ ok: true, provider });
+});
+
+app.get("/api/auth/google/connect", (req, res) => {
+  const preset = String(req.query.preset || "core");
+  const redirectTo = String(req.query.redirect || "/");
+  res.redirect(`/api/integrations/google/connect?preset=${encodeURIComponent(preset)}&intent=login&redirect=${encodeURIComponent(redirectTo)}`);
 });
 
 app.get("/api/integrations/google/connect", (req, res) => {
@@ -2495,7 +2597,9 @@ app.get("/api/integrations/google/connect", (req, res) => {
       return res.status(400).send("google_oauth_not_configured");
     }
     const preset = String(req.query.preset || "core");
-    const url = connectGoogle(preset);
+    const intent = String(req.query.intent || "connect");
+    const redirectTo = String(req.query.redirect || "/");
+    const url = connectGoogle(preset, { intent, redirectTo });
     res.redirect(url);
   } catch (err) {
     res.status(500).send(err.message || "google_auth_failed");
@@ -2541,9 +2645,7 @@ app.get("/api/integrations/slack/callback", async (req, res) => {
       team: data.team || null,
       authed_user: data.authed_user || null,
       connectedAt: new Date().toISOString()
-    });
-    integrationsState.slack.connected = true;
-    integrationsState.slack.connectedAt = new Date().toISOString();
+    }, getUserId(req));
     res.redirect(`${getUiBaseUrl()}/?integration=slack&status=success`);
   } catch (err) {
     res.redirect(`${getUiBaseUrl()}/?integration=slack&status=error`);
@@ -2551,9 +2653,7 @@ app.get("/api/integrations/slack/callback", async (req, res) => {
 });
 
 app.post("/api/integrations/slack/disconnect", (_req, res) => {
-  setProvider("slack", null);
-  integrationsState.slack.connected = false;
-  delete integrationsState.slack.connectedAt;
+  setProvider("slack", null, getUserId(_req));
   res.json({ ok: true });
 });
 
@@ -2594,9 +2694,7 @@ app.get("/api/integrations/discord/callback", async (req, res) => {
       scope: data.scope || null,
       token_type: data.token_type || null,
       connectedAt: new Date().toISOString()
-    });
-    integrationsState.discord.connected = true;
-    integrationsState.discord.connectedAt = new Date().toISOString();
+    }, getUserId(req));
     res.redirect(`${getUiBaseUrl()}/?integration=discord&status=success`);
   } catch (err) {
     res.redirect(`${getUiBaseUrl()}/?integration=discord&status=error`);
@@ -2604,9 +2702,7 @@ app.get("/api/integrations/discord/callback", async (req, res) => {
 });
 
 app.post("/api/integrations/discord/disconnect", (_req, res) => {
-  setProvider("discord", null);
-  integrationsState.discord.connected = false;
-  delete integrationsState.discord.connectedAt;
+  setProvider("discord", null, getUserId(_req));
   res.json({ ok: true });
 });
 
@@ -2695,9 +2791,7 @@ app.get("/api/integrations/meta/callback", async (req, res) => {
     const key = `meta_${String(product || "facebook")}`;
     validateOAuthState(key, String(state || ""));
     const token = await exchangeMetaCode({ code: String(code || ""), product: String(product || "facebook") });
-    storeMetaToken(String(product || "facebook"), token);
-    integrationsState.facebook.connected = true;
-    integrationsState.facebook.connectedAt = new Date().toISOString();
+    storeMetaToken(String(product || "facebook"), token, getUserId(req));
     res.redirect(`${getUiBaseUrl()}/?integration=meta&status=success`);
   } catch (err) {
     res.redirect(`${getUiBaseUrl()}/?integration=meta&status=error`);
@@ -2705,15 +2799,12 @@ app.get("/api/integrations/meta/callback", async (req, res) => {
 });
 
 app.post("/api/integrations/meta/disconnect", (_req, res) => {
-  setProvider("meta", null);
-  integrationsState.facebook.connected = false;
-  integrationsState.instagram.connected = false;
-  integrationsState.whatsapp.connected = false;
+  setProvider("meta", null, getUserId(_req));
   res.json({ ok: true });
 });
 
-app.get("/api/integrations/facebook/profile", async (_req, res) => {
-  const token = getMetaToken("facebook");
+app.get("/api/integrations/facebook/profile", async (req, res) => {
+  const token = getMetaToken("facebook", getUserId(req));
   if (!token) return res.status(400).json({ error: "facebook_not_connected" });
   const r = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,email&access_token=${encodeURIComponent(token)}`);
   const data = await r.json();
@@ -2721,8 +2812,8 @@ app.get("/api/integrations/facebook/profile", async (_req, res) => {
   res.json(data);
 });
 
-app.get("/api/integrations/facebook/posts", async (_req, res) => {
-  const token = getMetaToken("facebook");
+app.get("/api/integrations/facebook/posts", async (req, res) => {
+  const token = getMetaToken("facebook", getUserId(req));
   if (!token) return res.status(400).json({ error: "facebook_not_connected" });
   const r = await fetch(`https://graph.facebook.com/v19.0/me/posts?limit=10&access_token=${encodeURIComponent(token)}`);
   const data = await r.json();
@@ -2747,50 +2838,65 @@ app.get("/api/integrations/google/callback", async (req, res) => {
     const state = req.query.state;
     if (!code || !state) return res.status(400).send("missing_code_or_state");
     const token = await exchangeGoogleCode(String(code), String(state));
-    integrationsState.google_docs.connected = true;
-    integrationsState.google_drive.connected = true;
-    integrationsState.google_docs.connectedAt = new Date().toISOString();
-    integrationsState.google_drive.connectedAt = new Date().toISOString();
     // store token in persistent store
     await (async () => {
       const { setProvider } = await import("./integrations/store.js");
-      const existing = getProvider("google") || {};
       let email = null;
+      let name = null;
+      let picture = null;
+      let userId = null;
       try {
         const info = await fetchGoogleUserInfo(token.access_token);
         email = info?.email || null;
+        name = info?.name || info?.given_name || null;
+        picture = info?.picture || null;
+        userId = info?.id || info?.email || null;
       } catch {
         // ignore userinfo errors
       }
+      const effectiveUserId = userId || `google_${Date.now()}`;
+      const existing = getProvider("google", effectiveUserId) || {};
       setProvider("google", {
         ...existing,
         ...token,
         refresh_token: token.refresh_token || existing.refresh_token,
         scope: token.scope || existing.scope,
         email: email || existing.email,
+        name: name || existing.name,
+        picture: picture || existing.picture,
         connectedAt: new Date().toISOString()
+      }, effectiveUserId);
+
+      const sessionId = createSession({
+        id: effectiveUserId,
+        email,
+        name,
+        picture,
+        workspaceId: effectiveUserId
       });
+      setSessionCookie(res, sessionId);
     })();
     const uiBase = process.env.WEB_UI_URL || "http://localhost:3000";
-    res.redirect(`${uiBase}/?integration=google&status=success`);
+    const redirectTo = token?.meta?.redirectTo || "/";
+    res.redirect(`${uiBase}${redirectTo}?integration=google&status=success`);
   } catch (err) {
     const uiBase = process.env.WEB_UI_URL || "http://localhost:3000";
     res.redirect(`${uiBase}/?integration=google&status=error`);
   }
 });
 
-app.get("/api/integrations/google/status", async (_req, res) => {
+app.get("/api/integrations/google/status", async (req, res) => {
   try {
-    const status = getGoogleStatus();
+    const status = getGoogleStatus(getUserId(req));
     res.json({ ok: status.connected, ...status });
   } catch (err) {
     res.status(200).json({ ok: false, error: err.message || "google_not_connected" });
   }
 });
 
-app.post("/api/integrations/google/disconnect", async (_req, res) => {
+app.post("/api/integrations/google/disconnect", async (req, res) => {
   try {
-    const result = await disconnectGoogle();
+    const result = await disconnectGoogle(getUserId(req));
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message || "google_disconnect_failed" });
@@ -2800,7 +2906,7 @@ app.post("/api/integrations/google/disconnect", async (_req, res) => {
 app.post("/api/integrations/google/docs/create", async (req, res) => {
   try {
     const { title, content } = req.body || {};
-    const doc = await createGoogleDoc(title || "Aika Notes", content || "");
+    const doc = await createGoogleDoc(title || "Aika Notes", content || "", getUserId(req));
     res.json({ ok: true, doc });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_docs_create_failed" });
@@ -2813,7 +2919,7 @@ app.post("/api/integrations/google/docs/append", async (req, res) => {
     if (!documentId || !content) {
       return res.status(400).json({ error: "documentId_and_content_required" });
     }
-    const result = await appendGoogleDoc(documentId, content);
+    const result = await appendGoogleDoc(documentId, content, getUserId(req));
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_docs_append_failed" });
@@ -2824,7 +2930,7 @@ app.post("/api/integrations/google/drive/upload", async (req, res) => {
   try {
     const { name, content, mimeType } = req.body || {};
     if (!name || !content) return res.status(400).json({ error: "name_and_content_required" });
-    const file = await uploadDriveFile(name, content, mimeType || "text/plain");
+    const file = await uploadDriveFile(name, content, mimeType || "text/plain", getUserId(req));
     res.json({ ok: true, file });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_drive_upload_failed" });
@@ -2834,7 +2940,7 @@ app.post("/api/integrations/google/drive/upload", async (req, res) => {
 app.get("/api/integrations/google/drive/list", async (req, res) => {
   try {
     const limit = Number(req.query.limit || 20);
-    const data = await listDriveFiles("trashed=false", limit);
+    const data = await listDriveFiles("trashed=false", limit, getUserId(req));
     res.json({ files: data.files || [] });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_drive_list_failed", detail: err.detail || null });
@@ -2845,7 +2951,7 @@ app.get("/api/integrations/google/docs/get", async (req, res) => {
   try {
     const docId = req.query.docId;
     if (!docId) return res.status(400).json({ error: "docId_required" });
-    const doc = await getGoogleDoc(String(docId));
+    const doc = await getGoogleDoc(String(docId), getUserId(req));
     const title = doc?.title || "";
     const text = (doc?.body?.content || [])
       .map(c => c.paragraph?.elements?.map(e => e.textRun?.content || "").join("") || "")
@@ -2862,7 +2968,7 @@ app.get("/api/integrations/google/sheets/get", async (req, res) => {
     const spreadsheetId = req.query.spreadsheetId;
     const range = req.query.range;
     if (!spreadsheetId || !range) return res.status(400).json({ error: "spreadsheetId_and_range_required" });
-    const data = await getSheetValues(String(spreadsheetId), String(range));
+    const data = await getSheetValues(String(spreadsheetId), String(range), getUserId(req));
     res.json({ data });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_sheets_get_failed", detail: err.detail || null });
@@ -2875,7 +2981,7 @@ app.post("/api/integrations/google/sheets/append", async (req, res) => {
     if (!spreadsheetId || !range || !Array.isArray(values)) {
       return res.status(400).json({ error: "spreadsheetId_range_values_required" });
     }
-    const data = await appendSheetValues(String(spreadsheetId), String(range), values);
+    const data = await appendSheetValues(String(spreadsheetId), String(range), values, getUserId(req));
     res.json({ data });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_sheets_append_failed", detail: err.detail || null });
@@ -2885,7 +2991,7 @@ app.post("/api/integrations/google/sheets/append", async (req, res) => {
 app.get("/api/integrations/google/calendar/next", async (req, res) => {
   try {
     const max = Number(req.query.max || 10);
-    const data = await listCalendarEvents(max);
+    const data = await listCalendarEvents(max, getUserId(req));
     res.json({ events: data.items || [] });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_calendar_list_failed", detail: err.detail || null });
@@ -2903,7 +3009,7 @@ app.post("/api/integrations/google/calendar/create", async (req, res) => {
     };
     if (description) payload.description = description;
     if (location) payload.location = location;
-    const data = await createCalendarEvent(payload);
+    const data = await createCalendarEvent(payload, getUserId(req));
     res.json({ event: data });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_calendar_create_failed", detail: err.detail || null });
@@ -2914,7 +3020,7 @@ app.get("/api/integrations/google/slides/get", async (req, res) => {
   try {
     const presentationId = req.query.presentationId;
     if (!presentationId) return res.status(400).json({ error: "presentationId_required" });
-    const data = await getSlidesPresentation(String(presentationId));
+    const data = await getSlidesPresentation(String(presentationId), getUserId(req));
     res.json({ title: data.title, slideCount: (data.slides || []).length });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_slides_get_failed", detail: err.detail || null });
@@ -2923,7 +3029,7 @@ app.get("/api/integrations/google/slides/get", async (req, res) => {
 
 app.get("/api/integrations/google/meet/spaces", async (_req, res) => {
   try {
-    const data = await listMeetSpaces();
+    const data = await listMeetSpaces(getUserId(req));
     res.json({ spaces: data.spaces || [] });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_meet_list_failed", detail: err.detail || null });
@@ -2932,7 +3038,7 @@ app.get("/api/integrations/google/meet/spaces", async (_req, res) => {
 
 app.post("/api/integrations/google/meet/spaces", async (req, res) => {
   try {
-    const data = await createMeetSpace(req.body || {});
+    const data = await createMeetSpace(req.body || {}, getUserId(req));
     res.json({ space: data });
   } catch (err) {
     res.status(500).json({ error: err.message || "google_meet_create_failed", detail: err.detail || null });
@@ -2971,11 +3077,10 @@ app.post("/api/integrations/fireflies/upload", async (req, res) => {
   }
 });
 
-app.get("/api/integrations/plex/identity", async (_req, res) => {
+app.get("/api/integrations/plex/identity", async (req, res) => {
   try {
     const xml = await fetchPlexIdentity();
-    integrationsState.plex.connected = true;
-    integrationsState.plex.connectedAt = new Date().toISOString();
+    setProvider("plex", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
     res.type("application/xml").send(xml);
   } catch (err) {
     res.status(500).json({ error: err.message || "plex_failed" });
@@ -2987,8 +3092,7 @@ app.post("/api/integrations/slack/post", async (req, res) => {
     const { channel, text } = req.body || {};
     if (!channel || !text) return res.status(400).json({ error: "channel_and_text_required" });
     const data = await sendSlackMessage(channel, text);
-    integrationsState.slack.connected = true;
-    integrationsState.slack.connectedAt = new Date().toISOString();
+    setProvider("slack", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message || "slack_failed" });
@@ -3000,8 +3104,7 @@ app.post("/api/integrations/telegram/send", async (req, res) => {
     const { chatId, text } = req.body || {};
     if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
     const data = await sendTelegramMessage(chatId, text);
-    integrationsState.telegram.connected = true;
-    integrationsState.telegram.connectedAt = new Date().toISOString();
+    setProvider("telegram", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message || "telegram_failed" });
@@ -3013,8 +3116,7 @@ app.post("/api/integrations/discord/send", async (req, res) => {
     const { text } = req.body || {};
     if (!text) return res.status(400).json({ error: "text_required" });
     const data = await sendDiscordMessage(text);
-    integrationsState.discord.connected = true;
-    integrationsState.discord.connectedAt = new Date().toISOString();
+    setProvider("discord", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message || "discord_failed" });
@@ -3036,7 +3138,7 @@ app.post("/api/agent/task", rateLimit, async (req, res) => {
     const result = await executor.callTool({
       name: toolName,
       params: payload || {},
-      context: { userId: req.headers["x-user-id"] || req.ip, source: "agent", correlationId: req.headers["x-correlation-id"] || "" }
+      context: { userId: getUserId(req), source: "agent", correlationId: req.headers["x-correlation-id"] || "" }
     });
     return res.json(result);
   } catch (err) {

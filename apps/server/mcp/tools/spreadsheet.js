@@ -13,17 +13,18 @@ function buildDiffMarkdown(target, changes) {
   return lines.join("\n");
 }
 
-export async function applyChanges({ target, changes = [], draftOnly = true }) {
+export async function applyChanges({ target, changes = [], draftOnly = true }, context = {}) {
   if (!target?.type || !target?.pathOrId) {
     const err = new Error("target_required");
     err.status = 400;
     throw err;
   }
+  const userId = context.userId || "local";
   const diffMarkdown = buildDiffMarkdown(target, changes);
   let doc = null;
   try {
-    const folderId = await ensureDriveFolderPath(["Aika", "SpreadsheetPatches"]);
-    doc = await createGoogleDocInFolder(`Spreadsheet Patch ${new Date().toISOString()}`, diffMarkdown, folderId);
+    const folderId = await ensureDriveFolderPath(["Aika", "SpreadsheetPatches"], userId);
+    doc = await createGoogleDocInFolder(`Spreadsheet Patch ${new Date().toISOString()}`, diffMarkdown, folderId, userId);
   } catch {
     doc = null;
   }
@@ -33,7 +34,8 @@ export async function applyChanges({ target, changes = [], draftOnly = true }) {
     changes,
     diffMarkdown,
     googleDocId: doc?.documentId || null,
-    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null,
+    userId
   });
   return {
     id: record.id,

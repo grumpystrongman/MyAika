@@ -1,13 +1,34 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import OpenAI from "openai";
 import { listRecordingChunks } from "../storage/recordings.js";
+import ffmpegPath from "ffmpeg-static";
 
 const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1";
 const SUMMARY_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const WORDS_PER_SECOND = Number(process.env.TRANSCRIPT_WPS || 2.5);
 const STT_FORCE_LANGUAGE = (process.env.STT_FORCE_LANGUAGE || "en").trim();
+const STT_MAX_MB = Number(process.env.STT_MAX_MB || 20);
+const STT_SEGMENT_SECONDS = Number(process.env.STT_SEGMENT_SECONDS || 600);
+
+function resolveFfmpeg() {
+  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH;
+  }
+  if (ffmpegPath && fs.existsSync(ffmpegPath)) {
+    return ffmpegPath;
+  }
+  return null;
+}
+
+function runFfmpeg(args) {
+  const exe = resolveFfmpeg();
+  if (!exe) return false;
+  const result = spawnSync(exe, args, { stdio: "ignore" });
+  return result.status === 0;
+}
 
 function isSilentWav(audioPath) {
   try {
@@ -54,16 +75,69 @@ function isLikelyHallucinatedTranscript(text) {
 export function combineChunks(recordingId, recordingsDir) {
   const chunks = listRecordingChunks(recordingId);
   if (!chunks.length) return null;
+  const available = chunks.filter(chunk => fs.existsSync(chunk.storagePath));
+  if (!available.length) return null;
+  const outputWav = path.join(recordingsDir, recordingId, "recording.wav");
+  const listPath = path.join(recordingsDir, recordingId, "chunks.txt");
+  const listContent = available
+    .map(chunk => `file '${chunk.storagePath.replace(/'/g, "'\\''")}'`)
+    .join("\n");
+  fs.writeFileSync(listPath, listContent);
+  const ffmpegOk = runFfmpeg([
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    listPath,
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-c:a",
+    "pcm_s16le",
+    outputWav
+  ]);
+  if (ffmpegOk && fs.existsSync(outputWav)) {
+    return outputWav;
+  }
+
   const buffers = [];
-  for (const chunk of chunks) {
-    if (fs.existsSync(chunk.storagePath)) {
-      buffers.push(fs.readFileSync(chunk.storagePath));
-    }
+  for (const chunk of available) {
+    buffers.push(fs.readFileSync(chunk.storagePath));
   }
   if (!buffers.length) return null;
   const outputPath = path.join(recordingsDir, recordingId, "recording.webm");
   fs.writeFileSync(outputPath, Buffer.concat(buffers));
   return outputPath;
+}
+
+export function splitAudioForTranscription(audioPath, segmentDir, segmentSeconds) {
+  if (!resolveFfmpeg()) return [];
+  if (!fs.existsSync(segmentDir)) fs.mkdirSync(segmentDir, { recursive: true });
+  const segmentPattern = path.join(segmentDir, "segment-%03d.wav");
+  const ok = runFfmpeg([
+    "-y",
+    "-i",
+    audioPath,
+    "-f",
+    "segment",
+    "-segment_time",
+    String(segmentSeconds),
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-c:a",
+    "pcm_s16le",
+    segmentPattern
+  ]);
+  if (!ok) return [];
+  return fs.readdirSync(segmentDir)
+    .filter(name => name.startsWith("segment-") && name.endsWith(".wav"))
+    .map(name => path.join(segmentDir, name))
+    .sort();
 }
 
 function splitSentences(text) {

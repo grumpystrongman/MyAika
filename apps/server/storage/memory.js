@@ -13,7 +13,7 @@ function tierFolder(tier) {
   return "Tier3";
 }
 
-export function createMemoryEntry({ tier, title, content, tags = [], containsPHI = false, googleDocId = null, googleDocUrl = null, contentCiphertext: providedCiphertext = null }) {
+export function createMemoryEntry({ tier, title, content, tags = [], containsPHI = false, googleDocId = null, googleDocUrl = null, contentCiphertext: providedCiphertext = null, userId = "local" }) {
   const db = getDb();
   ensureDir(cacheDir);
   const id = crypto.randomBytes(8).toString("hex");
@@ -31,8 +31,8 @@ export function createMemoryEntry({ tier, title, content, tags = [], containsPHI
     fs.writeFileSync(cachePath, md);
   }
   db.prepare(
-    `INSERT INTO memory_entries (id, tier, title, tags_json, contains_phi, content_ciphertext, content_plaintext, google_doc_id, google_doc_url, cache_path, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO memory_entries (id, tier, title, tags_json, contains_phi, content_ciphertext, content_plaintext, google_doc_id, google_doc_url, cache_path, created_at, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     tier,
@@ -44,7 +44,8 @@ export function createMemoryEntry({ tier, title, content, tags = [], containsPHI
     googleDocId,
     googleDocUrl,
     cachePath,
-    createdAt
+    createdAt,
+    userId
   );
   if (tier !== 3) {
     db.prepare(`INSERT INTO memory_fts (id, title, content, tags, tier) VALUES (?, ?, ?, ?, ?)`)
@@ -56,12 +57,16 @@ export function createMemoryEntry({ tier, title, content, tags = [], containsPHI
   return { id, cachePath, tierFolder: tierFolder(tier), contentCiphertext };
 }
 
-export function searchMemory({ tier, query, tags = [], limit = 20 }) {
+export function searchMemory({ tier, query, tags = [], limit = 20, userId = "local" }) {
   const db = getDb();
   if (query) {
     const rows = db.prepare(
-      `SELECT id, title, content, tags, tier FROM memory_fts WHERE memory_fts MATCH ? AND tier = ? LIMIT ?`
-    ).all(query, tier, limit);
+      `SELECT f.id, f.title, f.content, f.tags, f.tier
+       FROM memory_fts f
+       JOIN memory_entries m ON m.id = f.id
+       WHERE m.user_id = ? AND f.tier = ? AND memory_fts MATCH ?
+       LIMIT ?`
+    ).all(userId, tier, query, limit);
     let results = rows.map(r => ({
       id: r.id,
       title: r.title,
@@ -75,8 +80,8 @@ export function searchMemory({ tier, query, tags = [], limit = 20 }) {
     return results;
   }
   const rows = db.prepare(
-    `SELECT id, title, tags_json, content_plaintext, content_ciphertext, google_doc_url, created_at FROM memory_entries WHERE tier = ? ORDER BY created_at DESC LIMIT ?`
-  ).all(tier, limit);
+    `SELECT id, title, tags_json, content_plaintext, content_ciphertext, google_doc_url, created_at FROM memory_entries WHERE tier = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?`
+  ).all(tier, userId, limit);
   let list = rows.map(r => {
     let snippet = r.content_plaintext || "";
     if (tier === 3 && r.content_ciphertext) {

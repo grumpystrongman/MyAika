@@ -1,10 +1,10 @@
 import { createHoldRecord } from "../../storage/calendar.js";
 
-export function proposeHold({ title, start, end, timezone, attendees = [], location = "", description = "" }) {
+export function proposeHold({ title, start, end, timezone, attendees = [], location = "", description = "" }, context = {}) {
   if (!title || !start || !end || !timezone) {
     const err = new Error("title_start_end_timezone_required");
     err.status = 400;
     throw err;
   }
-  return createHoldRecord({ title, start, end, timezone, attendees, location, description });
+  return createHoldRecord({ title, start, end, timezone, attendees, location, description, userId: context.userId || "local" });
 }

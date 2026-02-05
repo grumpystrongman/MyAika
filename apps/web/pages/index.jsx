@@ -273,6 +273,11 @@ function isLowSignalUtterance(text) {
   return false;
 }
 
+function buildGreeting(user) {
+  const name = user?.name || user?.email || "there";
+  return `Hello ${name}, Aika is here to serve. How may I assist you today?`;
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState("chat");
   const [integrations, setIntegrations] = useState({});
@@ -327,6 +332,8 @@ export default function Home() {
   const [productResearchBusy, setProductResearchBusy] = useState(false);
   const [productResearchNotice, setProductResearchNotice] = useState("");
   const [cartBusyAsin, setCartBusyAsin] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const meetingCopilotRef = useRef({ start: null, stop: null });
   const meetingRecRef = useRef(null);
   const [meetingRecording, setMeetingRecording] = useState(false);
@@ -1295,10 +1302,10 @@ export default function Home() {
     if (!audioUnlocked) return;
     if (!autoSpeak || textOnly) return;
     if (lastAssistantText) return;
-    const greeting = "Hello Jeff, Aika is here to serve. How may I assist you today?";
+    const greeting = buildGreeting(currentUser);
     setLastAssistantText(greeting);
     speakChunks(greeting, { use_raw_text: true });
-  }, [audioUnlocked, autoSpeak, textOnly, lastAssistantText]);
+  }, [audioUnlocked, autoSpeak, textOnly, lastAssistantText, currentUser]);
 
   useEffect(() => {
     if (!voiceMode || !micEnabled || micState !== "idle") return;
@@ -1844,9 +1851,38 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    async function loadAuth() {
+      try {
+        const resp = await fetch(`${SERVER_URL}/api/auth/me`);
+        const data = await resp.json();
+        if (!mounted) return;
+        if (data?.authenticated) {
+          setCurrentUser(data.user || null);
+          const greeting = buildGreeting(data.user || null);
+          setLog(prev => {
+            if (prev.length === 1 && prev[0]?.role === "assistant") {
+              return [{ ...prev[0], text: greeting }];
+            }
+            return prev;
+          });
+        }
+      } catch {
+        // ignore auth failures
+      } finally {
+        if (mounted) setAuthChecked(true);
+      }
+    }
+    loadAuth();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const integrationList = [
-    { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes.", method: "oauth", connectUrl: "/api/integrations/google/auth/start" },
-    { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts.", method: "oauth", connectUrl: "/api/integrations/google/auth/start" },
+    { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes.", method: "oauth", connectUrl: "/api/auth/google/connect" },
+    { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts.", method: "oauth", connectUrl: "/api/auth/google/connect" },
     { key: "slack", label: "Slack", detail: "Team chat updates.", method: "oauth", connectUrl: "/api/integrations/slack/connect", connectLabel: "Connect OAuth" },
     { key: "discord", label: "Discord", detail: "Community updates (OAuth identity).", method: "oauth", connectUrl: "/api/integrations/discord/connect", connectLabel: "Connect OAuth" },
     { key: "telegram", label: "Telegram", detail: "Message you directly (bot token).", method: "token" },
@@ -2465,7 +2501,7 @@ export default function Home() {
             </button>
           </div>
         )}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button
             onClick={() => setActiveTab("chat")}
             style={{
@@ -2557,6 +2593,25 @@ export default function Home() {
           >
             Guide
           </button>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            {currentUser ? (
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Signed in as <b>{currentUser.name || currentUser.email || currentUser.id}</b>
+              </div>
+            ) : (
+              <button
+                onClick={() => window.open(`${SERVER_URL}/api/auth/google/connect`, "_blank", "width=520,height=680")}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #e5e7eb",
+                  background: "#fff"
+                }}
+              >
+                Sign in with Google
+              </button>
+            )}
+          </div>
         </div>
 
           {activeTab === "settings" && (

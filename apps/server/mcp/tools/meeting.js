@@ -41,12 +41,13 @@ async function summarizeWithOpenAI({ transcript, title, date, attendees = [] }) 
   return `# ${title}\n${date ? `\n**Date:** ${date}` : ""}${attendees.length ? `\n**Attendees:** ${attendees.join(", ")}` : ""}\n\n${output}`;
 }
 
-export async function summarizeMeeting({ transcript, title, date, attendees = [], tags = [], store = { googleDocs: true, localMarkdown: true } }) {
+export async function summarizeMeeting({ transcript, title, date, attendees = [], tags = [], store = { googleDocs: true, localMarkdown: true } }, context = {}) {
   if (!transcript || typeof transcript !== "string") {
     const err = new Error("transcript_required");
     err.status = 400;
     throw err;
   }
+  const userId = context.userId || "local";
   const safeTitle = typeof title === "string" && title.trim() ? title.trim() : "Meeting Summary";
   const summaryMarkdown = process.env.OPENAI_API_KEY
     ? await summarizeWithOpenAI({ transcript, title: safeTitle, date, attendees })
@@ -55,8 +56,8 @@ export async function summarizeMeeting({ transcript, title, date, attendees = []
   let doc = null;
   if (store?.googleDocs) {
     try {
-      const folderId = await ensureDriveFolderPath(["Aika", "Meetings"]);
-      doc = await createGoogleDocInFolder(safeTitle, summaryMarkdown, folderId);
+      const folderId = await ensureDriveFolderPath(["Aika", "Meetings"], userId);
+      doc = await createGoogleDocInFolder(safeTitle, summaryMarkdown, folderId, userId);
     } catch {
       doc = null;
     }
@@ -69,7 +70,8 @@ export async function summarizeMeeting({ transcript, title, date, attendees = []
     tags,
     summaryMarkdown,
     googleDocId: doc?.documentId || null,
-    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null,
+    userId
   });
 
   return {
