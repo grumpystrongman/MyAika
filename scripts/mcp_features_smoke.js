@@ -1,9 +1,12 @@
 // MCP Features smoke test
 // Usage: node scripts/mcp_features_smoke.js
 const BASE = process.env.MCP_BASE_URL || "http://127.0.0.1:8790";
+const SMOKE_USER = process.env.SMOKE_USER_ID || "smoke-user";
 
 async function get(path) {
-  const r = await fetch(`${BASE}${path}`);
+  const r = await fetch(`${BASE}${path}`, {
+    headers: { "x-user-id": SMOKE_USER }
+  });
   const data = await r.json();
   return { status: r.status, data };
 }

@@ -5,6 +5,9 @@
 - Terminal 2: `npm run dev:web`
 - Open `http://localhost:3000`
 
+## Automated smoke (recommended)
+- `npm run smoke`
+
 ## UI smoke checks (Aika Tools tab)
 1) Meetings
    - Paste a short transcript, click **Summarize & Store**
@@ -18,7 +21,7 @@
    - Propose a hold (draft only)
 5) Email
    - Draft reply, then attempt send
-   - Verify approval required and appears in Tools → Approvals
+   - Verify approval required and appears in Tools -> Approvals
 6) Spreadsheet
    - Apply changes with JSON ops
    - Verify diff/patch response and Google Doc link if connected

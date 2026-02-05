@@ -1,6 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-
 const base = process.env.SERVER_URL || "http://localhost:8790";
 
 async function main() {
@@ -18,9 +15,10 @@ async function main() {
     push("health", false, err.message);
   }
 
+  let audioUrl = "";
   try {
     const payload = {
-      text: "Hello Jeff \uDC9D this is a smoke test for piper.",
+      text: "Hello Jeff, this is a smoke test for Piper voice.",
       settings: {
         engine: "piper",
         voiceName: process.env.PIPER_DEFAULT_VOICE || "en_GB-semaine-medium",
@@ -34,16 +32,18 @@ async function main() {
       body: JSON.stringify(payload)
     });
     const data = await r.json().catch(() => ({}));
-    push("tts_piper_unicode", r.ok && !!data.audioUrl, r.ok ? (data.audioUrl || "") : (data.error || `status ${r.status}`));
+    audioUrl = r.ok ? data.audioUrl : "";
+    push("tts_piper", r.ok && !!audioUrl, r.ok ? (audioUrl || "") : (data.error || `status ${r.status}`));
   } catch (err) {
-    push("tts_piper_unicode", false, err.message);
+    push("tts_piper", false, err.message);
   }
 
   try {
-    const audioPath = path.resolve("apps/server/voices/fem_aika.wav");
-    const buf = fs.readFileSync(audioPath);
+    if (!audioUrl) throw new Error("tts_missing_audio_url");
+    const audioResp = await fetch(`${base}${audioUrl}`);
+    const audioBuf = Buffer.from(await audioResp.arrayBuffer());
     const form = new FormData();
-    form.append("audio", new Blob([buf], { type: "audio/wav" }), "fem_aika.wav");
+    form.append("audio", new Blob([audioBuf], { type: "audio/wav" }), "smoke.wav");
     const r = await fetch(`${base}/api/stt/transcribe`, { method: "POST", body: form });
     const data = await r.json().catch(() => ({}));
     push("stt_transcribe", r.ok && typeof data.text === "string", r.ok ? (data.text || "(empty)") : (data.error || `status ${r.status}`));
