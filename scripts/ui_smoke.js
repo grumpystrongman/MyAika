@@ -19,6 +19,23 @@ async function run() {
   try {
     await page.goto(UI_BASE, { waitUntil: "networkidle" });
 
+    await page.waitForTimeout(1500);
+    const authLocator = page.getByText("Sign in to Aika").first();
+    const checkingLocator = page.getByText("Checking sign-in").first();
+    if (await authLocator.isVisible().catch(() => false)) {
+      console.log("UI smoke passed (auth gate shown).");
+      await browser.close();
+      return;
+    }
+    if (await checkingLocator.isVisible().catch(() => false)) {
+      await page.waitForTimeout(4000);
+      if (await authLocator.isVisible().catch(() => false)) {
+        console.log("UI smoke passed (auth gate shown).");
+        await browser.close();
+        return;
+      }
+    }
+
     await page.getByRole("button", { name: "Chat", exact: true }).click();
     await page.getByPlaceholder("Type your message...").waitFor();
 

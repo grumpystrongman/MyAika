@@ -6,12 +6,12 @@ import MeetingCopilot from "../src/components/MeetingCopilot";
 
 function resolveServerUrl() {
   if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
-  // Default: same-origin web app + Next.js rewrites proxy to backend.
   return "";
 }
 
 const SERVER_URL = resolveServerUrl();
 const ALWAYS_SERVER_STT = true;
+const REQUIRE_GOOGLE_AUTH = process.env.NEXT_PUBLIC_REQUIRE_GOOGLE_AUTH !== "false";
 
 const THINKING_CUES = [
   "Hold on, I'm thinking.",
@@ -1301,6 +1301,7 @@ export default function Home() {
   useEffect(() => {
     if (!audioUnlocked) return;
     if (!autoSpeak || textOnly) return;
+    if (REQUIRE_GOOGLE_AUTH && !currentUser) return;
     if (lastAssistantText) return;
     const greeting = buildGreeting(currentUser);
     setLastAssistantText(greeting);
@@ -1879,6 +1880,73 @@ export default function Home() {
       mounted = false;
     };
   }, []);
+
+  const showAuthGate = REQUIRE_GOOGLE_AUTH && authChecked && !currentUser;
+  const googleLoginUrl = SERVER_URL
+    ? `${SERVER_URL}/api/auth/google/connect`
+    : "/api/auth/google/connect";
+
+  if (REQUIRE_GOOGLE_AUTH && !authChecked) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#0b1220",
+        color: "#e5e7eb",
+        padding: 24
+      }}>
+        <div style={{ fontSize: 14, color: "#cbd5f5" }}>Checking sign-in…</div>
+      </div>
+    );
+  }
+
+  if (showAuthGate) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#0b1220",
+        color: "#e5e7eb",
+        padding: 24
+      }}>
+        <div style={{
+          maxWidth: 520,
+          width: "100%",
+          background: "#0f172a",
+          border: "1px solid #1f2937",
+          borderRadius: 16,
+          padding: 24,
+          textAlign: "center"
+        }}>
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Sign in to Aika</div>
+          <div style={{ fontSize: 14, color: "#cbd5f5", marginBottom: 16 }}>
+            Aika requires Google sign-in before loading chat, voice, and recordings.
+          </div>
+          <button
+            onClick={() => window.open(googleLoginUrl, "_blank", "width=520,height=680")}
+            style={{
+              padding: "10px 16px",
+              borderRadius: 10,
+              border: "1px solid #334155",
+              background: "#1d4ed8",
+              color: "white",
+              fontWeight: 600,
+              cursor: "pointer"
+            }}
+          >
+            Sign in with Google
+          </button>
+          <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
+            After signing in, refresh this page to continue.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const integrationList = [
     { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes.", method: "oauth", connectUrl: "/api/auth/google/connect" },
@@ -2600,7 +2668,7 @@ export default function Home() {
               </div>
             ) : (
               <button
-                onClick={() => window.open(`${SERVER_URL}/api/auth/google/connect`, "_blank", "width=520,height=680")}
+                onClick={() => window.open(googleLoginUrl, "_blank", "width=520,height=680")}
                 style={{
                   padding: "8px 12px",
                   borderRadius: 10,
