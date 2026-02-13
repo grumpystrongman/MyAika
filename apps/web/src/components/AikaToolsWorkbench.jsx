@@ -599,7 +599,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <button
-              onClick={() => window.open(`${serverUrl}/api/auth/google/connect`, "_blank")}
+              onClick={() => window.open(`${serverUrl}/api/auth/google/connect?ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
               style={{ padding: "6px 10px", borderRadius: 8 }}
             >
               Connect Google Docs

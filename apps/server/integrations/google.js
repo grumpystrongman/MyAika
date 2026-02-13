@@ -31,7 +31,12 @@ function getGoogleEnv() {
   return {
     clientId: process.env.GOOGLE_CLIENT_ID || "",
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
-    redirectUri: process.env.GOOGLE_REDIRECT_URI || ""
+    redirectUri: process.env.GOOGLE_REDIRECT_URI || "",
+    redirectUriLocal: process.env.GOOGLE_REDIRECT_URI_LOCAL || "",
+    redirectUris: (process.env.GOOGLE_REDIRECT_URIS || "")
+      .split(",")
+      .map(u => u.trim())
+      .filter(Boolean)
   };
 }
 
@@ -84,16 +89,58 @@ function scopeSatisfied(current, required) {
 
 export function connectGoogle(preset = "core", meta = {}) {
   const state = generateState();
-  storeState(state, meta);
-  return getGoogleAuthUrl(state, preset);
+  const redirectUri = resolveRedirectUri(meta);
+  storeState(state, { ...meta, redirectUri });
+  return getGoogleAuthUrl(state, preset, redirectUri);
 }
 
-export function getGoogleAuthUrl(state, preset = "core") {
+function resolveRedirectUri(meta = {}) {
+  const { redirectUri, redirectUriLocal, redirectUris } = getGoogleEnv();
+  if (meta?.redirectUri) return meta.redirectUri;
+  if (meta?.uiBase && redirectUris.length) {
+    try {
+      const uiCallback = new URL("/api/auth/google/callback", meta.uiBase).toString();
+      if (redirectUris.includes(uiCallback)) return uiCallback;
+    } catch {
+      // ignore parse errors
+    }
+  }
+  if (meta?.uiBase && redirectUris.length) {
+    try {
+      const uiHost = new URL(meta.uiBase).hostname;
+      const matched = redirectUris.find(uri => {
+        try {
+          const host = new URL(uri).hostname;
+          return host === uiHost;
+        } catch {
+          return false;
+        }
+      });
+      if (matched) return matched;
+    } catch {
+      // ignore parse errors
+    }
+  }
+  if (meta?.uiBase && redirectUriLocal) {
+    try {
+      const uiHost = new URL(meta.uiBase).hostname;
+      if (["localhost", "127.0.0.1"].includes(uiHost)) {
+        return redirectUriLocal;
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }
+  return redirectUri || redirectUris[0] || "";
+}
+
+export function getGoogleAuthUrl(state, preset = "core", redirectUriOverride = "") {
   const { clientId, redirectUri } = getGoogleEnv();
+  const resolvedRedirect = redirectUriOverride || redirectUri;
   const scopes = GOOGLE_SCOPE_PRESETS[preset] || GOOGLE_SCOPE_PRESETS.core;
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: redirectUri,
+    redirect_uri: resolvedRedirect,
     response_type: "code",
     access_type: "offline",
     prompt: "consent",
@@ -111,11 +158,12 @@ export async function exchangeGoogleCode(code, state) {
     throw err;
   }
   const { clientId, clientSecret, redirectUri } = getGoogleEnv();
+  const resolvedRedirect = meta?.redirectUri || redirectUri;
   const body = new URLSearchParams({
     code,
     client_id: clientId,
     client_secret: clientSecret,
-    redirect_uri: redirectUri,
+    redirect_uri: resolvedRedirect,
     grant_type: "authorization_code"
   });
 
@@ -193,11 +241,12 @@ export async function getGoogleAccessToken(requiredScopes = [], userId = "") {
     }
   }
   if (stored.access_token && stored.expires_at && stored.expires_at > Date.now() + 30000) {
+    setProvider("google", { ...stored, lastUsedAt: new Date().toISOString() }, userId);
     return stored.access_token;
   }
   if (!stored.refresh_token) throw new Error("google_refresh_token_missing");
   const refreshed = await refreshGoogleToken(stored.refresh_token);
-  const updated = { ...stored, ...refreshed };
+  const updated = { ...stored, ...refreshed, lastUsedAt: new Date().toISOString() };
   setProvider("google", updated, userId);
   return updated.access_token;
 }

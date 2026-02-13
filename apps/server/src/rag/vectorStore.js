@@ -462,3 +462,28 @@ export function getChunksByIds(chunkIds = [], filters = {}) {
   `;
   return db.prepare(sql).all(...params);
 }
+
+export function listMeetingSummaries({ dateFrom, dateTo, limit = 20 } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  if (dateFrom) {
+    where.push("m.occurred_at >= ?");
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    where.push("m.occurred_at <= ?");
+    params.push(dateTo);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const sql = `
+    SELECT m.id, m.title, m.occurred_at, m.source_url,
+           ms.summary_json, ms.decisions_json, ms.tasks_json, ms.next_steps_json
+    FROM meetings m
+    LEFT JOIN meeting_summaries ms ON ms.meeting_id = m.id
+    ${whereSql}
+    ORDER BY m.occurred_at DESC
+    LIMIT ?
+  `;
+  return db.prepare(sql).all(...params, Number(limit || 20));
+}

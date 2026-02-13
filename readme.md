@@ -92,6 +92,8 @@ Notes:
    - `GOOGLE_CLIENT_ID`
    - `GOOGLE_CLIENT_SECRET`
    - `GOOGLE_REDIRECT_URI` (example: `http://localhost:8790/api/integrations/google/callback`)
+   - Optional: `GOOGLE_REDIRECT_URI_LOCAL` for localhost callbacks
+   - Optional: `GOOGLE_REDIRECT_URIS` (comma-separated list of allowed callbacks)
    - `WEB_UI_URL` (example: `http://localhost:3000`)
 2) Click "Connect" for Google Docs/Drive in the Integrations tab to complete OAuth.
 3) Use these endpoints:
@@ -136,6 +138,38 @@ Manual sync + ask:
 - `POST /api/fireflies/sync` `{ limit?: number, force?: boolean }`
 - `POST /api/rag/ask` `{ question: string, topK?: number }`
 - UI: open `http://localhost:3000/fireflies-rag`
+
+### Action Runner + Teach Mode
+Action Runner provides a DLAM-style browser executor with approvals and local artifacts.
+- UI tabs: **Action Runner** and **Teach Mode**
+- Endpoints:
+  - `POST /api/action/plan`
+  - `POST /api/action/run`
+  - `GET /api/action/runs/:id`
+- Macros:
+  - `GET /api/teach/macros`
+  - `POST /api/teach/macros`
+  - `POST /api/teach/macros/:id/run`
+- Artifacts saved under `data/action_runs/<runId>/`
+
+### Connections Portal + Pairing
+Use **Features → Connections** to see integration status, revoke tokens, and approve pairings.
+- Pairing endpoints:
+  - `GET /api/pairings`
+  - `POST /api/pairings/:id/approve`
+ - Inbound webhooks:
+   - Telegram: `POST /api/integrations/telegram/webhook`
+   - Slack events: `POST /api/integrations/slack/events`
+   - Discord: set `DISCORD_BOT_TOKEN` to enable the gateway listener
+
+### Live Canvas
+Canvas cards are stored locally and rendered in the **Canvas** tab.
+- `POST /api/canvas/update` `{ workspaceId, cardId, content, kind }`
+
+### Skill Vault (Local)
+Local-only skill registry for prompt skills.
+- `GET /api/skill-vault`
+- `POST /api/skill-vault/:id/run`
 
 ### Weather + Web Search (chat-enabled)
 Aika can now use live internet helpers directly from chat:

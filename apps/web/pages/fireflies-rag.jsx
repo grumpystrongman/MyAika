@@ -18,6 +18,11 @@ export default function FirefliesRagPage() {
   const [citations, setCitations] = useState([]);
   const [debug, setDebug] = useState(null);
   const [asking, setAsking] = useState(false);
+  const [lastQuestion, setLastQuestion] = useState("");
+  const [lastAnswer, setLastAnswer] = useState("");
+  const [lastCitations, setLastCitations] = useState([]);
+  const [feedbackRating, setFeedbackRating] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState("");
 
   const handleSync = async () => {
     setSyncing(true);
@@ -30,7 +35,10 @@ export default function FirefliesRagPage() {
         body: JSON.stringify({ limit: Number(syncLimit), force: Boolean(forceSync) })
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || "sync_failed");
+      if (!resp.ok) {
+        const retryNote = data?.retryAt ? ` (retry after ${data.retryAt})` : "";
+        throw new Error(`${data?.error || "sync_failed"}${retryNote}`);
+      }
       setSyncResult(data);
       setSyncStatus("Sync complete.");
     } catch (err) {
@@ -56,12 +64,43 @@ export default function FirefliesRagPage() {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "ask_failed");
       setAnswer(data?.answer || "");
-      setCitations(Array.isArray(data?.citations) ? data.citations : []);
+      const nextCitations = Array.isArray(data?.citations) ? data.citations : [];
+      setCitations(nextCitations);
       setDebug(data?.debug || null);
+      setLastQuestion(trimmed);
+      setLastAnswer(data?.answer || "");
+      setLastCitations(nextCitations);
+      setFeedbackRating("");
+      setFeedbackStatus("");
     } catch (err) {
       setAnswer(`Error: ${err?.message || "ask_failed"}`);
     } finally {
       setAsking(false);
+    }
+  };
+
+  const submitFeedback = async (rating) => {
+    if (!lastAnswer) return;
+    setFeedbackStatus("Saving feedback...");
+    setFeedbackRating(rating);
+    try {
+      const resp = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "rag",
+          rating,
+          question: lastQuestion,
+          answer: lastAnswer,
+          messageId: `rag-${Date.now()}`,
+          citations: lastCitations
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "feedback_failed");
+      setFeedbackStatus("Feedback saved.");
+    } catch (err) {
+      setFeedbackStatus(`Feedback failed: ${err?.message || "feedback_failed"}`);
     }
   };
 
@@ -157,6 +196,37 @@ export default function FirefliesRagPage() {
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{answer}</div>
           ) : (
             <div style={{ color: "#6b7280" }}>No answer yet. Sync transcripts and ask a question.</div>
+          )}
+          {answer && (
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => submitFeedback("up")}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: feedbackRating === "up" ? "#dcfce7" : "white",
+                  fontSize: 12
+                }}
+              >
+                Thumbs Up
+              </button>
+              <button
+                onClick={() => submitFeedback("down")}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: feedbackRating === "down" ? "#fee2e2" : "white",
+                  fontSize: 12
+                }}
+              >
+                Thumbs Down
+              </button>
+              {feedbackStatus && (
+                <div style={{ fontSize: 12, color: "#6b7280" }}>{feedbackStatus}</div>
+              )}
+            </div>
           )}
           {debug && (
             <pre style={{ marginTop: 12, fontSize: 12, background: "#f9fafb", padding: 12, borderRadius: 10, overflowX: "auto" }}>

@@ -3,6 +3,7 @@ import cors from "cors";
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import OpenAI from "openai";
 import { z } from "zod";
 import { initMemory, addMemory, searchMemories } from "./memory.js";
@@ -43,6 +44,8 @@ import {
 } from "./integrations/fireflies.js";
 import { fetchPlexIdentity } from "./integrations/plex.js";
 import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
+import { startDiscordBot } from "./integrations/discord_bot.js";
+import { handleInboundMessage } from "./integrations/inbound.js";
 import { fetchCurrentWeather } from "./integrations/weather.js";
 import { searchWeb } from "./integrations/web_search.js";
 import { buildAmazonAddToCartUrl, runProductResearch } from "./integrations/product_research.js";
@@ -52,6 +55,7 @@ import { buildMetaAuthUrl, exchangeMetaCode, getMetaToken, storeMetaToken } from
 import { registry, executor } from "./mcp/index.js";
 import { redactPhi } from "./mcp/policy.js";
 import { listApprovals, denyApproval } from "./mcp/approvals.js";
+import { writeAudit } from "./mcp/audit.js";
 import { listToolHistory } from "./storage/history.js";
 import { initDb } from "./storage/db.js";
 import { runMigrations } from "./storage/schema.js";
@@ -79,12 +83,21 @@ import {
   listAgentActions
 } from "./storage/agent_actions.js";
 import { writeOutbox } from "./storage/outbox.js";
+import { listPairings, approvePairing, denyPairing } from "./storage/pairings.js";
+import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
 import { initRagStore } from "./src/rag/vectorStore.js";
 import { syncFireflies, startFirefliesSyncLoop } from "./src/rag/firefliesIngest.js";
 import { answerRagQuestion } from "./src/rag/query.js";
+import { recordFeedback } from "./src/feedback/feedback.js";
+import { planAction } from "./src/actionRunner/planner.js";
+import { getActionRun } from "./src/actionRunner/runner.js";
+import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
+import { listMacros, saveMacro, deleteMacro, getMacro, applyMacroParams, extractMacroParams } from "./src/actionRunner/macros.js";
+import { listCanvasCards, upsertCanvasCard } from "./src/canvas/store.js";
+import { listSkillVault, getSkillVaultEntry, scanSkillWithVirusTotal } from "./src/skillVault/registry.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -106,7 +119,12 @@ import {
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({
+  limit: "2mb",
+  verify: (req, _res, buf) => {
+    req.rawBody = buf?.toString?.() || "";
+  }
+}));
 app.use((req, _res, next) => {
   const session = getSession(req);
   req.aikaUser = session?.user || null;
@@ -114,6 +132,7 @@ app.use((req, _res, next) => {
   next();
 });
 startReminderScheduler();
+startDiscordBot();
 
 initDb();
 runMigrations();
@@ -326,6 +345,60 @@ function buildIntegrationsState(userId = "") {
   return state;
 }
 
+function buildConnections(userId = "") {
+  const connections = [];
+  const googleStored = getProvider("google", userId);
+  const googleStatus = getGoogleStatus(userId);
+  connections.push({
+    id: "google",
+    label: "Google (Gmail/Calendar/Drive)",
+    detail: "Docs, Drive, Calendar, Gmail",
+    status: googleStatus?.connected ? "connected" : "disconnected",
+    scopes: googleStatus?.scopes || [],
+    lastUsedAt: googleStored?.lastUsedAt || null,
+    connectedAt: googleStored?.connectedAt || null,
+    configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+  });
+
+  const slackStored = getProvider("slack", userId);
+  connections.push({
+    id: "slack",
+    label: "Slack",
+    detail: "Channels and messages",
+    status: slackStored?.access_token || slackStored?.bot_token || process.env.SLACK_BOT_TOKEN ? "connected" : "disconnected",
+    scopes: slackStored?.scope ? String(slackStored.scope).split(/\\s|,/).filter(Boolean) : [],
+    lastUsedAt: slackStored?.lastUsedAt || null,
+    connectedAt: slackStored?.connectedAt || null,
+    configured: Boolean(process.env.SLACK_BOT_TOKEN || (process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET))
+  });
+
+  const discordStored = getProvider("discord", userId);
+  connections.push({
+    id: "discord",
+    label: "Discord",
+    detail: "Bot messages",
+    status: discordStored?.webhook || discordStored?.bot_token || process.env.DISCORD_BOT_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: discordStored?.lastUsedAt || null,
+    connectedAt: discordStored?.connectedAt || null,
+    configured: Boolean(process.env.DISCORD_BOT_TOKEN || (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET))
+  });
+
+  const telegramStored = getProvider("telegram", userId);
+  connections.push({
+    id: "telegram",
+    label: "Telegram",
+    detail: "Bot messages",
+    status: telegramStored?.token || process.env.TELEGRAM_BOT_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: telegramStored?.lastUsedAt || null,
+    connectedAt: telegramStored?.connectedAt || null,
+    configured: Boolean(process.env.TELEGRAM_BOT_TOKEN)
+  });
+
+  return connections;
+}
+
 // Heuristic fallback behavior
 function inferBehaviorFromText(text) {
   const t = text.toLowerCase();
@@ -408,6 +481,24 @@ function encodeForm(data) {
     .join("&");
 }
 
+function verifySlackSignature(req) {
+  const secret = process.env.SLACK_SIGNING_SECRET || "";
+  if (!secret) return true;
+  const timestamp = req.headers["x-slack-request-timestamp"];
+  const signature = req.headers["x-slack-signature"];
+  if (!timestamp || !signature) return false;
+  const rawBody = req.rawBody || "";
+  const base = `v0:${timestamp}:${rawBody}`;
+  const hmac = crypto.createHmac("sha256", secret).update(base).digest("hex");
+  const expected = `v0=${hmac}`;
+  if (expected.length !== String(signature).length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  } catch {
+    return false;
+  }
+}
+
 function getWorkspaceId(req) {
   return (
     req.aikaUser?.workspaceId
@@ -431,6 +522,13 @@ function getBaseUrl() {
 
 function getUiBaseUrl() {
   return process.env.WEB_UI_URL || "http://localhost:3000";
+}
+
+function getRequestOrigin(req) {
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "";
+  if (!host) return "";
+  return `${proto}://${host}`;
 }
 
 function normalizeLocation(value) {
@@ -2269,6 +2367,50 @@ const ragAskSchema = z.object({
   }).optional()
 });
 
+const feedbackSchema = z.object({
+  source: z.string().optional(),
+  rating: z.enum(["up", "down"]),
+  question: z.string().optional(),
+  answer: z.string().optional(),
+  messageId: z.string().optional(),
+  citations: z.array(z.object({
+    meeting_title: z.string().optional(),
+    occurred_at: z.string().optional(),
+    chunk_id: z.string().optional(),
+    snippet: z.string().optional()
+  })).optional()
+});
+
+const actionPlanSchema = z.object({
+  instruction: z.string().min(3),
+  startUrl: z.string().optional()
+});
+
+const actionRunSchema = z.object({
+  taskName: z.string().optional(),
+  startUrl: z.string().optional(),
+  actions: z.array(z.object({ type: z.string() }).passthrough()).min(1),
+  safety: z.object({
+    requireApprovalFor: z.array(z.string()).optional(),
+    maxActions: z.number().int().optional()
+  }).optional(),
+  async: z.boolean().optional()
+});
+
+const macroSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  startUrl: z.string().optional(),
+  actions: z.array(z.object({ type: z.string() }).passthrough()).min(1)
+});
+
+const macroRunSchema = z.object({
+  params: z.record(z.any()).optional(),
+  async: z.boolean().optional()
+});
+
 app.post("/api/fireflies/sync", async (req, res) => {
   try {
     const parsed = firefliesSyncSchema.parse(req.body || {});
@@ -2277,6 +2419,15 @@ app.post("/api/fireflies/sync", async (req, res) => {
       force: Boolean(parsed.force),
       sendEmail: parsed.sendEmail
     });
+    if (result?.ok === false) {
+      const status =
+        result.error === "fireflies_rate_limited"
+          ? 429
+          : result.error === "sync_in_progress"
+            ? 409
+            : 400;
+      return res.status(status).json(result);
+    }
     res.json(result);
   } catch (err) {
     if (err?.issues) {
@@ -2300,6 +2451,291 @@ app.post("/api/rag/ask", async (req, res) => {
     }
     res.status(500).json({ error: err?.message || "rag_query_failed" });
   }
+});
+
+app.post("/api/feedback", async (req, res) => {
+  try {
+    const parsed = feedbackSchema.parse(req.body || {});
+    const stored = await recordFeedback({
+      messageId: parsed.messageId,
+      source: parsed.source || "chat",
+      rating: parsed.rating,
+      question: parsed.question || "",
+      answer: parsed.answer || "",
+      citations: parsed.citations || []
+    });
+
+    const ratingTag = parsed.rating === "down" ? "thumbs_down" : "thumbs_up";
+    const sourceTag = String(parsed.source || "chat").toLowerCase();
+    const memoryLines = [
+      `Feedback: ${ratingTag}`,
+      sourceTag ? `Source: ${sourceTag}` : "",
+      parsed.question ? `Question: ${parsed.question}` : "",
+      parsed.answer ? `Answer: ${parsed.answer}` : ""
+    ].filter(Boolean);
+
+    addMemory(db, {
+      role: "system",
+      content: memoryLines.join("\n"),
+      tags: `feedback,${ratingTag},source_${sourceTag}`
+    });
+
+    res.json({ ok: true, feedbackId: stored.id, meetingId: stored.meetingId, chunkId: stored.chunkId });
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "feedback_failed" });
+  }
+});
+
+app.post("/api/action/plan", rateLimit, async (req, res) => {
+  try {
+    const parsed = actionPlanSchema.parse(req.body || {});
+    const result = await planAction({
+      instruction: parsed.instruction,
+      startUrl: parsed.startUrl || ""
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "action_plan_failed" });
+  }
+});
+
+app.post("/api/action/run", rateLimit, async (req, res) => {
+  try {
+    const parsed = actionRunSchema.parse(req.body || {});
+    const result = await executor.callTool({
+      name: "action.run",
+      params: parsed,
+      context: {
+        userId: getUserId(req),
+        workspaceId: getWorkspaceId(req),
+        correlationId: req.headers["x-correlation-id"] || ""
+      }
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "action_run_failed" });
+  }
+});
+
+app.get("/api/action/runs/:id", rateLimit, (req, res) => {
+  const run = getActionRun(req.params.id);
+  if (!run) return res.status(404).json({ error: "run_not_found" });
+  res.json(run);
+});
+
+app.get("/api/action/runs/:id/artifacts/:file", rateLimit, (req, res) => {
+  const runId = req.params.id;
+  const file = req.params.file;
+  const dir = getRunDir(runId);
+  const filePath = getRunFilePath(runId, file);
+  const resolvedDir = path.resolve(dir);
+  const resolvedFile = path.resolve(filePath);
+  if (!resolvedFile.startsWith(resolvedDir)) {
+    return res.status(403).json({ error: "invalid_artifact_path" });
+  }
+  if (!fs.existsSync(resolvedFile)) {
+    return res.status(404).json({ error: "artifact_not_found" });
+  }
+  res.sendFile(resolvedFile);
+});
+
+app.get("/api/teach/macros", rateLimit, (_req, res) => {
+  const macros = listMacros().map(macro => ({
+    ...macro,
+    params: extractMacroParams(macro)
+  }));
+  res.json({ macros });
+});
+
+app.get("/api/teach/macros/:id", rateLimit, (req, res) => {
+  const macro = getMacro(req.params.id);
+  if (!macro) return res.status(404).json({ error: "macro_not_found" });
+  res.json({ macro, params: extractMacroParams(macro) });
+});
+
+app.post("/api/teach/macros", rateLimit, (req, res) => {
+  try {
+    const parsed = macroSchema.parse(req.body || {});
+    const macro = saveMacro(parsed);
+    res.json({ macro });
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "macro_save_failed" });
+  }
+});
+
+app.delete("/api/teach/macros/:id", rateLimit, (req, res) => {
+  const ok = deleteMacro(req.params.id);
+  if (!ok) return res.status(404).json({ error: "macro_not_found" });
+  res.json({ ok: true });
+});
+
+app.post("/api/teach/macros/:id/run", rateLimit, async (req, res) => {
+  try {
+    const macro = getMacro(req.params.id);
+    if (!macro) return res.status(404).json({ error: "macro_not_found" });
+    const parsed = macroRunSchema.parse(req.body || {});
+    const plan = applyMacroParams(macro, parsed.params || {});
+    const result = await executor.callTool({
+      name: "action.run",
+      params: { ...plan, async: parsed.async !== false },
+      context: {
+        userId: getUserId(req),
+        workspaceId: getWorkspaceId(req),
+        correlationId: req.headers["x-correlation-id"] || ""
+      }
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "macro_run_failed" });
+  }
+});
+
+app.get("/api/pairings", rateLimit, (_req, res) => {
+  res.json(listPairings());
+});
+
+app.post("/api/pairings/:id/approve", rateLimit, (req, res) => {
+  const approved = approvePairing(req.params.id, getUserId(req));
+  if (!approved) return res.status(404).json({ error: "pairing_not_found" });
+  res.json({ ok: true, approved });
+});
+
+app.post("/api/pairings/:id/deny", rateLimit, (req, res) => {
+  const denied = denyPairing(req.params.id);
+  if (!denied) return res.status(404).json({ error: "pairing_not_found" });
+  res.json({ ok: true, denied });
+});
+
+app.get("/api/connections", rateLimit, (req, res) => {
+  const connections = buildConnections(getUserId(req));
+  const panic = getRuntimeFlags();
+  res.json({ connections, panic: { outboundToolsDisabled: Boolean(panic.outboundToolsDisabled) } });
+});
+
+app.post("/api/connections/panic", rateLimit, (req, res) => {
+  const enabled = Boolean(req.body?.enabled);
+  const flags = setRuntimeFlag("outboundToolsDisabled", enabled);
+  writeAudit({
+    type: "panic_switch",
+    at: new Date().toISOString(),
+    enabled,
+    userId: getUserId(req)
+  });
+  res.json({ ok: true, enabled: Boolean(flags.outboundToolsDisabled) });
+});
+
+app.post("/api/connections/:id/revoke", rateLimit, async (req, res) => {
+  const id = req.params.id;
+  try {
+    if (id === "google") {
+      await disconnectGoogle(getUserId(req));
+    } else {
+      setProvider(id, null, getUserId(req));
+    }
+    writeAudit({
+      type: "connection_revoked",
+      at: new Date().toISOString(),
+      provider: id,
+      userId: getUserId(req)
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "connection_revoke_failed" });
+  }
+});
+
+app.get("/api/canvas", rateLimit, (req, res) => {
+  const workspaceId = getWorkspaceId(req);
+  res.json({ cards: listCanvasCards(workspaceId) });
+});
+
+app.post("/api/canvas/update", rateLimit, (req, res) => {
+  const { workspaceId, cardId, content, kind } = req.body || {};
+  if (!cardId) return res.status(400).json({ error: "cardId_required" });
+  const record = upsertCanvasCard({
+    workspaceId: workspaceId || getWorkspaceId(req),
+    cardId: String(cardId),
+    kind: kind ? String(kind) : undefined,
+    content: content ?? {}
+  });
+  res.json({ ok: true, card: record });
+});
+
+app.post("/api/integrations/telegram/webhook", rateLimit, async (req, res) => {
+  try {
+    const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    if (secret && req.headers["x-telegram-bot-api-secret-token"] !== secret) {
+      return res.status(401).json({ error: "telegram_secret_invalid" });
+    }
+    const update = req.body || {};
+    const message = update.message || update.edited_message;
+    const text = message?.text || message?.caption || "";
+    const chatId = message?.chat?.id;
+    const senderId = message?.from?.id ? String(message.from.id) : "";
+    const senderName = message?.from?.username || message?.from?.first_name || "";
+    if (text && chatId) {
+      await handleInboundMessage({
+        channel: "telegram",
+        senderId,
+        senderName,
+        text,
+        workspaceId: "default",
+        reply: async (replyText) => {
+          await sendTelegramMessage(chatId, replyText);
+        }
+      });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "telegram_webhook_failed" });
+  }
+});
+
+app.post("/api/integrations/slack/events", rateLimit, async (req, res) => {
+  if (!verifySlackSignature(req)) {
+    return res.status(401).json({ error: "slack_signature_invalid" });
+  }
+  const body = req.body || {};
+  if (body.type === "url_verification") {
+    return res.send(body.challenge);
+  }
+  const event = body.event || {};
+  if (event.type === "message" && !event.bot_id && !event.subtype) {
+    const senderId = String(event.user || "");
+    const senderName = senderId;
+    const text = event.text || "";
+    const channelId = event.channel;
+    if (text && channelId) {
+      await handleInboundMessage({
+        channel: "slack",
+        senderId,
+        senderName,
+        text,
+        workspaceId: "default",
+        reply: async (replyText) => {
+          await sendSlackMessage(channelId, replyText);
+        }
+      });
+    }
+  }
+  res.json({ ok: true });
 });
 
 app.get("/api/skills", (_req, res) => {
@@ -2389,6 +2825,40 @@ app.get("/api/skills/export/:type", (req, res) => {
       return res.status(404).json({ error: "unknown_export_type" });
   }
   res.type("text/plain").send(text || "");
+});
+
+app.get("/api/skill-vault", rateLimit, (_req, res) => {
+  res.json({ skills: listSkillVault() });
+});
+
+app.get("/api/skill-vault/:id", rateLimit, (req, res) => {
+  const entry = getSkillVaultEntry(req.params.id);
+  if (!entry) return res.status(404).json({ error: "skill_not_found" });
+  res.json(entry);
+});
+
+app.post("/api/skill-vault/:id/run", rateLimit, async (req, res) => {
+  try {
+    const input = req.body?.input || "";
+    const result = await executor.callTool({
+      name: "skill.vault.run",
+      params: { skillId: req.params.id, input },
+      context: {
+        userId: getUserId(req),
+        workspaceId: getWorkspaceId(req),
+        correlationId: req.headers["x-correlation-id"] || ""
+      }
+    });
+    res.json(result);
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "skill_run_failed", detail: err.detail || null });
+  }
+});
+
+app.post("/api/skill-vault/:id/scan", rateLimit, (_req, res) => {
+  const result = scanSkillWithVirusTotal(_req.params.id);
+  res.json(result);
 });
 
 app.get("/api/status", async (_req, res) => {
@@ -2648,7 +3118,8 @@ app.post("/api/integrations/disconnect", (req, res) => {
 app.get("/api/auth/google/connect", (req, res) => {
   const preset = String(req.query.preset || "core");
   const redirectTo = String(req.query.redirect || "/");
-  res.redirect(`/api/integrations/google/connect?preset=${encodeURIComponent(preset)}&intent=login&redirect=${encodeURIComponent(redirectTo)}`);
+  const uiBase = String(req.query.ui_base || req.query.uiBase || "") || getRequestOrigin(req) || getUiBaseUrl();
+  res.redirect(`/api/integrations/google/connect?preset=${encodeURIComponent(preset)}&intent=login&redirect=${encodeURIComponent(redirectTo)}&ui_base=${encodeURIComponent(uiBase)}`);
 });
 
 app.get("/api/integrations/google/connect", (req, res) => {
@@ -2659,7 +3130,8 @@ app.get("/api/integrations/google/connect", (req, res) => {
     const preset = String(req.query.preset || "core");
     const intent = String(req.query.intent || "connect");
     const redirectTo = String(req.query.redirect || "/");
-    const url = connectGoogle(preset, { intent, redirectTo });
+    const uiBase = String(req.query.ui_base || req.query.uiBase || "") || getRequestOrigin(req) || getUiBaseUrl();
+    const url = connectGoogle(preset, { intent, redirectTo, uiBase });
     res.redirect(url);
   } catch (err) {
     res.status(500).send(err.message || "google_auth_failed");
@@ -2706,6 +3178,12 @@ app.get("/api/integrations/slack/callback", async (req, res) => {
       authed_user: data.authed_user || null,
       connectedAt: new Date().toISOString()
     }, getUserId(req));
+    writeAudit({
+      type: "connection_token_stored",
+      at: new Date().toISOString(),
+      provider: "slack",
+      userId: getUserId(req)
+    });
     res.redirect(`${getUiBaseUrl()}/?integration=slack&status=success`);
   } catch (err) {
     res.redirect(`${getUiBaseUrl()}/?integration=slack&status=error`);
@@ -2755,6 +3233,12 @@ app.get("/api/integrations/discord/callback", async (req, res) => {
       token_type: data.token_type || null,
       connectedAt: new Date().toISOString()
     }, getUserId(req));
+    writeAudit({
+      type: "connection_token_stored",
+      at: new Date().toISOString(),
+      provider: "discord",
+      userId: getUserId(req)
+    });
     res.redirect(`${getUiBaseUrl()}/?integration=discord&status=success`);
   } catch (err) {
     res.redirect(`${getUiBaseUrl()}/?integration=discord&status=error`);
@@ -2926,6 +3410,12 @@ app.get("/api/integrations/google/callback", async (req, res) => {
         picture: picture || existing.picture,
         connectedAt: new Date().toISOString()
       }, effectiveUserId);
+      writeAudit({
+        type: "connection_token_stored",
+        at: new Date().toISOString(),
+        provider: "google",
+        userId: effectiveUserId
+      });
 
       const sessionId = createSession({
         id: effectiveUserId,
@@ -2936,7 +3426,7 @@ app.get("/api/integrations/google/callback", async (req, res) => {
       });
       setSessionCookie(res, sessionId);
     })();
-    const uiBase = process.env.WEB_UI_URL || "http://localhost:3000";
+    const uiBase = token?.meta?.uiBase || process.env.WEB_UI_URL || "http://localhost:3000";
     const redirectTo = token?.meta?.redirectTo || "/";
     res.redirect(`${uiBase}${redirectTo}?integration=google&status=success`);
   } catch (err) {

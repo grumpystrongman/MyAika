@@ -8,16 +8,18 @@
   },
   "dependencies": {
     "@myaika/shared": "0.0.1",
+    "@xenova/transformers": "^2.17.2",
     "adm-zip": "^0.5.12",
     "better-sqlite3": "^11.0.0",
     "cors": "^2.8.5",
+    "discord.js": "^14.25.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "@xenova/transformers": "^2.17.2",
     "ffmpeg-static": "^5.2.0",
     "hnswlib-node": "^3.0.0",
     "multer": "^1.4.5-lts.1",
     "openai": "^4.0.0",
+    "playwright": "^1.58.1",
     "sqlite-vec": "0.1.7-alpha.2",
     "zod": "^3.23.8"
   }

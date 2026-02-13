@@ -3,6 +3,10 @@ import { Emotion } from "@myaika/shared";
 import AikaAvatar from "../src/components/AikaAvatar";
 import AikaToolsWorkbench from "../src/components/AikaToolsWorkbench";
 import MeetingCopilot from "../src/components/MeetingCopilot";
+import ActionRunnerPanel from "../src/components/ActionRunnerPanel";
+import ConnectionsPanel from "../src/components/ConnectionsPanel";
+import TeachModePanel from "../src/components/TeachModePanel";
+import CanvasPanel from "../src/components/CanvasPanel";
 
 function resolveServerUrl() {
   if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
@@ -263,6 +267,11 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function makeMessageId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function isLowSignalUtterance(text) {
   const normalized = String(text || "").toLowerCase().trim();
   if (!normalized) return true;
@@ -293,6 +302,10 @@ export default function Home() {
   const [skills, setSkills] = useState([]);
   const [skillEvents, setSkillEvents] = useState([]);
   const [skillsError, setSkillsError] = useState("");
+  const [skillVault, setSkillVault] = useState([]);
+  const [skillVaultError, setSkillVaultError] = useState("");
+  const [skillVaultResult, setSkillVaultResult] = useState("");
+  const [skillVaultInput, setSkillVaultInput] = useState("");
   const [webhooks, setWebhooks] = useState([]);
   const [webhookForm, setWebhookForm] = useState({ name: "", url: "" });
   const [scenes, setScenes] = useState([]);
@@ -315,6 +328,7 @@ export default function Home() {
   const [featuresError, setFeaturesError] = useState("");
   const [featuresLastDiscovery, setFeaturesLastDiscovery] = useState(null);
   const [featuresDiagnostics, setFeaturesDiagnostics] = useState(null);
+  const [featuresView, setFeaturesView] = useState("mcp");
   const [connectModal, setConnectModal] = useState(null);
   const [avatarModels, setAvatarModels] = useState([]);
   const [avatarModelId, setAvatarModelId] = useState("miku");
@@ -354,6 +368,8 @@ export default function Home() {
   const [micStatus, setMicStatus] = useState("Mic idle");
   const [sttDebug, setSttDebug] = useState({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
   const [chatError, setChatError] = useState("");
+  const [feedbackError, setFeedbackError] = useState("");
+  const [feedbackState, setFeedbackState] = useState({});
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [textOnly, setTextOnly] = useState(false);
   const [voiceMode, setVoiceMode] = useState(true);
@@ -528,7 +544,8 @@ export default function Home() {
     if (voiceMode && autoSpeak && !textOnly) {
       speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft", fast: true, use_raw_text: true }, { restartMicOnEnd: false });
     }
-    setLog(l => [...l, { role: "user", text }]);
+    const userMessageId = makeMessageId();
+    setLog(l => [...l, { id: userMessageId, role: "user", text }]);
     setUserText("");
 
     setChatError("");
@@ -568,13 +585,51 @@ export default function Home() {
 
       setBehavior({ ...b, speaking: false });
       const displayReply = stripEmotionTags(reply);
-      setLog(l => [...l, { role: "assistant", text: displayReply || "(no reply)" }]);
+      const replyMessageId = makeMessageId();
+      const replyCitations = Array.isArray(data.citations) ? data.citations : [];
+      setLog(l => [
+        ...l,
+        {
+          id: replyMessageId,
+          role: "assistant",
+          text: displayReply || "(no reply)",
+          prompt: text,
+          source: "chat",
+          citations: replyCitations
+        }
+      ]);
       setLastAssistantText(displayReply);
 
       if (autoSpeak && !textOnly && displayReply) {
         const spoken = displayReply;
         if (spoken) speakChunks(spoken, { use_raw_text: true });
       }
+  }
+
+  async function submitFeedback(message, rating) {
+    if (!message || message.role !== "assistant") return;
+    if (!message.id) return;
+    setFeedbackError("");
+    setFeedbackState(prev => ({ ...prev, [message.id]: rating }));
+    try {
+      const payload = {
+        source: message.source || "chat",
+        rating,
+        question: message.prompt || "",
+        answer: message.text || "",
+        messageId: message.id,
+        citations: Array.isArray(message.citations) ? message.citations : []
+      };
+      const resp = await fetch(`${SERVER_URL}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "feedback_failed");
+    } catch (err) {
+      setFeedbackError(err?.message || "feedback_failed");
+    }
   }
 
   async function stopAudio(fadeMs = 160) {
@@ -1363,7 +1418,7 @@ export default function Home() {
     }, []);
 
     useEffect(() => {
-      if (activeTab !== "skills") return;
+      if (activeTab !== "settings" || settingsTab !== "skills") return;
       let cancelled = false;
       async function loadSkills() {
         try {
@@ -1413,7 +1468,32 @@ export default function Home() {
         cancelled = true;
         clearInterval(id);
       };
-    }, [activeTab]);
+    }, [activeTab, settingsTab]);
+
+    useEffect(() => {
+      if (activeTab !== "settings" || settingsTab !== "skills") return;
+      let cancelled = false;
+      async function loadSkillVault() {
+        try {
+          const r = await fetch(`${SERVER_URL}/api/skill-vault`);
+          if (!r.ok) throw new Error("skill_vault_failed");
+          const data = await r.json();
+          if (!cancelled) {
+            setSkillVault(data.skills || []);
+            setSkillVaultError("");
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setSkillVault([]);
+            setSkillVaultError(err?.message || "skill_vault_failed");
+          }
+        }
+      }
+      loadSkillVault();
+      return () => {
+        cancelled = true;
+      };
+    }, [activeTab, settingsTab]);
 
     useEffect(() => {
       let cancelled = false;
@@ -1882,9 +1962,10 @@ export default function Home() {
   }, []);
 
   const showAuthGate = REQUIRE_GOOGLE_AUTH && authChecked && !currentUser;
+  const uiBase = typeof window !== "undefined" ? window.location.origin : "";
   const googleLoginUrl = SERVER_URL
-    ? `${SERVER_URL}/api/auth/google/connect`
-    : "/api/auth/google/connect";
+    ? `${SERVER_URL}/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`
+    : `/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`;
 
   if (REQUIRE_GOOGLE_AUTH && !authChecked) {
     return (
@@ -2116,6 +2197,26 @@ export default function Home() {
       setSkillsError("");
     } catch (err) {
       setSkillsError(err?.message || "skills_toggle_failed");
+    }
+  }
+
+  async function runSkillVault(skillId) {
+    try {
+      setSkillVaultError("");
+      const r = await fetch(`${SERVER_URL}/api/skill-vault/${skillId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: skillVaultInput })
+      });
+      const data = await r.json();
+      if (data?.status === "approval_required") {
+        setSkillVaultResult(JSON.stringify(data, null, 2));
+        return;
+      }
+      if (!r.ok) throw new Error(data.error || "skill_run_failed");
+      setSkillVaultResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setSkillVaultError(err?.message || "skill_run_failed");
     }
   }
 
@@ -2615,6 +2716,39 @@ export default function Home() {
               Tools
             </button>
             <button
+              onClick={() => setActiveTab("actionRunner")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "actionRunner" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "actionRunner" ? "#e6f0ff" : "white"
+              }}
+            >
+              Action Runner
+            </button>
+            <button
+              onClick={() => setActiveTab("teachMode")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "teachMode" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "teachMode" ? "#e6f0ff" : "white"
+              }}
+            >
+              Teach Mode
+            </button>
+            <button
+              onClick={() => setActiveTab("canvas")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "canvas" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "canvas" ? "#e6f0ff" : "white"
+              }}
+            >
+              Canvas
+            </button>
+            <button
               onClick={() => setActiveTab("features")}
               style={{
                 padding: "8px 12px",
@@ -2843,6 +2977,43 @@ export default function Home() {
                   Download Reminders
                 </button>
               </div>
+
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+                Skill Vault
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Local-only skill registry with prompts and macros.
+              </div>
+              <label style={{ fontSize: 12 }}>
+                Input for skill run
+                <input
+                  value={skillVaultInput}
+                  onChange={(e) => setSkillVaultInput(e.target.value)}
+                  style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+                />
+              </label>
+              <div style={{ display: "grid", gap: 8 }}>
+                {skillVault.map(skill => (
+                  <div key={skill.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10, background: "white" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{skill.name}</div>
+                        <div style={{ fontSize: 11, color: "#6b7280" }}>v{skill.version || "0.0.1"}</div>
+                      </div>
+                      <button onClick={() => runSkillVault(skill.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                        Run
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {skillVault.length === 0 && <div style={{ fontSize: 12, color: "#6b7280" }}>No vault skills yet.</div>}
+              </div>
+              {skillVaultError && <div style={{ color: "#b91c1c", fontSize: 12 }}>Skill Vault error: {skillVaultError}</div>}
+              {skillVaultResult && (
+                <pre style={{ fontSize: 11, marginTop: 6, whiteSpace: "pre-wrap", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                  {skillVaultResult}
+                </pre>
+              )}
 
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
                 Reminders Notifications
@@ -3363,6 +3534,18 @@ export default function Home() {
           </div>
         )}
 
+        {activeTab === "actionRunner" && (
+          <ActionRunnerPanel serverUrl={SERVER_URL} />
+        )}
+
+        {activeTab === "teachMode" && (
+          <TeachModePanel serverUrl={SERVER_URL} />
+        )}
+
+        {activeTab === "canvas" && (
+          <CanvasPanel serverUrl={SERVER_URL} />
+        )}
+
         {activeTab === "workbench" && (
           <AikaToolsWorkbench serverUrl={SERVER_URL} />
         )}
@@ -3380,20 +3563,45 @@ export default function Home() {
         {activeTab === "features" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-                MCP Features
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={refreshFeatures} style={{ padding: "6px 10px", borderRadius: 8 }}>
-                  Refresh
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  onClick={() => setFeaturesView("mcp")}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: featuresView === "mcp" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                    background: featuresView === "mcp" ? "#e6f0ff" : "white"
+                  }}
+                >
+                  MCP Features
                 </button>
-                <button onClick={copyDiagnostics} style={{ padding: "6px 10px", borderRadius: 8 }}>
-                  Copy Diagnostics
+                <button
+                  onClick={() => setFeaturesView("connections")}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: featuresView === "connections" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                    background: featuresView === "connections" ? "#e6f0ff" : "white"
+                  }}
+                >
+                  Connections
                 </button>
               </div>
+              {featuresView === "mcp" && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={refreshFeatures} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                    Refresh
+                  </button>
+                  <button onClick={copyDiagnostics} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                    Copy Diagnostics
+                  </button>
+                </div>
+              )}
             </div>
 
-            {featuresError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{featuresError}</div>}
+            {featuresView === "mcp" && (
+              <>
+                {featuresError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{featuresError}</div>}
 
             <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1.3fr", gap: 12 }}>
               <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
@@ -3470,11 +3678,11 @@ export default function Home() {
               </div>
             </div>
 
-            {connectModal && (
-              <div style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(15,23,42,0.4)",
+                {connectModal && (
+                  <div style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(15,23,42,0.4)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -3526,6 +3734,12 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+                )}
+              </>
+            )}
+
+            {featuresView === "connections" && (
+              <ConnectionsPanel serverUrl={SERVER_URL} />
             )}
           </div>
         )}
@@ -3580,8 +3794,43 @@ export default function Home() {
             </div>
           )}
           {log.map((m, i) => (
-            <div key={i} style={{ marginBottom: 10 }}>
-              <b>{m.role === "user" ? "You" : "Aika"}:</b> {m.text}
+            <div key={m.id || i} style={{ marginBottom: 10 }}>
+              <div><b>{m.role === "user" ? "You" : "Aika"}:</b> {m.text}</div>
+              {m.role === "assistant" && m.id && (
+                <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
+                  <button
+                    onClick={() => submitFeedback(m, "up")}
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: feedbackState[m.id] === "up" ? "#dcfce7" : "white",
+                      fontSize: 12
+                    }}
+                    title="Thumbs up"
+                  >
+                    Thumbs Up
+                  </button>
+                  <button
+                    onClick={() => submitFeedback(m, "down")}
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: feedbackState[m.id] === "down" ? "#fee2e2" : "white",
+                      fontSize: 12
+                    }}
+                    title="Thumbs down"
+                  >
+                    Thumbs Down
+                  </button>
+                  {feedbackState[m.id] && (
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>
+                      Feedback saved
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -4090,6 +4339,11 @@ export default function Home() {
           {chatError && (
             <div style={{ color: "#b91c1c", fontSize: 12 }}>
               Chat error: {chatError}
+            </div>
+          )}
+          {feedbackError && (
+            <div style={{ color: "#b91c1c", fontSize: 12 }}>
+              Feedback error: {feedbackError}
             </div>
           )}
           {ttsWarnings.length > 0 && (

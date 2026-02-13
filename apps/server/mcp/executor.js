@@ -36,7 +36,10 @@ export class ToolExecutor {
       throw err;
     }
 
-    if (policy.requiresApproval || def.requiresApproval) {
+    const toolRequiresApproval = typeof def.requiresApproval === "function"
+      ? def.requiresApproval(params, context)
+      : def.requiresApproval;
+    if (policy.requiresApproval || toolRequiresApproval) {
       const approval = createApproval({
         toolName: def.name,
         params: policy.redactedParams,

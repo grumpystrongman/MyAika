@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { getRuntimeFlags } from "../storage/runtime_flags.js";
 
 const PHONE_RE = /(?:\+?1\s*)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/g;
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
@@ -52,11 +53,13 @@ function parseAllowlist(raw) {
 }
 
 export function getPolicyConfig() {
+  const flags = getRuntimeFlags();
   return {
     phiMode: process.env.PHI_MODE !== "false",
     allowlistNormal: parseAllowlist(process.env.TOOL_ALLOWLIST_BY_MODE_NORMAL || ""),
     allowlistPhi: parseAllowlist(process.env.TOOL_ALLOWLIST_BY_MODE_PHI || ""),
-    allowedDomains: parseAllowlist(process.env.ALLOWED_OUTBOUND_DOMAINS || "")
+    allowedDomains: parseAllowlist(process.env.ALLOWED_OUTBOUND_DOMAINS || ""),
+    outboundDisabled: String(process.env.TOOLS_PANIC_SWITCH || "0") === "1" || Boolean(flags.outboundToolsDisabled)
   };
 }
 
@@ -89,7 +92,8 @@ export function evaluatePolicy({ tool, params, context, outboundTargets = [] }) 
   }
 
   const outboundOk = checkOutboundDomains(outboundTargets, cfg.allowedDomains);
-  const block = !allowlisted || (tool.outbound && !outboundOk);
+  const outboundBlocked = tool.outbound && (cfg.outboundDisabled || !outboundOk);
+  const block = !allowlisted || outboundBlocked;
 
   const requiresApproval =
     Boolean(tool.requiresApproval) ||

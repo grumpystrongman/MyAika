@@ -13,6 +13,7 @@ export default async function handler(req, res) {
   const fallbackBase = "http://127.0.0.1:8790";
   const bases = Array.from(new Set([primaryBase, fallbackBase]));
   const requestOrigin = getRequestOrigin(req);
+  const uiBase = String(req.query?.ui_base || req.query?.uiBase || requestOrigin || "");
 
   const buildUrl = (base) => {
     const url = new URL("/api/auth/google/connect", base);
@@ -22,6 +23,9 @@ export default async function handler(req, res) {
       } else if (value !== undefined) {
         url.searchParams.set(key, String(value));
       }
+    }
+    if (!url.searchParams.get("ui_base") && uiBase) {
+      url.searchParams.set("ui_base", uiBase);
     }
     return url;
   };

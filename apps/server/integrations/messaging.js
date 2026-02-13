@@ -1,4 +1,8 @@
-import { getProvider } from "./store.js";
+import { getProvider, setProvider } from "./store.js";
+
+function nowIso() {
+  return new Date().toISOString();
+}
 
 export async function sendSlackMessage(channel, text) {
   const stored = getProvider("slack") || {};
@@ -15,6 +19,9 @@ export async function sendSlackMessage(channel, text) {
   if (!r.ok) {
     const msg = await r.text();
     throw new Error(msg || "slack_post_failed");
+  }
+  if (stored && Object.keys(stored).length) {
+    setProvider("slack", { ...stored, lastUsedAt: nowIso() });
   }
   return await r.json();
 }
@@ -33,6 +40,9 @@ export async function sendTelegramMessage(chatId, text) {
     const msg = await r.text();
     throw new Error(msg || "telegram_send_failed");
   }
+  if (stored && Object.keys(stored).length) {
+    setProvider("telegram", { ...stored, lastUsedAt: nowIso() });
+  }
   return await r.json();
 }
 
@@ -48,6 +58,9 @@ export async function sendDiscordMessage(content) {
   if (!r.ok) {
     const msg = await r.text();
     throw new Error(msg || "discord_send_failed");
+  }
+  if (stored && Object.keys(stored).length) {
+    setProvider("discord", { ...stored, lastUsedAt: nowIso() });
   }
   return { ok: true };
 }

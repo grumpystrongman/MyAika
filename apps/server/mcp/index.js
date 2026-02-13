@@ -7,6 +7,10 @@ import { proposeHold } from "./tools/calendar.js";
 import { draftReply, sendEmail } from "./tools/email.js";
 import { applyChanges } from "./tools/spreadsheet.js";
 import { writeMemoryTool, searchMemoryTool, rotateKeyTool } from "./tools/memory.js";
+import { actionRun } from "./tools/actionRunner.js";
+import { assessActionPlan, extractDomainsFromPlan } from "../src/actionRunner/runner.js";
+import { skillVaultRun } from "./tools/skillVault.js";
+import { assessSkillPermissions } from "../src/skillVault/registry.js";
 import {
   plexIdentity,
   firefliesTranscripts,
@@ -249,6 +253,57 @@ registry.register(
     outboundTargets: () => ["https://discord.com"]
   },
   discordSend
+);
+
+registry.register(
+  {
+    name: "action.run",
+    description: "Run a browser action plan (headless).",
+    paramsSchema: {
+      taskName: "string",
+      startUrl: "string",
+      actions: "object[]",
+      safety: "object",
+      async: "boolean"
+    },
+    outbound: true,
+    riskLevel: "high",
+    outboundTargets: (params = {}) => {
+      const domains = extractDomainsFromPlan({ startUrl: params.startUrl, actions: params.actions });
+      return domains.map(domain => `https://${domain}`);
+    },
+    requiresApproval: (params = {}, context = {}) => {
+      const assessment = assessActionPlan({
+        taskName: params.taskName,
+        startUrl: params.startUrl,
+        actions: params.actions,
+        safety: params.safety,
+        workspaceId: context.workspaceId || "default"
+      });
+      return assessment.requiresApproval;
+    },
+    humanSummary: params => {
+      const assessment = assessActionPlan({ taskName: params?.taskName, startUrl: params?.startUrl, actions: params?.actions, safety: params?.safety, workspaceId: "default" });
+      const risks = assessment.riskTags?.length ? ` Risks: ${assessment.riskTags.join(", ")}` : "";
+      return `Run action plan: ${assessment.taskName || "Action Run"}.${risks}`;
+    }
+  },
+  actionRun
+);
+
+registry.register(
+  {
+    name: "skill.vault.run",
+    description: "Run a local skill vault prompt.",
+    paramsSchema: { skillId: "string", input: "string" },
+    riskLevel: "medium",
+    requiresApproval: params => {
+      const check = assessSkillPermissions(params?.skillId);
+      return Boolean(check?.blockedTools?.length);
+    },
+    humanSummary: params => `Run skill vault: ${params?.skillId || "unknown"}`
+  },
+  skillVaultRun
 );
 
 const executor = new ToolExecutor(registry);
