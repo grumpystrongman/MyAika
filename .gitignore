@@ -22,6 +22,7 @@ data/memory_vault/
 data/calendar_holds.json
 data/email_drafts.json
 data/spreadsheet_plans.json
+apps/server/data/
 *.sqlite
 .DS_Store
 apps/server/voices/*_trim_6s.wav

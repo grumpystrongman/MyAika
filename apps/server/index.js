@@ -4,6 +4,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import OpenAI from "openai";
+import { z } from "zod";
 import { initMemory, addMemory, searchMemories } from "./memory.js";
 import { Emotion, makeBehavior } from "@myaika/shared";
 import { generateAikaVoice, resolveAudioPath } from "./aika_voice/index.js";
@@ -81,6 +82,9 @@ import { writeOutbox } from "./storage/outbox.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
+import { initRagStore } from "./src/rag/vectorStore.js";
+import { syncFireflies, startFirefliesSyncLoop } from "./src/rag/firefliesIngest.js";
+import { answerRagQuestion } from "./src/rag/query.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -113,6 +117,12 @@ startReminderScheduler();
 
 initDb();
 runMigrations();
+try {
+  initRagStore();
+} catch (err) {
+  console.warn("RAG init failed:", err?.message || err);
+}
+startFirefliesSyncLoop();
 
 const rateMap = new Map();
 let voiceFullTestState = {
@@ -2240,6 +2250,56 @@ app.get("/api/integrations", (req, res) => {
       whatsapp: { ...integrationsState.whatsapp, configured: whatsappConfigured }
     }
   });
+});
+
+const firefliesSyncSchema = z.object({
+  limit: z.number().int().min(0).optional(),
+  force: z.boolean().optional(),
+  sendEmail: z.boolean().optional()
+});
+
+const ragAskSchema = z.object({
+  question: z.string().min(1),
+  topK: z.number().int().min(1).max(20).optional(),
+  filters: z.object({
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
+    titleContains: z.string().optional(),
+    meetingId: z.string().optional()
+  }).optional()
+});
+
+app.post("/api/fireflies/sync", async (req, res) => {
+  try {
+    const parsed = firefliesSyncSchema.parse(req.body || {});
+    const result = await syncFireflies({
+      limit: parsed.limit ?? 0,
+      force: Boolean(parsed.force),
+      sendEmail: parsed.sendEmail
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "fireflies_sync_failed" });
+  }
+});
+
+app.post("/api/rag/ask", async (req, res) => {
+  try {
+    const parsed = ragAskSchema.parse(req.body || {});
+    const result = await answerRagQuestion(parsed.question, {
+      topK: parsed.topK,
+      filters: parsed.filters || {}
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "rag_query_failed" });
+  }
 });
 
 app.get("/api/skills", (_req, res) => {

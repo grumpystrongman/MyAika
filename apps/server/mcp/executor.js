@@ -126,6 +126,10 @@ export class ToolExecutor {
       err.status = 400;
       throw err;
     }
+    const execContext = { ...context };
+    if (!execContext.userId && approval.createdBy) {
+      execContext.userId = approval.createdBy;
+    }
     if (!token || token !== approval.token) {
       const err = new Error("approval_token_invalid");
       err.status = 403;
@@ -134,20 +138,20 @@ export class ToolExecutor {
     const entry = this.registry.get(approval.toolName);
     if (!entry) throw new Error("tool_not_found");
     const { def, handler } = entry;
-    const policy = evaluatePolicy({ tool: def, params: approval.params, context });
+    const policy = evaluatePolicy({ tool: def, params: approval.params, context: execContext });
     if (policy.block) {
       const err = new Error("policy_blocked");
       err.status = 403;
       throw err;
     }
-    const result = await handler(approval.params, context);
+    const result = await handler(approval.params, execContext);
     markExecuted(id);
     writeAudit({
       type: "approval_executed",
       tool: def.name,
       at: new Date().toISOString(),
       correlationId: approval.correlationId,
-      userId: context?.userId || "",
+      userId: execContext.userId || "",
       params: policy.redactedParams,
       status: "ok"
     });

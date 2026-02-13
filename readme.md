@@ -123,6 +123,20 @@ Set `FIREFLIES_API_KEY` and restart the server, then call:
 
 Fireflies GraphQL API docs. citeturn0search2
 
+### Fireflies RAG (Local)
+Local-only RAG is available for Fireflies transcripts using SQLite + sqlite-vec.
+
+Setup:
+- Set `FIREFLIES_API_KEY`
+- Set `RAG_EMBEDDINGS_PROVIDER=local`
+- Optional: `FIREFLIES_SYNC_INTERVAL_MINUTES` and `FIREFLIES_SYNC_ON_STARTUP=1` for auto-sync
+- Optional: `FIREFLIES_AUTO_EMAIL=1` and `FIREFLIES_EMAIL_TO=you@example.com` for email summaries
+
+Manual sync + ask:
+- `POST /api/fireflies/sync` `{ limit?: number, force?: boolean }`
+- `POST /api/rag/ask` `{ question: string, topK?: number }`
+- UI: open `http://localhost:3000/fireflies-rag`
+
 ### Weather + Web Search (chat-enabled)
 Aika can now use live internet helpers directly from chat:
 - Weather examples:
