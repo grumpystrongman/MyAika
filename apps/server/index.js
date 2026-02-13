@@ -88,10 +88,11 @@ import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
-import { initRagStore } from "./src/rag/vectorStore.js";
+import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus } from "./src/rag/vectorStore.js";
 import { syncFireflies, startFirefliesSyncLoop } from "./src/rag/firefliesIngest.js";
 import { answerRagQuestion } from "./src/rag/query.js";
 import { recordFeedback } from "./src/feedback/feedback.js";
+import { recordMemoryToRag } from "./src/rag/memoryIngest.js";
 import { planAction } from "./src/actionRunner/planner.js";
 import { getActionRun } from "./src/actionRunner/runner.js";
 import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
@@ -294,6 +295,20 @@ const db = initMemory();
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+function addMemoryIndexed({ role, content, tags = "", source, occurredAt } = {}) {
+  const memoryId = addMemory(db, { role, content, tags });
+  if (!memoryId) return null;
+  const sourceLabel = source || role || "memory";
+  recordMemoryToRag({
+    memoryId,
+    content,
+    tags,
+    source: sourceLabel,
+    occurredAt
+  }).catch(() => {});
+  return memoryId;
+}
 
 function buildIntegrationsState(userId = "") {
   const state = {
@@ -688,6 +703,13 @@ function parseMemoryRecall(userText) {
   return text;
 }
 
+function shouldUseRag(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t) return false;
+  if (t.startsWith("rag:") || t.startsWith("meeting:")) return true;
+  return /\b(fireflies|meeting|meetings|transcript|minutes|action items|decisions|recap|summary|summarize|what did we decide|last week|this week)\b/i.test(t);
+}
+
 function isAdmin(req) {
   return (
     String(req.headers["x-user-role"] || "").toLowerCase() === "admin"
@@ -967,14 +989,14 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "userText required" });
     }
     const lowerText = userText.toLowerCase();
-    addMemory(db, {
+    addMemoryIndexed({
       role: "user",
       content: userText,
       tags: "message"
     });
 
     const sendAssistantReply = (text, behavior = makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }), extra = {}) => {
-      addMemory(db, {
+      addMemoryIndexed({
         role: "assistant",
         content: text,
         tags: "reply"
@@ -984,27 +1006,28 @@ app.post("/chat", async (req, res) => {
 
     const statedLocation = extractLocationFromText(userText);
     if (statedLocation) {
-      addMemory(db, {
+      addMemoryIndexed({
         role: "system",
         content: `Home location: ${statedLocation}`,
         tags: "fact,location,profile"
       });
       return sendAssistantReply(
         `Got it. I will remember your location as ${statedLocation}, and use it when you ask for weather.`,
-        makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 })
+        makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 }),
+        { memoryAdded: true }
       );
     }
 
     const explicitMemory = parseMemoryWrite(userText);
     if (explicitMemory) {
       const locationInMemory = extractLocationFromText(explicitMemory);
-      addMemory(db, {
+      addMemoryIndexed({
         role: "system",
         content: explicitMemory,
         tags: locationInMemory ? "fact,explicit,location" : "fact,explicit"
       });
       if (locationInMemory) {
-        addMemory(db, {
+        addMemoryIndexed({
           role: "system",
           content: `Home location: ${locationInMemory}`,
           tags: "fact,location,profile"
@@ -1014,7 +1037,8 @@ app.post("/chat", async (req, res) => {
         locationInMemory
           ? `Got it. I will remember your location as ${locationInMemory}, and use it for weather.`
           : `Got it. I'll remember this: "${explicitMemory}"`,
-        makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 })
+        makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 }),
+        { memoryAdded: true }
       );
     }
 
@@ -1038,8 +1062,32 @@ app.post("/chat", async (req, res) => {
       return sendAssistantReply(
         `Here's what I remember:\n${memoryText}`,
         makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 }),
-        { memories: displayMatches }
+        { memories: displayMatches, memoryRecall: true }
       );
+    }
+
+    if (shouldUseRag(userText)) {
+      try {
+        const ragCounts = getRagCounts();
+        if (ragCounts.totalChunks > 0) {
+          const queryText = userText.replace(/^rag:\s*/i, "").replace(/^meeting:\s*/i, "").trim() || userText;
+          const ragResult = await answerRagQuestion(queryText, { topK: Number(process.env.RAG_TOP_K || 8) });
+          if (ragResult?.answer) {
+            const ragCitations = ragResult.citations || [];
+            const memoryRecall = ragCitations.some(cite => {
+              const chunkId = String(cite?.chunk_id || "");
+              return chunkId.startsWith("memory:") || chunkId.startsWith("feedback:");
+            });
+            return sendAssistantReply(
+              ragResult.answer,
+              makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+              { citations: ragCitations, source: "rag", memoryRecall }
+            );
+          }
+        }
+      } catch {
+        // ignore RAG failures and continue with other handlers
+      }
     }
 
     const productQuery = parseProductResearchQuery(userText);
@@ -1345,7 +1393,7 @@ INSTRUCTIONS:
     }
 
     // Save assistant reply
-    addMemory(db, {
+    addMemoryIndexed({
       role: "assistant",
       content: replyText,
       tags: "reply"
@@ -2453,6 +2501,30 @@ app.post("/api/rag/ask", async (req, res) => {
   }
 });
 
+app.get("/api/rag/status", (_req, res) => {
+  try {
+    res.json({
+      ...getRagCounts(),
+      vectorStore: getVectorStoreStatus()
+    });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "rag_status_failed" });
+  }
+});
+
+app.get("/api/rag/meetings", (req, res) => {
+  try {
+    const type = String(req.query.type || "all");
+    const limit = Number(req.query.limit || 20);
+    const offset = Number(req.query.offset || 0);
+    const search = String(req.query.search || "");
+    const meetings = listMeetings({ type, limit, offset, search });
+    res.json({ meetings });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "rag_meetings_failed" });
+  }
+});
+
 app.post("/api/feedback", async (req, res) => {
   try {
     const parsed = feedbackSchema.parse(req.body || {});
@@ -2474,7 +2546,7 @@ app.post("/api/feedback", async (req, res) => {
       parsed.answer ? `Answer: ${parsed.answer}` : ""
     ].filter(Boolean);
 
-    addMemory(db, {
+    addMemoryIndexed({
       role: "system",
       content: memoryLines.join("\n"),
       tags: `feedback,${ratingTag},source_${sourceTag}`
@@ -3707,7 +3779,7 @@ app.post("/api/aika/voice/preference", (req, res) => {
         : null;
   if (!pref) return res.status(400).json({ error: "voice_preference_required" });
 
-  addMemory(db, {
+  addMemoryIndexed({
     role: "assistant",
     content: pref,
     tags: "voice_preference"
@@ -3720,7 +3792,7 @@ app.post("/api/aika/voice/prompt", (req, res) => {
   if (!prompt_text || typeof prompt_text !== "string") {
     return res.status(400).json({ error: "prompt_text_required" });
   }
-  addMemory(db, {
+  addMemoryIndexed({
     role: "assistant",
     content: `Aika voice prompt: ${prompt_text}`,
     tags: "voice_prompt"

@@ -1,59 +1,11 @@
 {
   "models": [
     {
-      "id": "epsilon",
-      "label": "epsilon (Local)",
-      "modelUrl": "/assets/aika/live2d/epsilon/Epsilon_free.model3.json",
-      "fallbackPng": "/assets/aika/live2d/placeholder.svg",
-      "thumbnail": "/assets/aika/live2d/epsilon/thumb.png",
-      "source": "local_scan"
-    },
-    {
-      "id": "hibiki",
-      "label": "hibiki (Local)",
-      "modelUrl": "/assets/aika/live2d/hibiki/hibiki.model3.json",
-      "fallbackPng": "/assets/aika/live2d/placeholder.svg",
-      "thumbnail": "/assets/aika/live2d/hibiki/thumb.png",
-      "source": "local_scan"
-    },
-    {
-      "id": "hiyori",
-      "label": "hiyori (Local)",
-      "modelUrl": "/assets/aika/live2d/hiyori/hiyori_free_t08.model3.json",
-      "fallbackPng": "/assets/aika/live2d/placeholder.svg",
-      "thumbnail": "/assets/aika/live2d/hiyori/thumb.png",
-      "source": "local_scan"
-    },
-    {
-      "id": "kei",
-      "label": "kei (Local)",
-      "modelUrl": "/assets/aika/live2d/kei/kei_vowels_pro.model3.json",
-      "fallbackPng": "/assets/aika/live2d/placeholder.svg",
-      "thumbnail": "/assets/aika/live2d/kei/thumb.png",
-      "source": "local_scan"
-    },
-    {
-      "id": "mark",
-      "label": "mark (Local)",
-      "modelUrl": "/assets/aika/live2d/mark/mark_free_t04.model3.json",
-      "fallbackPng": "/assets/aika/live2d/placeholder.svg",
-      "thumbnail": "/assets/aika/live2d/mark/thumb.png",
-      "source": "local_scan"
-    },
-    {
       "id": "miku",
       "label": "miku (Local)",
       "modelUrl": "/assets/aika/live2d/miku/miku.model3.json",
       "fallbackPng": "/assets/aika/live2d/placeholder.svg",
       "thumbnail": "/assets/aika/live2d/miku/thumb.png",
-      "source": "local_scan"
-    },
-    {
-      "id": "simple",
-      "label": "simple (Local)",
-      "modelUrl": "/assets/aika/live2d/simple/simple.model3.json",
-      "fallbackPng": "/assets/aika/live2d/placeholder.svg",
-      "thumbnail": "/assets/aika/live2d/simple/thumb.png",
       "source": "local_scan"
     }
   ]

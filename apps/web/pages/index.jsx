@@ -7,6 +7,7 @@ import ActionRunnerPanel from "../src/components/ActionRunnerPanel";
 import ConnectionsPanel from "../src/components/ConnectionsPanel";
 import TeachModePanel from "../src/components/TeachModePanel";
 import CanvasPanel from "../src/components/CanvasPanel";
+import FirefliesPanel from "../src/components/FirefliesPanel";
 
 function resolveServerUrl() {
   if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
@@ -587,6 +588,11 @@ export default function Home() {
       const displayReply = stripEmotionTags(reply);
       const replyMessageId = makeMessageId();
       const replyCitations = Array.isArray(data.citations) ? data.citations : [];
+      const memoryNote = data?.memoryAdded
+        ? "⭐ Added to memory"
+        : data?.memoryRecall
+          ? "⭐ Memory recall"
+          : "";
       setLog(l => [
         ...l,
         {
@@ -594,8 +600,9 @@ export default function Home() {
           role: "assistant",
           text: displayReply || "(no reply)",
           prompt: text,
-          source: "chat",
-          citations: replyCitations
+          source: data?.source || "chat",
+          citations: replyCitations,
+          memoryNote
         }
       ]);
       setLastAssistantText(displayReply);
@@ -2738,6 +2745,17 @@ export default function Home() {
               Teach Mode
             </button>
             <button
+              onClick={() => setActiveTab("fireflies")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "fireflies" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "fireflies" ? "#e6f0ff" : "white"
+              }}
+            >
+              Fireflies
+            </button>
+            <button
               onClick={() => setActiveTab("canvas")}
               style={{
                 padding: "8px 12px",
@@ -3542,6 +3560,10 @@ export default function Home() {
           <TeachModePanel serverUrl={SERVER_URL} />
         )}
 
+        {activeTab === "fireflies" && (
+          <FirefliesPanel serverUrl={SERVER_URL} />
+        )}
+
         {activeTab === "canvas" && (
           <CanvasPanel serverUrl={SERVER_URL} />
         )}
@@ -3796,6 +3818,25 @@ export default function Home() {
           {log.map((m, i) => (
             <div key={m.id || i} style={{ marginBottom: 10 }}>
               <div><b>{m.role === "user" ? "You" : "Aika"}:</b> {m.text}</div>
+              {m.memoryNote && (
+                <div style={{ marginTop: 4, fontSize: 12, color: "#2563eb" }}>{m.memoryNote}</div>
+              )}
+              {Array.isArray(m.citations) && m.citations.length > 0 && (
+                <details style={{ marginTop: 6 }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "#6b7280" }}>
+                    View citations ({m.citations.length})
+                  </summary>
+                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+                    {m.citations.map((cite, idx) => (
+                      <div key={`${cite.chunk_id || idx}-${idx}`} style={{ fontSize: 12, color: "#374151" }}>
+                        <div style={{ fontWeight: 600 }}>{cite.meeting_title || "Meeting"} {cite.occurred_at ? `(${cite.occurred_at})` : ""}</div>
+                        <div style={{ color: "#6b7280" }}>{cite.chunk_id}</div>
+                        <div style={{ whiteSpace: "pre-wrap" }}>{cite.snippet}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
               {m.role === "assistant" && m.id && (
                 <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
                   <button

@@ -487,3 +487,52 @@ export function listMeetingSummaries({ dateFrom, dateTo, limit = 20 } = {}) {
   `;
   return db.prepare(sql).all(...params, Number(limit || 20));
 }
+
+export function listMeetings({ type = "all", limit = 20, offset = 0, search = "" } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  const normalizedType = String(type || "all").toLowerCase();
+
+  if (normalizedType === "memory") {
+    where.push("m.id LIKE 'memory:%'");
+  } else if (normalizedType === "feedback") {
+    where.push("m.id LIKE 'feedback:%'");
+  } else if (normalizedType === "fireflies") {
+    where.push("m.id NOT LIKE 'memory:%'");
+    where.push("m.id NOT LIKE 'feedback:%'");
+  }
+
+  if (search) {
+    where.push("(m.title LIKE ? OR m.raw_transcript LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const sql = `
+    SELECT m.id, m.title, m.occurred_at, m.source_url, m.participants_json,
+           ms.summary_json, ms.decisions_json, ms.tasks_json, ms.next_steps_json
+    FROM meetings m
+    LEFT JOIN meeting_summaries ms ON ms.meeting_id = m.id
+    ${whereSql}
+    ORDER BY m.occurred_at DESC
+    LIMIT ? OFFSET ?
+  `;
+  return db.prepare(sql).all(...params, Number(limit || 20), Number(offset || 0));
+}
+
+export function getRagCounts() {
+  initRagStore();
+  const totalMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings").get()?.count || 0;
+  const totalChunks = db.prepare("SELECT COUNT(*) AS count FROM chunks").get()?.count || 0;
+  const memoryMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'memory:%'").get()?.count || 0;
+  const feedbackMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'feedback:%'").get()?.count || 0;
+  const firefliesMeetings = totalMeetings - memoryMeetings - feedbackMeetings;
+  return {
+    totalMeetings,
+    totalChunks,
+    firefliesMeetings: Math.max(0, firefliesMeetings),
+    memoryMeetings,
+    feedbackMeetings
+  };
+}
