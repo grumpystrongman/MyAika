@@ -83,6 +83,9 @@ export function evaluateAction({ actionType, params = {}, outboundTargets = [], 
     protectedPathHit: protectedHit,
     unknownDomain
   });
+  const memoryTier = Number(params?.tier ?? 1);
+  const allowEncryptedWrite = policy?.memory_tiers?.tier3?.allow_write === true;
+  const isEncryptedMemoryWrite = actionType === "memory.write" && Number.isFinite(memoryTier) && memoryTier >= 3 && allowEncryptedWrite;
 
   if (killState.enabled && !isAllowedWhenKillSwitchActive(actionType)) {
     return {
@@ -161,7 +164,7 @@ export function evaluateAction({ actionType, params = {}, outboundTargets = [], 
     protectedHit ||
     (unknownDomain && policy?.network_rules?.require_approval_for_new_domains) ||
     riskScore >= Number(policy.risk_threshold || 60) ||
-    (classification.sensitivity?.phi && actionType !== "memory.read");
+    (classification.sensitivity?.phi && actionType !== "memory.read" && !isEncryptedMemoryWrite);
 
   if (requiresApproval) {
     return {

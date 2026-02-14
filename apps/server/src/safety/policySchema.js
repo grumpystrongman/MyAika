@@ -165,10 +165,10 @@ export const defaultPolicy = policySchema.parse({
     redaction: {
       enabled: true,
       patterns: [
-        "(?i)api[_-]?key\\s*[:=]\\s*[^\\s]+",
-        "(?i)secret\\s*[:=]\\s*[^\\s]+",
-        "(?i)token\\s*[:=]\\s*[^\\s]+",
-        "(?i)password\\s*[:=]\\s*[^\\s]+"
+        "api[_-]?key\\s*[:=]\\s*[^\\s]+",
+        "secret\\s*[:=]\\s*[^\\s]+",
+        "token\\s*[:=]\\s*[^\\s]+",
+        "password\\s*[:=]\\s*[^\\s]+"
       ]
     },
     include_hash_chain: true

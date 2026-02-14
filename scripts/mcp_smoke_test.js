@@ -9,10 +9,10 @@ const defaultHeaders = {
   "x-user-id": SMOKE_USER
 };
 
-async function post(path, body) {
+async function post(path, body, headers = {}) {
   const r = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: defaultHeaders,
+    headers: { ...defaultHeaders, ...headers },
     body: JSON.stringify(body || {})
   });
   const text = await r.text();
@@ -147,10 +147,11 @@ async function run() {
   record("email.send (approval required)", sendAttempt.data?.status === "approval_required", summarizeResult(sendAttempt.data));
 
   if (sendAttempt.data?.approval?.id) {
-    const approval = await post(`/api/approvals/${sendAttempt.data.approval.id}/approve`, {});
+    const adminHeaders = { "x-user-role": "admin" };
+    const approval = await post(`/api/approvals/${sendAttempt.data.approval.id}/approve`, {}, adminHeaders);
     const exec = await post(`/api/approvals/${sendAttempt.data.approval.id}/execute`, {
       token: approval.data?.approval?.token
-    });
+    }, adminHeaders);
     record("email.send execute", exec.data?.status === "ok", summarizeResult(exec.data));
   }
 
