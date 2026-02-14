@@ -487,6 +487,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [knowledgeAnswer, setKnowledgeAnswer] = useState("");
   const [knowledgeCitations, setKnowledgeCitations] = useState([]);
   const [knowledgeSyncStatus, setKnowledgeSyncStatus] = useState("");
+  const [qaQuestion, setQaQuestion] = useState("");
+  const [qaAnswer, setQaAnswer] = useState("");
+  const [qaCitations, setQaCitations] = useState([]);
+  const [qaStatus, setQaStatus] = useState("");
+  const [qaSource, setQaSource] = useState("");
+  const [qaAllowFallback, setQaAllowFallback] = useState(true);
   const [sourceList, setSourceList] = useState([]);
   const [sourceStatus, setSourceStatus] = useState("");
   const [newSourceUrl, setNewSourceUrl] = useState("");
@@ -1138,6 +1144,31 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
+  const askTradingQa = async () => {
+    if (!serverUrl) return;
+    const question = qaQuestion.trim();
+    if (!question) return;
+    setQaStatus("Thinking...");
+    setQaAnswer("");
+    setQaCitations([]);
+    setQaSource("");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/ask-deep`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, allowFallback: qaAllowFallback })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "qa_failed");
+      setQaAnswer(data?.answer || "");
+      setQaCitations(data?.citations || []);
+      setQaSource(data?.source || "");
+      setQaStatus("");
+    } catch (err) {
+      setQaStatus(err?.message || "qa_failed");
+    }
+  };
+
   const runScenario = async () => {
     if (!serverUrl) return;
     setScenarioStatus("Running scenarios...");
@@ -1209,6 +1240,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { id: "terminal", label: "Terminal" },
+              { id: "qa", label: "Q&A" },
               { id: "knowledge", label: "How-To" },
               { id: "scenarios", label: "Scenarios" }
             ].map(tab => (
@@ -1716,6 +1748,93 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
         </div>
       </div>
+      )}
+
+      {tradingTab === "qa" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 16 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Ask Trading Knowledge</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Uses the RAG knowledge base first, then expands with the LLM if needed.
+              </div>
+              <textarea
+                value={qaQuestion}
+                onChange={(e) => setQaQuestion(e.target.value)}
+                rows={6}
+                placeholder="Ask about indicators, strategy, risk management, market structure..."
+                style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={qaAllowFallback}
+                  onChange={(e) => setQaAllowFallback(e.target.checked)}
+                />
+                <span style={{ fontSize: 11, color: "#64748b" }}>Allow LLM fallback for more depth</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  onClick={askTradingQa}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                >
+                  Ask
+                </button>
+                {qaStatus && <div style={{ fontSize: 12, color: "#475569", alignSelf: "center" }}>{qaStatus}</div>}
+              </div>
+              <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                {[
+                  "Explain how RSI should be interpreted and common pitfalls.",
+                  "What is the difference between market and limit orders?",
+                  "How does VWAP guide intraday execution?",
+                  "Summarize best practices for backtesting to avoid overfitting.",
+                  "What are key risks in highly volatile crypto assets?"
+                ].map(prompt => (
+                  <button
+                    key={prompt}
+                    onClick={() => { setQaQuestion(prompt); }}
+                    style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", textAlign: "left", fontSize: 11 }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb", minHeight: 280 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontWeight: 600 }}>Answer</div>
+                {qaSource && (
+                  <span style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase" }}>{qaSource}</span>
+                )}
+              </div>
+              {qaAnswer ? (
+                <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap" }}>{qaAnswer}</div>
+              ) : (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>Ask a question to see a response.</div>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Citations</div>
+              {qaCitations.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No citations yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {qaCitations.map((cite, idx) => (
+                    <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "#64748b", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                      <div style={{ fontWeight: 600 }}>{cite.meeting_title}</div>
+                      <div>{cite.chunk_id}</div>
+                      <div>{cite.snippet}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {tradingTab === "knowledge" && (

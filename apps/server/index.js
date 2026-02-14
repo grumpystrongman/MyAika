@@ -2899,6 +2899,12 @@ const tradingKnowledgeAskSchema = z.object({
   topK: z.number().int().min(1).max(12).optional()
 });
 
+const tradingKnowledgeDeepSchema = z.object({
+  question: z.string().min(3),
+  topK: z.number().int().min(1).max(12).optional(),
+  allowFallback: z.boolean().optional()
+});
+
 const tradingSourceSchema = z.object({
   url: z.string().url(),
   tags: z.array(z.string()).optional(),
@@ -3326,6 +3332,44 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
         answer = base.context;
       }
       res.json({ answer, citations: base.citations || [], debug: base.debug || {} });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "knowledge_query_failed" });
+    }
+  });
+
+  app.post("/api/trading/knowledge/ask-deep", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingKnowledgeDeepSchema.parse(req.body || {});
+      const base = await queryTradingKnowledge(parsed.question, { topK: parsed.topK || 6 });
+      const allowFallback = parsed.allowFallback !== false;
+      let answer = base.answer;
+      let source = base.context ? "rag" : "rag_empty";
+
+      if (process.env.OPENAI_API_KEY && allowFallback) {
+        const system = "You are a trading education assistant. Use the provided context first. If the context is insufficient, you may answer from general knowledge, but explicitly note when you are doing so.";
+        const user = `Question: ${parsed.question}\n\nContext:\n${base.context || "(none)"}`;
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          input: [
+            { role: "system", content: [{ type: "input_text", text: system }] },
+            { role: "user", content: [{ type: "input_text", text: user }] }
+          ],
+          max_output_tokens: 450
+        });
+        const modelText = response?.output_text || "";
+        if (modelText.trim()) {
+          answer = modelText.trim();
+          source = base.context ? "rag+llm" : "llm";
+        }
+      } else if (base.context) {
+        answer = base.context;
+        source = "rag";
+      }
+
+      res.json({ answer, citations: base.citations || [], debug: base.debug || {}, source });
     } catch (err) {
       if (err?.issues) {
         return res.status(400).json({ error: "invalid_request", detail: err.issues });
