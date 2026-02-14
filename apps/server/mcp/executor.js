@@ -2,6 +2,9 @@ import { evaluatePolicy, redactPhi } from "./policy.js";
 import { writeAudit } from "./audit.js";
 import { createApproval, approveApproval, getApproval, markExecuted } from "./approvals.js";
 import { recordToolHistory } from "../storage/history.js";
+import { evaluateAction } from "../src/safety/evaluator.js";
+import { appendAuditEvent } from "../src/safety/auditLog.js";
+import { redactPayload } from "../src/safety/redact.js";
 
 export class ToolExecutor {
   constructor(registry) {
@@ -13,9 +16,49 @@ export class ToolExecutor {
     if (!entry) throw new Error("tool_not_found");
     const { def, handler } = entry;
     const outboundTargets = def.outboundTargets?.(params, context) || [];
+    const safetyDecision = evaluateAction({
+      actionType: def.name,
+      params,
+      outboundTargets
+    });
+    const redactedPayload = redactPayload(params);
     const policy = evaluatePolicy({ tool: def, params, context, outboundTargets });
 
+    if (safetyDecision.decision === "deny") {
+      appendAuditEvent({
+        action_type: def.name,
+        decision: "deny",
+        reason: safetyDecision.reason,
+        user: context?.userId || "",
+        session: context?.correlationId || "",
+        risk_score: safetyDecision.riskScore,
+        resource_refs: safetyDecision.classification?.resourceRefs || [],
+        redacted_payload: redactedPayload,
+        result_redacted: { error: "policy_denied" }
+      });
+      const err = new Error("policy_denied");
+      err.status = 403;
+      recordToolHistory({
+        tool: def.name,
+        request: params,
+        status: "blocked",
+        error: { message: "policy_denied" }
+      });
+      throw err;
+    }
+
     if (policy.block) {
+      appendAuditEvent({
+        action_type: def.name,
+        decision: "deny",
+        reason: "mcp_policy_block",
+        user: context?.userId || "",
+        session: context?.correlationId || "",
+        risk_score: safetyDecision.riskScore,
+        resource_refs: safetyDecision.classification?.resourceRefs || [],
+        redacted_payload: redactedPayload,
+        result_redacted: { error: "policy_blocked" }
+      });
       writeAudit({
         type: "tool_call_blocked",
         tool: def.name,
@@ -39,7 +82,7 @@ export class ToolExecutor {
     const toolRequiresApproval = typeof def.requiresApproval === "function"
       ? def.requiresApproval(params, context)
       : def.requiresApproval;
-    if (policy.requiresApproval || toolRequiresApproval) {
+    if (policy.requiresApproval || toolRequiresApproval || safetyDecision.decision === "require_approval") {
       const approval = createApproval({
         toolName: def.name,
         params: policy.redactedParams,
@@ -47,6 +90,17 @@ export class ToolExecutor {
         riskLevel: def.riskLevel || "medium",
         createdBy: context?.userId || "user",
         correlationId: context?.correlationId || ""
+      });
+      appendAuditEvent({
+        action_type: def.name,
+        decision: "require_approval",
+        reason: safetyDecision.reason || "approval_required",
+        user: context?.userId || "",
+        session: context?.correlationId || "",
+        risk_score: safetyDecision.riskScore,
+        resource_refs: safetyDecision.classification?.resourceRefs || [],
+        redacted_payload: redactedPayload,
+        result_redacted: { approvalId: approval.id }
       });
       writeAudit({
         type: "tool_call_requires_approval",
@@ -71,6 +125,17 @@ export class ToolExecutor {
     try {
       result = await handler(params, context);
     } catch (err) {
+      appendAuditEvent({
+        action_type: def.name,
+        decision: "error",
+        reason: err.message || "tool_failed",
+        user: context?.userId || "",
+        session: context?.correlationId || "",
+        risk_score: safetyDecision.riskScore,
+        resource_refs: safetyDecision.classification?.resourceRefs || [],
+        redacted_payload: redactedPayload,
+        result_redacted: { error: err.message || "tool_failed" }
+      });
       recordToolHistory({
         tool: def.name,
         request: params,
@@ -80,6 +145,17 @@ export class ToolExecutor {
       throw err;
     }
     const summary = typeof result === "string" ? result.slice(0, 240) : "ok";
+    appendAuditEvent({
+      action_type: def.name,
+      decision: "allow",
+      reason: "tool_ok",
+      user: context?.userId || "",
+      session: context?.correlationId || "",
+      risk_score: safetyDecision.riskScore,
+      resource_refs: safetyDecision.classification?.resourceRefs || [],
+      redacted_payload: redactedPayload,
+      result_redacted: redactPayload(result)
+    });
     writeAudit({
       type: "tool_call",
       tool: def.name,
@@ -141,6 +217,28 @@ export class ToolExecutor {
     const entry = this.registry.get(approval.toolName);
     if (!entry) throw new Error("tool_not_found");
     const { def, handler } = entry;
+    const safetyDecision = evaluateAction({
+      actionType: def.name,
+      params: approval.params || {},
+      outboundTargets: def.outboundTargets?.(approval.params, execContext) || []
+    });
+    const redactedPayload = redactPayload(approval.params || {});
+    if (safetyDecision.decision === "deny") {
+      appendAuditEvent({
+        action_type: def.name,
+        decision: "deny",
+        reason: safetyDecision.reason,
+        user: execContext.userId || "",
+        session: execContext.correlationId || "",
+        risk_score: safetyDecision.riskScore,
+        resource_refs: safetyDecision.classification?.resourceRefs || [],
+        redacted_payload: redactedPayload,
+        result_redacted: { error: "policy_denied" }
+      });
+      const err = new Error("policy_denied");
+      err.status = 403;
+      throw err;
+    }
     const policy = evaluatePolicy({ tool: def, params: approval.params, context: execContext });
     if (policy.block) {
       const err = new Error("policy_blocked");
@@ -149,6 +247,17 @@ export class ToolExecutor {
     }
     const result = await handler(approval.params, execContext);
     markExecuted(id);
+    appendAuditEvent({
+      action_type: def.name,
+      decision: "allow",
+      reason: "approval_executed",
+      user: execContext.userId || "",
+      session: execContext.correlationId || "",
+      risk_score: safetyDecision.riskScore,
+      resource_refs: safetyDecision.classification?.resourceRefs || [],
+      redacted_payload: redactedPayload,
+      result_redacted: redactPayload(result)
+    });
     writeAudit({
       type: "approval_executed",
       tool: def.name,

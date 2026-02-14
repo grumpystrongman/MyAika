@@ -222,6 +222,46 @@ const migrations = [
     ALTER TABLE memory_entries ADD COLUMN user_id TEXT;
     UPDATE memory_entries SET user_id = 'local' WHERE user_id IS NULL;
     `
+  },
+  {
+    id: 5,
+    sql: `
+    ALTER TABLE approvals ADD COLUMN created_by TEXT;
+    ALTER TABLE approvals ADD COLUMN action_type TEXT;
+    ALTER TABLE approvals ADD COLUMN summary TEXT;
+    ALTER TABLE approvals ADD COLUMN payload_redacted_json TEXT;
+    ALTER TABLE approvals ADD COLUMN decided_at TEXT;
+    ALTER TABLE approvals ADD COLUMN decided_by TEXT;
+    ALTER TABLE approvals ADD COLUMN reason TEXT;
+
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY,
+      ts TEXT,
+      user TEXT,
+      session TEXT,
+      action_type TEXT,
+      decision TEXT,
+      reason TEXT,
+      risk_score INTEGER,
+      resource_refs TEXT,
+      redacted_payload TEXT,
+      result_redacted TEXT,
+      prev_hash TEXT,
+      hash TEXT
+    );
+    `
+  },
+  {
+    id: 6,
+    sql: `
+    CREATE TABLE IF NOT EXISTS trading_settings (
+      id TEXT PRIMARY KEY,
+      email_json TEXT,
+      training_json TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    `
   }
 ];
 

@@ -10,6 +10,7 @@ export default function TeachModePanel({ serverUrl }) {
   const [selectedMacro, setSelectedMacro] = useState(null);
   const [macroParams, setMacroParams] = useState({});
   const [runResult, setRunResult] = useState(null);
+  const [approval, setApproval] = useState(null);
 
   async function loadMacros() {
     try {
@@ -62,6 +63,7 @@ export default function TeachModePanel({ serverUrl }) {
   async function runMacro() {
     if (!selectedMacro?.id) return;
     setError("");
+    setApproval(null);
     try {
       const resp = await fetch(`${serverUrl}/api/teach/macros/${selectedMacro.id}/run`, {
         method: "POST",
@@ -70,9 +72,45 @@ export default function TeachModePanel({ serverUrl }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "macro_run_failed");
+      if (data?.status === "approval_required") {
+        setApproval(data.approval || null);
+        return;
+      }
       setRunResult(data);
     } catch (err) {
       setError(err?.message || "macro_run_failed");
+    }
+  }
+
+  async function approveAndRun() {
+    if (!approval?.id) return;
+    setError("");
+    try {
+      let adminToken = "";
+      try {
+        adminToken = window.localStorage.getItem("aika_admin_token") || "";
+      } catch {
+        adminToken = "";
+      }
+      const approveResp = await fetch(`${serverUrl}/api/approvals/${approval.id}/approve`, {
+        method: "POST",
+        headers: adminToken ? { "x-admin-token": adminToken } : undefined
+      });
+      const approved = await approveResp.json();
+      if (!approveResp.ok) throw new Error(approved?.error || "approval_failed");
+      const token = approved?.approval?.token;
+      if (!token) throw new Error("approval_token_missing");
+      const execResp = await fetch(`${serverUrl}/api/approvals/${approval.id}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      const execData = await execResp.json();
+      if (!execResp.ok) throw new Error(execData?.error || "approval_execute_failed");
+      setRunResult(execData);
+      setApproval(null);
+    } catch (err) {
+      setError(err?.message || "approval_failed");
     }
   }
 
@@ -194,6 +232,16 @@ export default function TeachModePanel({ serverUrl }) {
         <button onClick={runMacro} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
           Run Macro
         </button>
+        {approval && (
+          <div style={{ marginTop: 10, padding: 10, border: "1px solid #f59e0b", borderRadius: 10, background: "#fff7ed", fontSize: 12 }}>
+            <div style={{ fontWeight: 600 }}>Approval required</div>
+            <div>Approval ID: {approval.id}</div>
+            <div style={{ marginTop: 6 }}>{approval.humanSummary}</div>
+            <button onClick={approveAndRun} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+              Approve & Run
+            </button>
+          </div>
+        )}
         {runResult && (
           <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
 {JSON.stringify(runResult, null, 2)}

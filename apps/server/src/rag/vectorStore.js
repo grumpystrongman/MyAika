@@ -99,6 +99,16 @@ function ensureSchema() {
       FOREIGN KEY(meeting_id) REFERENCES meetings(id)
     );
 
+    CREATE TABLE IF NOT EXISTS meeting_notifications (
+      meeting_id TEXT,
+      channel TEXT,
+      to_json TEXT,
+      sent_at TEXT,
+      status TEXT,
+      error TEXT,
+      PRIMARY KEY (meeting_id, channel)
+    );
+
     CREATE TABLE IF NOT EXISTS chunk_embeddings (
       chunk_id TEXT PRIMARY KEY,
       embedding BLOB
@@ -107,6 +117,22 @@ function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_chunks_meeting ON chunks(meeting_id);
     CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(occurred_at);
   `);
+}
+
+function ensureColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
+  if (!cols.includes(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+function ensureMigrations() {
+  ensureColumn("meeting_summaries", "decisions_json", "TEXT");
+  ensureColumn("meeting_summaries", "tasks_json", "TEXT");
+  ensureColumn("meeting_summaries", "risks_json", "TEXT");
+  ensureColumn("meeting_summaries", "next_steps_json", "TEXT");
+  ensureColumn("meeting_summaries", "updated_at", "TEXT");
+  ensureColumn("meeting_emails", "error", "TEXT");
 }
 
 function getMeta(key) {
@@ -139,6 +165,7 @@ export function initRagStore() {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   ensureSchema();
+  ensureMigrations();
   try {
     sqliteVec.load(db);
     vecEnabled = true;
@@ -308,6 +335,38 @@ export function getMeetingEmail(meetingId) {
   return {
     to: row.to_json ? JSON.parse(row.to_json) : [],
     subject: row.subject,
+    sent_at: row.sent_at,
+    status: row.status,
+    error: row.error
+  };
+}
+
+export function recordMeetingNotification({ meetingId, channel, to, status, error = "", sentAt }) {
+  initRagStore();
+  db.prepare(`
+    INSERT INTO meeting_notifications (meeting_id, channel, to_json, sent_at, status, error)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(meeting_id, channel) DO UPDATE SET
+      to_json = excluded.to_json,
+      sent_at = excluded.sent_at,
+      status = excluded.status,
+      error = excluded.error
+  `).run(
+    meetingId,
+    channel,
+    JSON.stringify(to || []),
+    sentAt || nowIso(),
+    status || "",
+    error || ""
+  );
+}
+
+export function getMeetingNotification(meetingId, channel) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM meeting_notifications WHERE meeting_id = ? AND channel = ?").get(meetingId, channel);
+  if (!row) return null;
+  return {
+    to: row.to_json ? JSON.parse(row.to_json) : [],
     sent_at: row.sent_at,
     status: row.status,
     error: row.error
@@ -498,9 +557,12 @@ export function listMeetings({ type = "all", limit = 20, offset = 0, search = ""
     where.push("m.id LIKE 'memory:%'");
   } else if (normalizedType === "feedback") {
     where.push("m.id LIKE 'feedback:%'");
+  } else if (normalizedType === "recordings" || normalizedType === "recording") {
+    where.push("m.id LIKE 'recording:%'");
   } else if (normalizedType === "fireflies") {
     where.push("m.id NOT LIKE 'memory:%'");
     where.push("m.id NOT LIKE 'feedback:%'");
+    where.push("m.id NOT LIKE 'recording:%'");
   }
 
   if (search) {
@@ -527,11 +589,13 @@ export function getRagCounts() {
   const totalChunks = db.prepare("SELECT COUNT(*) AS count FROM chunks").get()?.count || 0;
   const memoryMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'memory:%'").get()?.count || 0;
   const feedbackMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'feedback:%'").get()?.count || 0;
-  const firefliesMeetings = totalMeetings - memoryMeetings - feedbackMeetings;
+  const recordingMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'recording:%'").get()?.count || 0;
+  const firefliesMeetings = totalMeetings - memoryMeetings - feedbackMeetings - recordingMeetings;
   return {
     totalMeetings,
     totalChunks,
     firefliesMeetings: Math.max(0, firefliesMeetings),
+    recordingMeetings,
     memoryMeetings,
     feedbackMeetings
   };

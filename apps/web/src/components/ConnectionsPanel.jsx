@@ -83,6 +83,12 @@ export default function ConnectionsPanel({ serverUrl }) {
     }
   }
 
+  function connectOauth(conn) {
+    if (!conn?.connectUrl) return;
+    const url = `${serverUrl}${conn.connectUrl}`;
+    window.open(url, "_blank", "width=520,height=680");
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
@@ -96,14 +102,31 @@ export default function ConnectionsPanel({ serverUrl }) {
                 <div>
                   <div style={{ fontWeight: 600 }}>{conn.label}</div>
                   <div style={{ fontSize: 11, color: "#6b7280" }}>{conn.detail}</div>
+                  {conn.method && (
+                    <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.6 }}>
+                      {conn.method}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 11, color: conn.status === "connected" ? "#059669" : "#6b7280" }}>
                     {conn.status}
                   </span>
-                  <button onClick={() => revokeConnection(conn.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
-                    Revoke
-                  </button>
+                  {conn.status === "connected" ? (
+                    <button onClick={() => revokeConnection(conn.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                      Revoke
+                    </button>
+                  ) : conn.method === "oauth" && conn.connectUrl ? (
+                    <button
+                      onClick={() => connectOauth(conn)}
+                      disabled={conn.configured === false}
+                      style={{ padding: "4px 8px", borderRadius: 6 }}
+                    >
+                      {conn.connectLabel || "Connect"}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>{conn.connectLabel || "Setup required"}</span>
+                  )}
                 </div>
               </div>
               {conn.scopes?.length > 0 && (
@@ -111,6 +134,12 @@ export default function ConnectionsPanel({ serverUrl }) {
               )}
               {conn.lastUsedAt && (
                 <div style={{ fontSize: 11, color: "#6b7280" }}>Last used: {conn.lastUsedAt}</div>
+              )}
+              {conn.configured === false && (
+                <div style={{ fontSize: 11, color: "#b91c1c", marginTop: 6 }}>Missing configuration</div>
+              )}
+              {conn.setupHint && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{conn.setupHint}</div>
               )}
             </div>
           ))}

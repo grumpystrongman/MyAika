@@ -18,6 +18,10 @@ import {
 import { summarizeTranscript } from "../../recordings/processor.js";
 import { sendGmailMessage, getGoogleStatus } from "../../integrations/google.js";
 import { writeOutbox } from "../../storage/outbox.js";
+import { parseNotifyChannels, sendMeetingNotifications } from "../notifications/meetingNotifications.js";
+import { evaluateAction } from "../safety/evaluator.js";
+import { appendAuditEvent } from "../safety/auditLog.js";
+import { redactPayload } from "../safety/redact.js";
 
 let syncRunning = false;
 let rateLimitUntil = 0;
@@ -194,10 +198,12 @@ export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}
     let syncedChunks = 0;
     let skippedMeetings = 0;
     let emailedMeetings = 0;
+    let notifiedMeetings = 0;
 
     const autoEmail = typeof sendEmail === "boolean"
       ? sendEmail
       : String(process.env.FIREFLIES_AUTO_EMAIL || "0").toLowerCase() === "1";
+    const notifyChannels = parseNotifyChannels(process.env.FIREFLIES_NOTIFY_CHANNELS || "");
 
     for (const entry of transcripts) {
       try {
@@ -208,8 +214,10 @@ export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}
         const existingMeeting = existingCount ? getMeeting(transcriptId) : null;
         const existingEmail = autoEmail ? getMeetingEmail(transcriptId) : null;
         const needsEmail = autoEmail && (!existingEmail || existingEmail.status !== "sent");
+        const needsNotify = notifyChannels.length > 0;
         const needsIndex = !existingCount || force;
         const needsDetail = needsIndex || !existingMeeting?.raw_transcript || !existingMeeting?.title || !existingMeeting?.occurred_at;
+        const needsSummary = needsEmail || needsNotify;
 
         if (existingCount && !force && !needsEmail) {
           skippedMeetings += 1;
@@ -273,13 +281,17 @@ export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}
           syncedChunks += chunks.length;
         }
 
-        if (needsEmail) {
-          const summary = await ensureSummary({
+        let summary = null;
+        if (needsSummary) {
+          summary = await ensureSummary({
             meetingId: transcriptId,
             transcriptText,
             title,
             force
           });
+        }
+
+        if (needsEmail && summary) {
           const emailResult = await maybeSendEmail({
             meetingId: transcriptId,
             title,
@@ -289,6 +301,19 @@ export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}
             sourceUrl
           });
           if (emailResult?.sent) emailedMeetings += 1;
+        }
+
+        if (needsNotify && summary) {
+          const notifyResult = await sendMeetingNotifications({
+            meetingId: transcriptId,
+            title,
+            occurredAt,
+            summary,
+            sourceUrl,
+            channels: notifyChannels,
+            force
+          });
+          if (notifyResult?.sent) notifiedMeetings += 1;
         }
       } catch (err) {
         if (err?.code === "fireflies_rate_limited") {
@@ -311,7 +336,8 @@ export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}
       syncedMeetings,
       syncedChunks,
       skippedMeetings,
-      emailedMeetings
+      emailedMeetings,
+      notifiedMeetings
     };
   } catch (err) {
     if (err?.code === "fireflies_rate_limited" && err.retryAt) {
@@ -344,6 +370,24 @@ export function startFirefliesSyncLoop() {
   const scheduleNext = (delayMs) => {
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = setTimeout(async () => {
+      const safetyDecision = evaluateAction({
+        actionType: "integrations.fireflies.sync",
+        params: { limit: scheduleLimit },
+        outboundTargets: ["https://api.fireflies.ai"]
+      });
+      if (safetyDecision.decision !== "allow") {
+        appendAuditEvent({
+          action_type: "integrations.fireflies.sync",
+          decision: safetyDecision.decision,
+          reason: safetyDecision.reason,
+          risk_score: safetyDecision.riskScore,
+          resource_refs: safetyDecision.classification?.resourceRefs || [],
+          redacted_payload: redactPayload({ limit: scheduleLimit }),
+          result_redacted: { skipped: true }
+        });
+        scheduleNext(intervalMs);
+        return;
+      }
       if (rateLimitUntil && Date.now() < rateLimitUntil) {
         const retryDelay = Math.max(rateLimitUntil - Date.now(), intervalMs);
         scheduleNext(retryDelay);

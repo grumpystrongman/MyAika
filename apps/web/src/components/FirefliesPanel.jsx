@@ -16,6 +16,7 @@ function parseSummary(summaryJson) {
 export default function FirefliesPanel({ serverUrl }) {
   const [status, setStatus] = useState(null);
   const [meetings, setMeetings] = useState([]);
+  const [recordingEntries, setRecordingEntries] = useState([]);
   const [memoryEntries, setMemoryEntries] = useState([]);
   const [feedbackEntries, setFeedbackEntries] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -53,6 +54,7 @@ export default function FirefliesPanel({ serverUrl }) {
     try {
       await loadStatus();
       await loadMeetings("fireflies", setMeetings);
+      await loadMeetings("recordings", setRecordingEntries);
       await loadMeetings("memory", setMemoryEntries);
       await loadMeetings("feedback", setFeedbackEntries, "thumbs_up");
     } catch (err) {
@@ -121,7 +123,7 @@ export default function FirefliesPanel({ serverUrl }) {
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Status</div>
         {status ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>
-            Meetings: {status.firefliesMeetings} · Memory: {status.memoryMeetings} · Feedback: {status.feedbackMeetings} · Chunks: {status.totalChunks}
+            Meetings: {status.firefliesMeetings} · Recordings: {status.recordingMeetings || 0} · Memory: {status.memoryMeetings} · Feedback: {status.feedbackMeetings} · Chunks: {status.totalChunks}
             {status.vectorStore?.vecEnabled === false ? " · sqlite-vec: fallback" : " · sqlite-vec: on"}
           </div>
         ) : (
@@ -192,6 +194,31 @@ export default function FirefliesPanel({ serverUrl }) {
                   {item.source_url && (
                     <a href={item.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2563eb" }}>
                       Open transcript
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Local Recordings</div>
+        {recordingEntries.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#6b7280" }}>No recordings indexed yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {recordingEntries.map(item => {
+              const summary = parseSummary(item.summary_json);
+              return (
+                <div key={item.id} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontWeight: 600 }}>{item.title || "Recording"}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>{item.occurred_at || "Unknown date"}</div>
+                  {summary && <div style={{ marginTop: 6, fontSize: 12 }}>{summary}</div>}
+                  {item.source_url && (
+                    <a href={item.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2563eb" }}>
+                      Open audio
                     </a>
                   )}
                 </div>

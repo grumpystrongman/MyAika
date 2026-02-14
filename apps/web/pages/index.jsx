@@ -8,6 +8,8 @@ import ConnectionsPanel from "../src/components/ConnectionsPanel";
 import TeachModePanel from "../src/components/TeachModePanel";
 import CanvasPanel from "../src/components/CanvasPanel";
 import FirefliesPanel from "../src/components/FirefliesPanel";
+import SafetyPanel from "../src/components/SafetyPanel";
+import TradingPanel from "../src/components/TradingPanel";
 
 function resolveServerUrl() {
   if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
@@ -290,6 +292,7 @@ function buildGreeting(user) {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState("chat");
+  const [killSwitchActive, setKillSwitchActive] = useState(false);
   const [integrations, setIntegrations] = useState({});
   const [statusInfo, setStatusInfo] = useState(null);
   const [logLines, setLogLines] = useState([]);
@@ -314,6 +317,23 @@ export default function Home() {
   const [skillToasts, setSkillToasts] = useState([]);
   const [reminderAudioCue, setReminderAudioCue] = useState(true);
   const [reminderPush, setReminderPush] = useState(false);
+  const [tradingEmailSettings, setTradingEmailSettings] = useState({
+    enabled: false,
+    time: "08:00",
+    recipients: "",
+    subjectPrefix: "Aika Daily Picks",
+    minPicks: 10,
+    maxPicks: 15,
+    stockCount: 8,
+    cryptoCount: 4,
+    stocks: "",
+    cryptos: ""
+  });
+  const [tradingQuestions, setTradingQuestions] = useState([]);
+  const [tradingNotes, setTradingNotes] = useState("");
+  const [tradingSettingsStatus, setTradingSettingsStatus] = useState("");
+  const [tradingSettingsError, setTradingSettingsError] = useState("");
+  const [tradingSettingsLoading, setTradingSettingsLoading] = useState(false);
   const [userText, setUserText] = useState("");
   const [toolsList, setToolsList] = useState([]);
   const [toolsError, setToolsError] = useState("");
@@ -1503,6 +1523,11 @@ export default function Home() {
     }, [activeTab, settingsTab]);
 
     useEffect(() => {
+      if (activeTab !== "settings" || settingsTab !== "trading") return;
+      loadTradingSettings();
+    }, [activeTab, settingsTab]);
+
+    useEffect(() => {
       let cancelled = false;
       async function pollEvents() {
         try {
@@ -1572,6 +1597,23 @@ export default function Home() {
     }
     loadStatus();
     const id = setInterval(loadStatus, 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    async function loadKillSwitch() {
+      try {
+        const r = await fetch(`${SERVER_URL}/api/safety/kill-switch`);
+        const data = await r.json();
+        if (r.ok) {
+          setKillSwitchActive(Boolean(data?.killSwitch?.enabled));
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadKillSwitch();
+    const id = setInterval(loadKillSwitch, 15000);
     return () => clearInterval(id);
   }, []);
 
@@ -2207,6 +2249,126 @@ export default function Home() {
     }
   }
 
+  function parseListInput(value) {
+    return String(value || "")
+      .split(/[;,\n]/)
+      .map(v => v.trim())
+      .filter(Boolean);
+  }
+
+  function formatListInput(list) {
+    if (!Array.isArray(list)) return "";
+    return list.join(", ");
+  }
+
+  function addTradingQuestion() {
+    const id = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `q_${Date.now()}`;
+    setTradingQuestions(prev => [...prev, { id, question: "", answer: "" }]);
+  }
+
+  function updateTradingQuestion(idx, field, value) {
+    setTradingQuestions(prev => prev.map((item, i) => (
+      i === idx ? { ...item, [field]: value } : item
+    )));
+  }
+
+  function removeTradingQuestion(idx) {
+    setTradingQuestions(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  async function loadTradingSettings() {
+    setTradingSettingsLoading(true);
+    setTradingSettingsError("");
+    try {
+      const r = await fetch(`${SERVER_URL}/api/trading/settings`);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "trading_settings_failed");
+      const email = data?.email || {};
+      const training = data?.training || {};
+      setTradingEmailSettings({
+        enabled: Boolean(email.enabled),
+        time: email.time || "08:00",
+        recipients: formatListInput(email.recipients),
+        subjectPrefix: email.subjectPrefix || "Aika Daily Picks",
+        minPicks: Number(email.minPicks || 10),
+        maxPicks: Number(email.maxPicks || 15),
+        stockCount: Number(email.stockCount || 8),
+        cryptoCount: Number(email.cryptoCount || 4),
+        stocks: formatListInput(email.stocks || []),
+        cryptos: formatListInput(email.cryptos || [])
+      });
+      setTradingQuestions(Array.isArray(training.questions) ? training.questions : []);
+      setTradingNotes(training.notes || "");
+      setTradingSettingsStatus("Loaded settings.");
+    } catch (err) {
+      setTradingSettingsError(err?.message || "trading_settings_failed");
+    } finally {
+      setTradingSettingsLoading(false);
+    }
+  }
+
+  async function saveTradingSettings() {
+    setTradingSettingsLoading(true);
+    setTradingSettingsError("");
+    try {
+      const payload = {
+        email: {
+          enabled: Boolean(tradingEmailSettings.enabled),
+          time: tradingEmailSettings.time,
+          recipients: parseListInput(tradingEmailSettings.recipients),
+          subjectPrefix: tradingEmailSettings.subjectPrefix,
+          minPicks: Number(tradingEmailSettings.minPicks || 10),
+          maxPicks: Number(tradingEmailSettings.maxPicks || 15),
+          stockCount: Number(tradingEmailSettings.stockCount || 8),
+          cryptoCount: Number(tradingEmailSettings.cryptoCount || 4),
+          stocks: parseListInput(tradingEmailSettings.stocks),
+          cryptos: parseListInput(tradingEmailSettings.cryptos)
+        },
+        training: {
+          notes: tradingNotes,
+          questions: tradingQuestions
+            .map(item => ({
+              id: item.id,
+              question: String(item.question || "").trim(),
+              answer: String(item.answer || "").trim()
+            }))
+            .filter(item => item.question.length > 0)
+        }
+      };
+      const r = await fetch(`${SERVER_URL}/api/trading/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "trading_settings_save_failed");
+      setTradingSettingsStatus("Saved.");
+      if (data?.settings) {
+        setTradingEmailSettings(prev => ({
+          ...prev,
+          enabled: Boolean(data.settings.email?.enabled),
+          time: data.settings.email?.time || prev.time,
+          recipients: formatListInput(data.settings.email?.recipients || []),
+          subjectPrefix: data.settings.email?.subjectPrefix || prev.subjectPrefix,
+          minPicks: data.settings.email?.minPicks || prev.minPicks,
+          maxPicks: data.settings.email?.maxPicks || prev.maxPicks,
+          stockCount: data.settings.email?.stockCount || prev.stockCount,
+          cryptoCount: data.settings.email?.cryptoCount || prev.cryptoCount,
+          stocks: formatListInput(data.settings.email?.stocks || []),
+          cryptos: formatListInput(data.settings.email?.cryptos || [])
+        }));
+        setTradingQuestions(Array.isArray(data.settings.training?.questions) ? data.settings.training.questions : []);
+        setTradingNotes(data.settings.training?.notes || "");
+      }
+    } catch (err) {
+      setTradingSettingsError(err?.message || "trading_settings_save_failed");
+    } finally {
+      setTradingSettingsLoading(false);
+    }
+  }
+
   async function runSkillVault(skillId) {
     try {
       setSkillVaultError("");
@@ -2677,6 +2839,19 @@ export default function Home() {
             </button>
           </div>
         )}
+        {killSwitchActive && (
+          <div style={{
+            border: "1px solid #dc2626",
+            background: "#fef2f2",
+            color: "#991b1b",
+            borderRadius: 12,
+            padding: "10px 12px",
+            fontSize: 12,
+            fontWeight: 600
+          }}>
+            Kill switch active: automation is paused.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button
             onClick={() => setActiveTab("chat")}
@@ -2754,6 +2929,28 @@ export default function Home() {
               }}
             >
               Fireflies
+            </button>
+            <button
+              onClick={() => setActiveTab("trading")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "trading" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "trading" ? "#e6f0ff" : "white"
+              }}
+            >
+              Trading
+            </button>
+            <button
+              onClick={() => setActiveTab("safety")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "safety" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
+                background: activeTab === "safety" ? "#e6f0ff" : "white"
+              }}
+            >
+              Safety
             </button>
             <button
               onClick={() => setActiveTab("canvas")}
@@ -2839,6 +3036,7 @@ export default function Home() {
               {[
                 { key: "integrations", label: "Integrations" },
                 { key: "skills", label: "Skills" },
+                { key: "trading", label: "Trading" },
                 { key: "appearance", label: "Appearance" },
                 { key: "voice", label: "Voice" }
               ].map(item => (
@@ -3207,8 +3405,176 @@ export default function Home() {
                   </a>
                 )}
               </div>
+          </div>
+        )}
+
+        {activeTab === "settings" && settingsTab === "trading" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              Trading Emails
             </div>
-          )}
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Configure daily picks delivery and the watchlists Aika uses. These are stored locally and persist across restarts.
+            </div>
+            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "white" }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={tradingEmailSettings.enabled}
+                  onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                />
+                Enable daily trading picks email
+              </label>
+              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Send time (local)
+                  <input
+                    type="time"
+                    value={tradingEmailSettings.time}
+                    onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, time: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Subject prefix
+                  <input
+                    value={tradingEmailSettings.subjectPrefix}
+                    onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, subjectPrefix: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Recipients (comma-separated)
+                  <input
+                    value={tradingEmailSettings.recipients}
+                    onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, recipients: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+              </div>
+              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Stock picks
+                  <input
+                    type="number"
+                    value={tradingEmailSettings.stockCount}
+                    onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, stockCount: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Crypto picks
+                  <input
+                    type="number"
+                    value={tradingEmailSettings.cryptoCount}
+                    onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, cryptoCount: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Min picks
+                  <input
+                    type="number"
+                    value={tradingEmailSettings.minPicks}
+                    onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, minPicks: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Max picks
+                  <input
+                    type="number"
+                    value={tradingEmailSettings.maxPicks}
+                    onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, maxPicks: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  />
+                </label>
+              </div>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                Stock watchlist (comma-separated)
+                <input
+                  value={tradingEmailSettings.stocks}
+                  onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, stocks: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                />
+              </label>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                Crypto watchlist (comma-separated)
+                <input
+                  value={tradingEmailSettings.cryptos}
+                  onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, cryptos: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                />
+              </label>
+            </div>
+
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 6 }}>
+              Trading Personalization
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              These answers guide Aika's trading assistant and stay in memory until you overwrite them.
+            </div>
+            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "white" }}>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                Directives / Notes
+                <textarea
+                  rows={3}
+                  value={tradingNotes}
+                  onChange={(e) => setTradingNotes(e.target.value)}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                />
+              </label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontWeight: 600, fontSize: 12 }}>Guiding Questions</div>
+                <button onClick={addTradingQuestion} style={{ padding: "4px 8px", borderRadius: 8 }}>
+                  Add question
+                </button>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {tradingQuestions.length === 0 && (
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>No questions added yet.</div>
+                )}
+                {tradingQuestions.map((q, idx) => (
+                  <div key={q.id || idx} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, background: "#f9fafb" }}>
+                    <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                      Question
+                      <input
+                        value={q.question || ""}
+                        onChange={(e) => updateTradingQuestion(idx, "question", e.target.value)}
+                        style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 4, fontSize: 12, marginTop: 6 }}>
+                      Answer
+                      <input
+                        value={q.answer || ""}
+                        onChange={(e) => updateTradingQuestion(idx, "answer", e.target.value)}
+                        style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                      />
+                    </label>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+                      <button onClick={() => removeTradingQuestion(idx)} style={{ padding: "4px 8px", borderRadius: 8 }}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={saveTradingSettings} style={{ padding: "6px 12px", borderRadius: 8 }}>
+                Save Trading Settings
+              </button>
+              <button onClick={loadTradingSettings} style={{ padding: "6px 12px", borderRadius: 8 }}>
+                Reload
+              </button>
+              {tradingSettingsLoading && <span style={{ fontSize: 12, color: "#6b7280" }}>Saving...</span>}
+              {tradingSettingsStatus && <span style={{ fontSize: 12, color: "#2563eb" }}>{tradingSettingsStatus}</span>}
+            </div>
+            {tradingSettingsError && <div style={{ fontSize: 12, color: "#b91c1c" }}>{tradingSettingsError}</div>}
+          </div>
+        )}
 
           {activeTab === "settings" && settingsTab === "appearance" && (
             <div style={{ display: "grid", gap: 12 }}>
@@ -3562,6 +3928,14 @@ export default function Home() {
 
         {activeTab === "fireflies" && (
           <FirefliesPanel serverUrl={SERVER_URL} />
+        )}
+
+        {activeTab === "trading" && (
+          <TradingPanel serverUrl={SERVER_URL} />
+        )}
+
+        {activeTab === "safety" && (
+          <SafetyPanel serverUrl={SERVER_URL} />
         )}
 
         {activeTab === "canvas" && (

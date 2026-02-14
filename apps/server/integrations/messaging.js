@@ -64,3 +64,63 @@ export async function sendDiscordMessage(content) {
   }
   return { ok: true };
 }
+
+async function sendTwilioMessage({ to, from, body }) {
+  const sid = process.env.TWILIO_ACCOUNT_SID || "";
+  const token = process.env.TWILIO_AUTH_TOKEN || "";
+  if (!sid || !token) throw new Error("twilio_auth_missing");
+  if (!to || !from) throw new Error("twilio_to_from_missing");
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+  const payload = new URLSearchParams({ To: to, From: from, Body: body || "" });
+  const auth = Buffer.from(`${sid}:${token}`).toString("base64");
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: payload.toString()
+  });
+  if (!r.ok) {
+    const msg = await r.text();
+    throw new Error(msg || "twilio_send_failed");
+  }
+  return await r.json();
+}
+
+export async function sendSmsMessage(to, body, fromOverride = "") {
+  const from = fromOverride || process.env.TWILIO_SMS_FROM || "";
+  return await sendTwilioMessage({ to, from, body });
+}
+
+export async function sendWhatsAppMessage(to, body, fromOverride = "") {
+  const token = process.env.WHATSAPP_TOKEN || "";
+  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+  if (token && phoneId) {
+    const url = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
+    const payload = {
+      messaging_product: "whatsapp",
+      to: String(to || "").replace(/^whatsapp:/, ""),
+      type: "text",
+      text: { body: body || "" }
+    };
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) {
+      const msg = await r.text();
+      throw new Error(msg || "whatsapp_send_failed");
+    }
+    return await r.json();
+  }
+
+  const from = fromOverride || process.env.TWILIO_WHATSAPP_FROM || "";
+  const normalizedTo = String(to || "");
+  const twilioTo = normalizedTo.startsWith("whatsapp:") ? normalizedTo : `whatsapp:${normalizedTo}`;
+  return await sendTwilioMessage({ to: twilioTo, from, body });
+}

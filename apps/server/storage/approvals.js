@@ -10,13 +10,14 @@ function makeToken() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-export function createApprovalRecord({ tool, request, preview }) {
+export function createApprovalRecord({ tool, request, preview, actionType, summary, payloadRedacted, createdBy, reason } = {}) {
   const db = getDb();
   const id = makeId();
   const createdAt = nowIso();
   db.prepare(
-    `INSERT INTO approvals (id, tool, request_json, preview, status, created_at, resolved_at, token, approved_by, approved_at, executed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO approvals (id, tool, request_json, preview, status, created_at, resolved_at, token, approved_by, approved_at, executed_at,
+      created_by, action_type, summary, payload_redacted_json, decided_at, decided_by, reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     tool,
@@ -28,7 +29,14 @@ export function createApprovalRecord({ tool, request, preview }) {
     null,
     null,
     null,
-    null
+    null,
+    createdBy || null,
+    actionType || null,
+    summary || null,
+    JSON.stringify(payloadRedacted || null),
+    null,
+    null,
+    reason || null
   );
   return { id, status: "pending", createdAt };
 }

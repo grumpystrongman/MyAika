@@ -40,6 +40,18 @@ UI:
 - A recorder popup shows live waveform, elapsed time, and Pause/Resume/Stop.
 - Voice commands are supported if you enable “Listening for voice commands” (say: “hey Aika, start recording”, “pause recording”, “resume recording”, “stop recording”).
 
+## Daily Trading Picks Email
+Configure daily trading picks in `apps/server/.env`:
+- `TRADING_DAILY_EMAIL_ENABLED=1`
+- `TRADING_DAILY_EMAIL_TIME=08:00`
+- `TRADING_DAILY_EMAIL_RECIPIENTS=...`
+- `TRADING_DAILY_STOCKS=...`
+- `TRADING_DAILY_CRYPTOS=...`
+
+Notes:
+- Uses Gmail integration; must have `gmail.send` scope connected.
+- Emails are subject to the Safety approval layer unless you remove `email.send` from approval rules.
+
 Backend endpoints:
 - `POST /api/recordings/start` `{ title?, redactionEnabled?, retentionDays? }`
 - `POST /api/recordings/:id/chunk` (multipart form-data, `chunk` file, `seq` query param)
@@ -86,6 +98,31 @@ The Integrations tab lets you connect external services so Aika can:
 Notes:
 - Integrations are stubs until credentials are provided.
 - Add the credentials in `apps/server/.env` and restart the server.
+
+## Safety & Guardrails
+MyAika includes a Safety & Autonomy Guardrails layer that enforces deny-by-default, least privilege, approvals for high-risk actions, and a tamper-evident audit log.
+
+Key behaviors:
+- Any action not explicitly allowlisted is blocked.
+- High-risk actions (email sending, file delete, system changes, external posts) require approval.
+- Kill switch (“Aika, stand down.”) halts automation immediately until disabled with approval.
+- Audit logs are hash-chained and verifiable.
+
+Policy config:
+- File: `config/policy.json`
+- Safe defaults are enforced; edit via the Safety tab or by hand when the server is stopped.
+
+How to add a new action type:
+1) Add the action type to `allow_actions` in `config/policy.json`.
+2) Add to `requires_approval` if it is risky.
+3) Update any domain allowlist or protected paths if needed.
+
+Approvals:
+- Pending approvals can be reviewed in the Safety tab.
+- Approvals require an authenticated session or `ADMIN_APPROVAL_TOKEN`.
+
+Audit verification:
+- `GET /api/audit/verify` validates the hash chain.
 
 ### Google Docs + Drive
 1) Create an OAuth client in Google Cloud Console and set:

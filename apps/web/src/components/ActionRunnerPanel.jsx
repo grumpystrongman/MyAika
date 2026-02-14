@@ -78,7 +78,16 @@ export default function ActionRunnerPanel({ serverUrl }) {
     setError("");
     setRunning(true);
     try {
-      const approveResp = await fetch(`${serverUrl}/api/approvals/${approval.id}/approve`, { method: "POST" });
+      let adminToken = "";
+      try {
+        adminToken = window.localStorage.getItem("aika_admin_token") || "";
+      } catch {
+        adminToken = "";
+      }
+      const approveResp = await fetch(`${serverUrl}/api/approvals/${approval.id}/approve`, {
+        method: "POST",
+        headers: adminToken ? { "x-admin-token": adminToken } : undefined
+      });
       const approved = await approveResp.json();
       if (!approveResp.ok) throw new Error(approved?.error || "approval_failed");
       const token = approved?.approval?.token;

@@ -43,7 +43,7 @@ import {
   markFirefliesConnected
 } from "./integrations/fireflies.js";
 import { fetchPlexIdentity } from "./integrations/plex.js";
-import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage } from "./integrations/messaging.js";
+import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage, sendWhatsAppMessage, sendSmsMessage } from "./integrations/messaging.js";
 import { startDiscordBot } from "./integrations/discord_bot.js";
 import { handleInboundMessage } from "./integrations/inbound.js";
 import { fetchCurrentWeather } from "./integrations/weather.js";
@@ -92,7 +92,16 @@ import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus } from "
 import { syncFireflies, startFirefliesSyncLoop } from "./src/rag/firefliesIngest.js";
 import { answerRagQuestion } from "./src/rag/query.js";
 import { recordFeedback } from "./src/feedback/feedback.js";
+import { startDailyPicksLoop, runDailyPicksEmail, generateDailyPicks, rescheduleDailyPicksLoop } from "./src/trading/dailyPicks.js";
+import { createAlpacaTradeStream } from "./src/trading/alpacaStream.js";
 import { recordMemoryToRag } from "./src/rag/memoryIngest.js";
+import { indexRecordingToRag } from "./src/rag/recordingsIngest.js";
+import { parseNotifyChannels, sendMeetingNotifications } from "./src/notifications/meetingNotifications.js";
+import { getPolicy, savePolicy, reloadPolicy, getPolicyMeta } from "./src/safety/policyLoader.js";
+import { executeAction } from "./src/safety/executeAction.js";
+import { listAuditEvents, verifyAuditChain } from "./src/safety/auditLog.js";
+import { getKillSwitchState, setKillSwitch, isStopPhrase } from "./src/safety/killSwitch.js";
+import { createSafetyApproval, listSafetyApprovals, approveSafetyApproval, rejectSafetyApproval } from "./src/safety/approvals.js";
 import { planAction } from "./src/actionRunner/planner.js";
 import { getActionRun } from "./src/actionRunner/runner.js";
 import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
@@ -117,6 +126,7 @@ import {
   exportRemindersText,
   startReminderScheduler
 } from "./skills/index.js";
+import { getTradingSettings, updateTradingSettings, getTradingEmailSettings, getTradingTrainingSettings } from "./storage/trading_settings.js";
 
 const app = express();
 app.use(cors());
@@ -126,6 +136,7 @@ app.use(express.json({
     req.rawBody = buf?.toString?.() || "";
   }
 }));
+app.use(express.urlencoded({ extended: false }));
 app.use((req, _res, next) => {
   const session = getSession(req);
   req.aikaUser = session?.user || null;
@@ -143,6 +154,7 @@ try {
   console.warn("RAG init failed:", err?.message || err);
 }
 startFirefliesSyncLoop();
+startDailyPicksLoop();
 
 const rateMap = new Map();
 let voiceFullTestState = {
@@ -320,6 +332,7 @@ function buildIntegrationsState(userId = "") {
     facebook: { connected: false },
     instagram: { connected: false },
     whatsapp: { connected: false },
+    messages: { connected: false },
     telegram: { connected: false },
     slack: { connected: false },
     discord: { connected: false },
@@ -347,6 +360,24 @@ function buildIntegrationsState(userId = "") {
     state.telegram.connected = true;
     state.telegram.connectedAt = telegramStored.connectedAt || new Date().toISOString();
   }
+  const whatsappConnected = Boolean(
+    (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) ||
+    (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM && process.env.TWILIO_WHATSAPP_TO)
+  );
+  if (whatsappConnected) {
+    state.whatsapp.connected = true;
+    state.whatsapp.connectedAt = new Date().toISOString();
+  }
+  const smsConnected = Boolean(
+    process.env.TWILIO_ACCOUNT_SID &&
+    process.env.TWILIO_AUTH_TOKEN &&
+    process.env.TWILIO_SMS_FROM &&
+    process.env.TWILIO_SMS_TO
+  );
+  if (smsConnected) {
+    state.messages.connected = true;
+    state.messages.connectedAt = new Date().toISOString();
+  }
   const firefliesStored = getProvider("fireflies", userId);
   if (firefliesStored?.connected) {
     state.fireflies.connected = true;
@@ -372,7 +403,11 @@ function buildConnections(userId = "") {
     scopes: googleStatus?.scopes || [],
     lastUsedAt: googleStored?.lastUsedAt || null,
     connectedAt: googleStored?.connectedAt || null,
-    configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+    configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    method: "oauth",
+    connectUrl: "/api/integrations/google/connect?preset=core",
+    connectLabel: "Connect Google",
+    setupHint: "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in apps/server/.env"
   });
 
   const slackStored = getProvider("slack", userId);
@@ -384,7 +419,11 @@ function buildConnections(userId = "") {
     scopes: slackStored?.scope ? String(slackStored.scope).split(/\\s|,/).filter(Boolean) : [],
     lastUsedAt: slackStored?.lastUsedAt || null,
     connectedAt: slackStored?.connectedAt || null,
-    configured: Boolean(process.env.SLACK_BOT_TOKEN || (process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET))
+    configured: Boolean(process.env.SLACK_BOT_TOKEN || (process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET)),
+    method: "oauth",
+    connectUrl: "/api/integrations/slack/connect",
+    connectLabel: "Connect Slack",
+    setupHint: "Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET (or SLACK_BOT_TOKEN)"
   });
 
   const discordStored = getProvider("discord", userId);
@@ -396,7 +435,11 @@ function buildConnections(userId = "") {
     scopes: [],
     lastUsedAt: discordStored?.lastUsedAt || null,
     connectedAt: discordStored?.connectedAt || null,
-    configured: Boolean(process.env.DISCORD_BOT_TOKEN || (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET))
+    configured: Boolean(process.env.DISCORD_BOT_TOKEN || (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET)),
+    method: "oauth",
+    connectUrl: "/api/integrations/discord/connect",
+    connectLabel: "Connect Discord",
+    setupHint: "Set DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET (or DISCORD_BOT_TOKEN)"
   });
 
   const telegramStored = getProvider("telegram", userId);
@@ -408,7 +451,136 @@ function buildConnections(userId = "") {
     scopes: [],
     lastUsedAt: telegramStored?.lastUsedAt || null,
     connectedAt: telegramStored?.connectedAt || null,
-    configured: Boolean(process.env.TELEGRAM_BOT_TOKEN)
+    configured: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+    method: "token",
+    connectLabel: "Set Bot Token",
+    setupHint: "Set TELEGRAM_BOT_TOKEN in apps/server/.env"
+  });
+
+  const whatsappConfigured = Boolean(
+    (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) ||
+    (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM && process.env.TWILIO_WHATSAPP_TO)
+  );
+  connections.push({
+    id: "whatsapp",
+    label: "WhatsApp",
+    detail: "Outbound notifications",
+    status: whatsappConfigured ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: whatsappConfigured,
+    method: "api_key",
+    connectLabel: "Set WhatsApp Keys",
+    setupHint: "Set WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID (Cloud API) or TWILIO_WHATSAPP_*"
+  });
+
+  const smsConfigured = Boolean(
+    process.env.TWILIO_ACCOUNT_SID &&
+    process.env.TWILIO_AUTH_TOKEN &&
+    process.env.TWILIO_SMS_FROM &&
+    process.env.TWILIO_SMS_TO
+  );
+  connections.push({
+    id: "messages",
+    label: "Messages (SMS)",
+    detail: "Outbound text notifications",
+    status: smsConfigured ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: smsConfigured,
+    method: "api_key",
+    connectLabel: "Set Twilio Keys",
+    setupHint: "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_SMS_FROM, TWILIO_SMS_TO"
+  });
+
+  const metaStored = getProvider("meta", userId) || {};
+  const metaConfigured = Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
+  connections.push({
+    id: "facebook",
+    label: "Facebook Pages",
+    detail: "Posts, insights, sentiment",
+    status: metaStored?.facebook?.access_token ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: metaStored?.lastUsedAt || null,
+    connectedAt: metaStored?.connectedAt || null,
+    configured: metaConfigured,
+    method: "oauth",
+    connectUrl: "/api/integrations/meta/connect?product=facebook",
+    connectLabel: "Connect Meta",
+    setupHint: "Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET"
+  });
+
+  connections.push({
+    id: "instagram",
+    label: "Instagram",
+    detail: "Posts and metrics",
+    status: metaStored?.instagram?.access_token ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: metaStored?.lastUsedAt || null,
+    connectedAt: metaStored?.connectedAt || null,
+    configured: metaConfigured,
+    method: "oauth",
+    connectUrl: "/api/integrations/meta/connect?product=instagram",
+    connectLabel: "Connect Meta",
+    setupHint: "Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET"
+  });
+
+  connections.push({
+    id: "fireflies",
+    label: "Fireflies.ai",
+    detail: "Meeting transcription and summaries",
+    status: process.env.FIREFLIES_API_KEY ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: Boolean(process.env.FIREFLIES_API_KEY),
+    method: "api_key",
+    connectLabel: "Set API Key",
+    setupHint: "Set FIREFLIES_API_KEY in apps/server/.env"
+  });
+
+  connections.push({
+    id: "plex",
+    label: "Plex",
+    detail: "Server status and library health",
+    status: process.env.PLEX_URL && process.env.PLEX_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: Boolean(process.env.PLEX_URL && process.env.PLEX_TOKEN),
+    method: "api_key",
+    connectLabel: "Set Plex Keys",
+    setupHint: "Set PLEX_URL and PLEX_TOKEN"
+  });
+
+  connections.push({
+    id: "amazon",
+    label: "Amazon",
+    detail: "Product Advertising API",
+    status: process.env.AMAZON_ACCESS_KEY && process.env.AMAZON_SECRET_KEY && process.env.AMAZON_PARTNER_TAG ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: Boolean(process.env.AMAZON_ACCESS_KEY && process.env.AMAZON_SECRET_KEY && process.env.AMAZON_PARTNER_TAG),
+    method: "api_key",
+    connectLabel: "Set API Keys",
+    setupHint: "Set AMAZON_ACCESS_KEY, AMAZON_SECRET_KEY, AMAZON_PARTNER_TAG"
+  });
+
+  connections.push({
+    id: "walmart",
+    label: "Walmart",
+    detail: "Shopping list sync",
+    status: process.env.WALMART_CLIENT_ID && process.env.WALMART_CLIENT_SECRET ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: Boolean(process.env.WALMART_CLIENT_ID && process.env.WALMART_CLIENT_SECRET),
+    method: "api_key",
+    connectLabel: "Set API Keys",
+    setupHint: "Set WALMART_CLIENT_ID and WALMART_CLIENT_SECRET"
   });
 
   return connections;
@@ -473,6 +645,39 @@ function extractResponseText(response) {
     }
   }
   return parts.join("\n").trim();
+}
+
+function extractJsonArray(text) {
+  if (!text) return null;
+  const cleaned = String(text).replace(/```(?:json)?/gi, "").trim();
+  const first = cleaned.indexOf("[");
+  const last = cleaned.lastIndexOf("]");
+  if (first === -1 || last === -1 || last <= first) return null;
+  try {
+    return JSON.parse(cleaned.slice(first, last + 1));
+  } catch {
+    return null;
+  }
+}
+
+function buildTradingPreferenceBlock(training) {
+  const lines = [];
+  const notes = String(training?.notes || "").trim();
+  if (notes) lines.push(`Directives: ${notes}`);
+  const questions = Array.isArray(training?.questions) ? training.questions : [];
+  const answered = questions
+    .map(q => ({
+      question: String(q?.question || "").trim(),
+      answer: String(q?.answer || "").trim()
+    }))
+    .filter(q => q.question && q.answer);
+  if (answered.length) {
+    lines.push("Guiding Questions:");
+    answered.forEach(item => {
+      lines.push(`- ${item.question} ${item.answer}`);
+    });
+  }
+  return lines.join("\n");
 }
 
 function createOAuthState(provider) {
@@ -717,6 +922,13 @@ function isAdmin(req) {
   );
 }
 
+function isAdminRequest(req) {
+  if (isAdmin(req)) return true;
+  const token = process.env.ADMIN_APPROVAL_TOKEN;
+  if (!token) return false;
+  return req.headers["x-admin-token"] === token;
+}
+
 function canAccessRecording(req, recording) {
   if (!recording) return false;
   if (recording.workspace_id && recording.workspace_id !== getWorkspaceId(req)) return false;
@@ -893,6 +1105,36 @@ async function processRecordingPipeline(recordingId, opts = {}) {
     redactionEnabled: recording.redaction_enabled
   });
 
+  try {
+    await indexRecordingToRag({
+      recording: {
+        ...recording,
+        storage_url: recording.storage_url || (audioPath ? `/api/recordings/${recordingId}/audio` : "")
+      },
+      transcriptText: transcriptResult.text || "",
+      segments: transcriptResult.segments || [],
+      summary
+    });
+  } catch (err) {
+    console.warn("Recording RAG ingest failed:", err?.message || err);
+  }
+
+  try {
+    const notifyChannels = parseNotifyChannels(process.env.RECORDING_NOTIFY_CHANNELS || "");
+    if (notifyChannels.length) {
+      await sendMeetingNotifications({
+        meetingId: `recording:${recordingId}`,
+        title: recording.title || "Aika Recording",
+        occurredAt: recording.started_at || recording.created_at || new Date().toISOString(),
+        summary,
+        sourceUrl: recording.storage_url || (audioPath ? `/api/recordings/${recordingId}/audio` : ""),
+        channels: notifyChannels
+      });
+    }
+  } catch (err) {
+    console.warn("Recording notification failed:", err?.message || err);
+  }
+
   const artifacts = [];
   if (opts.createArtifacts) {
     const content = summary.summaryMarkdown || "";
@@ -989,12 +1231,6 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "userText required" });
     }
     const lowerText = userText.toLowerCase();
-    addMemoryIndexed({
-      role: "user",
-      content: userText,
-      tags: "message"
-    });
-
     const sendAssistantReply = (text, behavior = makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }), extra = {}) => {
       addMemoryIndexed({
         role: "assistant",
@@ -1003,6 +1239,29 @@ app.post("/chat", async (req, res) => {
       });
       return res.json({ text, behavior, ...extra });
     };
+
+    if (isStopPhrase(userText)) {
+      setKillSwitch({ enabled: true, reason: "stop_phrase", activatedBy: getUserId(req) });
+      return sendAssistantReply(
+        "Standing down. Safety lock is active. Use the Safety tab to resume.",
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 })
+      );
+    }
+
+    const killState = getKillSwitchState();
+    if (killState.enabled) {
+      return sendAssistantReply(
+        "Aika is in stand-down mode. You can view status/logs or disable the kill switch from the Safety tab.",
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
+        { killSwitch: true }
+      );
+    }
+
+    addMemoryIndexed({
+      role: "user",
+      content: userText,
+      tags: "message"
+    });
 
     const statedLocation = extractLocationFromText(userText);
     if (statedLocation) {
@@ -2020,6 +2279,38 @@ app.post("/api/recordings/:id/resummarize", async (req, res) => {
       redactionEnabled: recording.redaction_enabled
     });
 
+    try {
+      await indexRecordingToRag({
+        recording: {
+          ...recording,
+          storage_url: recording.storage_url || (recording.storage_path ? `/api/recordings/${recording.id}/audio` : "")
+        },
+        transcriptText: recording.transcript_text || "",
+        segments: recording.diarization_json || [],
+        summary,
+        force: true
+      });
+    } catch (err) {
+      console.warn("Recording RAG reindex failed:", err?.message || err);
+    }
+
+    try {
+      const notifyChannels = parseNotifyChannels(process.env.RECORDING_NOTIFY_CHANNELS || "");
+      if (notifyChannels.length) {
+        await sendMeetingNotifications({
+          meetingId: `recording:${recording.id}`,
+          title: recording.title || "Aika Recording",
+          occurredAt: recording.started_at || recording.created_at || new Date().toISOString(),
+          summary,
+          sourceUrl: recording.storage_url || (recording.storage_path ? `/api/recordings/${recording.id}/audio` : ""),
+          channels: notifyChannels,
+          force: true
+        });
+      }
+    } catch (err) {
+      console.warn("Recording notification failed:", err?.message || err);
+    }
+
     if (summary?.summaryMarkdown) {
       const filePath = writeArtifact(recording.id, "summary.md", summary.summaryMarkdown);
       const prev = Array.isArray(recording.artifacts_json) ? recording.artifacts_json : [];
@@ -2175,7 +2466,7 @@ app.post("/api/recordings/:id/email", async (req, res) => {
     const text = buildMeetingEmailText({ recording, notesUrl, transcriptUrl, audioUrl, googleDocUrl });
     const fromName = String(process.env.EMAIL_FROM_NAME || "Aika Meeting Copilot");
     const allowOutboxFallback = String(process.env.EMAIL_OUTBOX_FALLBACK || "0").toLowerCase() === "1";
-      const googleStatus = getGoogleStatus(recording.created_by || getUserId(req));
+    const googleStatus = getGoogleStatus(recording.created_by || getUserId(req));
     const scopes = new Set(Array.isArray(googleStatus.scopes) ? googleStatus.scopes : []);
     const hasGmailSendScope = scopes.has("https://www.googleapis.com/auth/gmail.send");
     if (!googleStatus.connected || !hasGmailSendScope) {
@@ -2185,48 +2476,57 @@ app.post("/api/recordings/:id/email", async (req, res) => {
         reconnectUrl: "/api/integrations/google/connect?preset=core"
       });
     }
-    try {
-        const sent = await sendGmailMessage({
-          to: recipients,
-          subject,
-          text,
-          fromName,
-          userId: recording.created_by || getUserId(req)
-        });
-      return res.json({
-        ok: true,
-        transport: "gmail",
-        to: recipients,
-        messageId: sent?.id || null,
-        links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
-      });
-    } catch (err) {
-      if (!allowOutboxFallback) {
-        return res.status(502).json({
-          error: "gmail_send_failed",
-          detail: String(err?.message || "gmail_send_failed"),
-          reconnectUrl: "/api/integrations/google/connect?preset=core"
-        });
+    const result = await executeAction({
+      actionType: "email.send",
+      params: { to: recipients, subject },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      summary: `Send meeting notes email for ${recording.id}`,
+      handler: async () => {
+        try {
+          const sent = await sendGmailMessage({
+            to: recipients,
+            subject,
+            text,
+            fromName,
+            userId: recording.created_by || getUserId(req)
+          });
+          return {
+            ok: true,
+            transport: "gmail",
+            to: recipients,
+            messageId: sent?.id || null,
+            links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
+          };
+        } catch (err) {
+          if (!allowOutboxFallback) {
+            throw err;
+          }
+          const outbox = writeOutbox({
+            type: "meeting_email",
+            to: recipients,
+            subject,
+            text,
+            recordingId: recording.id,
+            reason: String(err?.message || "gmail_not_configured")
+          });
+          return {
+            ok: true,
+            transport: "stub",
+            to: recipients,
+            outboxId: outbox.id,
+            warning: "gmail_send_unavailable_saved_to_outbox",
+            links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
+          };
+        }
       }
-      const outbox = writeOutbox({
-        type: "meeting_email",
-        to: recipients,
-        subject,
-        text,
-        recordingId: recording.id,
-        reason: String(err?.message || "gmail_not_configured")
-      });
-      return res.json({
-        ok: true,
-        transport: "stub",
-        to: recipients,
-        outboxId: outbox.id,
-        warning: "gmail_send_unavailable_saved_to_outbox",
-        links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
-      });
+    });
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
     }
+    return res.json(result.data);
   } catch (err) {
-    res.status(500).json({ error: err?.message || "recording_email_failed" });
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "recording_email_failed", reason: err.reason });
   }
 });
 
@@ -2234,10 +2534,29 @@ app.delete("/api/recordings/:id", (req, res) => {
   const recording = getRecording(req.params.id);
   if (!recording) return res.status(404).json({ error: "recording_not_found" });
   if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
-  deleteAgentActionsForRecording(recording.id);
-  deleteMemoryEntitiesForRecording(recording.id);
-  deleteRecording(recording.id);
-  res.json({ ok: true, id: recording.id });
+  executeAction({
+    actionType: "file.delete",
+    params: { recordingId: recording.id, path: recording.storage_path || "" },
+    context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+    resourceRefs: [recording.storage_path || ""],
+    summary: `Delete recording ${recording.id}`,
+    handler: async () => {
+      deleteAgentActionsForRecording(recording.id);
+      deleteMemoryEntitiesForRecording(recording.id);
+      deleteRecording(recording.id);
+      return { ok: true, id: recording.id };
+    }
+  })
+    .then(result => {
+      if (result.status === "approval_required") {
+        return res.status(403).json(result);
+      }
+      return res.json(result.data);
+    })
+    .catch(err => {
+      const status = err.status || 500;
+      res.status(status).json({ error: err.message || "recording_delete_failed", reason: err.reason });
+    });
 });
 
 app.post("/api/recordings/:id/ask", async (req, res) => {
@@ -2377,7 +2696,17 @@ app.get("/api/integrations", (req, res) => {
   const telegramConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
   const facebookConfigured = Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
   const instagramConfigured = Boolean(process.env.INSTAGRAM_APP_ID && process.env.INSTAGRAM_APP_SECRET);
-  const whatsappConfigured = Boolean(process.env.WHATSAPP_APP_ID && process.env.WHATSAPP_APP_SECRET);
+  const whatsappConfigured = Boolean(
+    (process.env.WHATSAPP_APP_ID && process.env.WHATSAPP_APP_SECRET) ||
+    (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) ||
+    (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM && process.env.TWILIO_WHATSAPP_TO)
+  );
+  const messagesConfigured = Boolean(
+    process.env.TWILIO_ACCOUNT_SID &&
+    process.env.TWILIO_AUTH_TOKEN &&
+    process.env.TWILIO_SMS_FROM &&
+    process.env.TWILIO_SMS_TO
+  );
   const integrationsState = buildIntegrationsState(getUserId(req));
   res.json({
     integrations: {
@@ -2393,7 +2722,8 @@ app.get("/api/integrations", (req, res) => {
       telegram: { ...integrationsState.telegram, configured: telegramConfigured },
       facebook: { ...integrationsState.facebook, configured: facebookConfigured },
       instagram: { ...integrationsState.instagram, configured: instagramConfigured },
-      whatsapp: { ...integrationsState.whatsapp, configured: whatsappConfigured }
+      whatsapp: { ...integrationsState.whatsapp, configured: whatsappConfigured },
+      messages: { ...integrationsState.messages, configured: messagesConfigured }
     }
   });
 });
@@ -2429,6 +2759,35 @@ const feedbackSchema = z.object({
   })).optional()
 });
 
+const tradingSettingsSchema = z.object({
+  email: z.object({
+    enabled: z.boolean().optional(),
+    time: z.string().optional(),
+    recipients: z.array(z.string()).optional(),
+    subjectPrefix: z.string().optional(),
+    minPicks: z.number().int().min(1).max(50).optional(),
+    maxPicks: z.number().int().min(1).max(50).optional(),
+    stockCount: z.number().int().min(0).max(50).optional(),
+    cryptoCount: z.number().int().min(0).max(50).optional(),
+    stocks: z.array(z.string()).optional(),
+    cryptos: z.array(z.string()).optional()
+  }).optional(),
+  training: z.object({
+    notes: z.string().optional(),
+    questions: z.array(z.object({
+      id: z.string().optional(),
+      question: z.string().min(1),
+      answer: z.string().optional()
+    })).optional()
+  }).optional()
+});
+
+const tradingRecommendationsSchema = z.object({
+  assetClass: z.enum(["crypto", "stock", "all"]).optional(),
+  topN: z.number().int().min(1).max(20).optional(),
+  symbols: z.array(z.string()).optional()
+});
+
 const actionPlanSchema = z.object({
   instruction: z.string().min(3),
   startUrl: z.string().optional()
@@ -2462,26 +2821,39 @@ const macroRunSchema = z.object({
 app.post("/api/fireflies/sync", async (req, res) => {
   try {
     const parsed = firefliesSyncSchema.parse(req.body || {});
-    const result = await syncFireflies({
-      limit: parsed.limit ?? 0,
-      force: Boolean(parsed.force),
-      sendEmail: parsed.sendEmail
+    const result = await executeAction({
+      actionType: "integrations.fireflies.sync",
+      params: parsed,
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      summary: "Sync Fireflies transcripts",
+      handler: async () => {
+        return await syncFireflies({
+          limit: parsed.limit ?? 0,
+          force: Boolean(parsed.force),
+          sendEmail: parsed.sendEmail
+        });
+      }
     });
-    if (result?.ok === false) {
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
+    }
+    const payload = result.data ?? result;
+    if (payload?.ok === false) {
       const status =
-        result.error === "fireflies_rate_limited"
+        payload.error === "fireflies_rate_limited"
           ? 429
-          : result.error === "sync_in_progress"
+          : payload.error === "sync_in_progress"
             ? 409
             : 400;
-      return res.status(status).json(result);
+      return res.status(status).json(payload);
     }
-    res.json(result);
+    res.json(payload);
   } catch (err) {
     if (err?.issues) {
       return res.status(400).json({ error: "invalid_request", detail: err.issues });
     }
-    res.status(500).json({ error: err?.message || "fireflies_sync_failed" });
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "fireflies_sync_failed", reason: err.reason });
   }
 });
 
@@ -2510,6 +2882,192 @@ app.get("/api/rag/status", (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err?.message || "rag_status_failed" });
   }
+});
+
+app.get("/api/trading/settings", (req, res) => {
+  try {
+    const settings = getTradingSettings(getUserId(req));
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "trading_settings_failed" });
+  }
+});
+
+app.post("/api/trading/settings", (req, res) => {
+  try {
+    const parsed = tradingSettingsSchema.parse(req.body || {});
+    const updated = updateTradingSettings(getUserId(req), parsed);
+    rescheduleDailyPicksLoop();
+    res.json({ ok: true, settings: updated });
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "trading_settings_failed" });
+  }
+});
+
+app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: "missing_openai_api_key" });
+    }
+    const parsed = tradingRecommendationsSchema.parse(req.body || {});
+    const assetClass = parsed.assetClass || "all";
+    const topN = parsed.topN || 12;
+    const emailSettings = getTradingEmailSettings(getUserId(req));
+    const training = getTradingTrainingSettings(getUserId(req));
+
+    const stockList = Array.isArray(parsed.symbols) && parsed.symbols.length
+      ? parsed.symbols
+      : Array.isArray(emailSettings?.stocks) ? emailSettings.stocks : [];
+    const cryptoList = Array.isArray(emailSettings?.cryptos) ? emailSettings.cryptos : [];
+    let watchlist = [];
+    if (assetClass === "stock") watchlist = stockList;
+    else if (assetClass === "crypto") watchlist = cryptoList;
+    else watchlist = [...stockList, ...cryptoList];
+
+    if (!watchlist.length) {
+      return res.status(400).json({ error: "watchlist_empty" });
+    }
+
+    const preferenceBlock = buildTradingPreferenceBlock(training);
+    const systemPrompt = `
+You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
+Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
+If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
+Return ONLY a JSON array like:
+[
+  {"symbol":"BTC-USD","assetClass":"crypto","bias":"BUY","confidence":0.72,"rationale":"..."}
+]
+Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
+`.trim();
+
+    const userPrompt = `
+Asset focus: ${assetClass}
+Requested picks: ${topN}
+Watchlist: ${watchlist.join(", ")}
+${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
+`.trim();
+
+    let response;
+    try {
+      response = await client.responses.create({
+        model: OPENAI_MODEL,
+        max_output_tokens: 700,
+        input: [
+          {
+            role: "system",
+            content: [{ type: "input_text", text: systemPrompt }]
+          },
+          {
+            role: "user",
+            content: [{ type: "input_text", text: userPrompt }]
+          }
+        ]
+      });
+    } catch (err) {
+      return res.status(502).json({ error: "openai_request_failed", detail: err?.message || String(err) });
+    }
+
+    let rawText = extractResponseText(response);
+    if (!rawText.trim()) {
+      rawText = await fallbackChatCompletion({ systemPrompt, userText: userPrompt, maxOutputTokens: 700 });
+    }
+    if (!rawText.trim()) {
+      return res.status(502).json({ error: "empty_model_response" });
+    }
+
+    const parsedJson = extractJsonArray(rawText);
+    const rawList = Array.isArray(parsedJson) ? parsedJson : Array.isArray(parsedJson?.picks) ? parsedJson.picks : null;
+    if (!rawList) {
+      return res.status(502).json({ error: "recommendations_parse_failed" });
+    }
+
+    const picks = rawList
+      .map(item => ({
+        symbol: String(item?.symbol || "").trim(),
+        assetClass: String(item?.assetClass || item?.asset_class || "").trim() || (stockList.includes(item?.symbol) ? "stock" : "crypto"),
+        bias: String(item?.bias || "WATCH").toUpperCase(),
+        confidence: Number(item?.confidence || 0),
+        rationale: String(item?.rationale || item?.abstract || "").trim()
+      }))
+      .filter(item => item.symbol)
+      .slice(0, topN);
+
+    res.json({ picks, source: "llm" });
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "recommendations_failed" });
+  }
+});
+
+app.get("/api/trading/daily-picks/preview", rateLimit, async (_req, res) => {
+  try {
+    const picks = await generateDailyPicks();
+    res.json({ picks });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "daily_picks_failed" });
+  }
+});
+
+app.post("/api/trading/daily-picks/run", rateLimit, async (req, res) => {
+  try {
+    const force = Boolean(req.body?.force);
+    const result = await runDailyPicksEmail({ force });
+    if (result?.approval) {
+      return res.status(403).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "daily_picks_send_failed", reason: err.reason });
+  }
+});
+
+app.get("/api/trading/stream", rateLimit, (req, res) => {
+  const symbol = String(req.query.symbol || "").toUpperCase();
+  const interval = String(req.query.interval || "1m").toLowerCase();
+  const feed = String(req.query.feed || process.env.ALPACA_DATA_FEED || "iex");
+  if (!symbol) {
+    return res.status(400).json({ error: "symbol_required" });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const send = (payload) => {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const heartbeat = setInterval(() => {
+    res.write(": heartbeat\n\n");
+  }, 15000);
+
+  let stream = null;
+  try {
+    stream = createAlpacaTradeStream({
+      symbol,
+      feed,
+      onStatus: (status) => send({ type: "status", status }),
+      onTrade: (trade) => send({ type: "trade", symbol, interval, ...trade }),
+      onError: (err) => send({ type: "error", message: err?.message || "alpaca_stream_error" })
+    });
+  } catch (err) {
+    clearInterval(heartbeat);
+    send({ type: "error", message: err?.message || "alpaca_stream_init_failed" });
+    return res.end();
+  }
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    if (stream?.close) stream.close();
+    res.end();
+  });
 });
 
 app.get("/api/rag/meetings", (req, res) => {
@@ -2718,6 +3276,11 @@ app.post("/api/connections/:id/revoke", rateLimit, async (req, res) => {
   try {
     if (id === "google") {
       await disconnectGoogle(getUserId(req));
+    } else if (id === "facebook" || id === "instagram") {
+      const meta = getProvider("meta", getUserId(req)) || {};
+      const next = { ...meta };
+      delete next[id];
+      setProvider("meta", Object.keys(next).length ? next : null, getUserId(req));
     } else {
       setProvider(id, null, getUserId(req));
     }
@@ -2770,7 +3333,17 @@ app.post("/api/integrations/telegram/webhook", rateLimit, async (req, res) => {
         text,
         workspaceId: "default",
         reply: async (replyText) => {
-          await sendTelegramMessage(chatId, replyText);
+          const result = await executeAction({
+            actionType: "messaging.telegramSend",
+            params: { chatId, text: replyText },
+            context: { userId: "system" },
+            outboundTargets: ["https://api.telegram.org"],
+            summary: "Reply to Telegram message",
+            handler: async () => sendTelegramMessage(chatId, replyText)
+          });
+          if (result.status === "approval_required") {
+            return;
+          }
         }
       });
     }
@@ -2802,12 +3375,67 @@ app.post("/api/integrations/slack/events", rateLimit, async (req, res) => {
         text,
         workspaceId: "default",
         reply: async (replyText) => {
-          await sendSlackMessage(channelId, replyText);
+          const result = await executeAction({
+            actionType: "messaging.slackPost",
+            params: { channel: channelId, text: replyText },
+            context: { userId: "system" },
+            outboundTargets: ["https://slack.com"],
+            summary: "Reply to Slack message",
+            handler: async () => sendSlackMessage(channelId, replyText)
+          });
+          if (result.status === "approval_required") {
+            return;
+          }
         }
       });
     }
   }
   res.json({ ok: true });
+});
+
+app.post("/api/integrations/messages/webhook", rateLimit, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const text = payload.Body || payload.body || "";
+    const from = payload.From || payload.from || "";
+    if (!from || !text) {
+      res.type("text/xml").send("<Response></Response>");
+      return;
+    }
+    const channel = String(from).startsWith("whatsapp:") ? "whatsapp" : "sms";
+    await handleInboundMessage({
+      channel,
+      senderId: String(from),
+      senderName: String(from),
+      text: String(text),
+      workspaceId: "default",
+      reply: async (replyText) => {
+        const actionType = channel === "whatsapp" ? "messaging.whatsapp.send" : "messaging.sms.send";
+        const outboundTargets = channel === "whatsapp"
+          ? ["https://graph.facebook.com", "https://api.twilio.com"]
+          : ["https://api.twilio.com"];
+        const result = await executeAction({
+          actionType,
+          params: { to: String(from), text: replyText },
+          context: { userId: "system" },
+          outboundTargets,
+          summary: `Reply to ${channel} message`,
+          handler: async () => {
+            if (channel === "whatsapp") {
+              return await sendWhatsAppMessage(String(from), replyText);
+            }
+            return await sendSmsMessage(String(from), replyText);
+          }
+        });
+        if (result.status === "approval_required") {
+          return;
+        }
+      }
+    });
+  } catch (err) {
+    console.warn("Twilio webhook failed:", err?.message || err);
+  }
+  res.type("text/xml").send("<Response></Response>");
 });
 
 app.get("/api/skills", (_req, res) => {
@@ -3128,14 +3756,28 @@ app.post("/api/approvals", rateLimit, async (req, res) => {
   }
 });
 
-app.get("/api/approvals", rateLimit, (_req, res) => {
-  res.json({ approvals: listApprovals() });
+app.get("/api/approvals", rateLimit, (req, res) => {
+  const status = req.query.status ? String(req.query.status) : "";
+  const approvals = listApprovals().filter(approval => !status || approval.status === status);
+  res.json({ approvals });
 });
 
 app.post("/api/approvals/:id/approve", rateLimit, (req, res) => {
   try {
-    const approved = executor.approve(req.params.id, req.headers["x-user-id"] || req.ip);
-    res.json({ approval: approved });
+    if (!isAdminRequest(req)) {
+      return res.status(403).json({ error: "admin_required" });
+    }
+    const safetyApproved = approveSafetyApproval(req.params.id, req.headers["x-user-id"] || req.ip);
+    let approved = null;
+    try {
+      approved = executor.approve(req.params.id, req.headers["x-user-id"] || req.ip);
+    } catch (err) {
+      if (err?.message !== "approval_not_found") throw err;
+    }
+    if (safetyApproved?.actionType === "kill_switch.disable") {
+      setKillSwitch({ enabled: false, reason: "approved_disable", activatedBy: safetyApproved.decidedBy || "" });
+    }
+    res.json({ approval: approved || safetyApproved });
   } catch (err) {
     const status = err.status || 500;
     res.status(status).json({ error: err.message || "approval_failed" });
@@ -3144,12 +3786,30 @@ app.post("/api/approvals/:id/approve", rateLimit, (req, res) => {
 
 app.post("/api/approvals/:id/deny", rateLimit, (req, res) => {
   try {
+    if (!isAdminRequest(req)) {
+      return res.status(403).json({ error: "admin_required" });
+    }
     const denied = denyApproval(req.params.id, req.headers["x-user-id"] || req.ip);
     if (!denied) return res.status(404).json({ error: "approval_not_found" });
+    rejectSafetyApproval(req.params.id, req.headers["x-user-id"] || req.ip);
     res.json({ approval: denied });
   } catch (err) {
     const status = err.status || 500;
     res.status(status).json({ error: err.message || "approval_deny_failed" });
+  }
+});
+
+app.post("/api/approvals/:id/reject", rateLimit, (req, res) => {
+  try {
+    if (!isAdminRequest(req)) {
+      return res.status(403).json({ error: "admin_required" });
+    }
+    const rejected = rejectSafetyApproval(req.params.id, req.headers["x-user-id"] || req.ip, String(req.body?.reason || ""));
+    if (!rejected) return res.status(404).json({ error: "approval_not_found" });
+    res.json({ approval: rejected });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "approval_reject_failed" });
   }
 });
 
@@ -3165,6 +3825,76 @@ app.post("/api/approvals/:id/execute", rateLimit, async (req, res) => {
     const status = err.status || 500;
     res.status(status).json({ error: err.message || "approval_execute_failed" });
   }
+});
+
+app.get("/api/safety/policy", rateLimit, (_req, res) => {
+  const policy = getPolicy();
+  res.json({ policy, meta: getPolicyMeta() });
+});
+
+app.post("/api/safety/policy", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  try {
+    const nextPolicy = req.body?.policy || req.body || {};
+    const current = getPolicy();
+    const wasPhiReadonly = current?.memory_tiers?.tier4?.allow_write === false;
+    const wantsPhiWrite = nextPolicy?.memory_tiers?.tier4?.allow_write === true;
+    if (wasPhiReadonly && wantsPhiWrite) {
+      const approval = createSafetyApproval({
+        actionType: "memory.tier4.write_enable",
+        summary: "Enable PHI write access (tier4)",
+        payloadRedacted: { memory_tiers: nextPolicy?.memory_tiers?.tier4 }
+      });
+      return res.status(403).json({ error: "approval_required", approval });
+    }
+    const saved = savePolicy(nextPolicy);
+    res.json({ ok: true, policy: saved });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || "policy_save_failed" });
+  }
+});
+
+app.get("/api/safety/kill-switch", rateLimit, (_req, res) => {
+  res.json({ killSwitch: getKillSwitchState() });
+});
+
+app.post("/api/safety/kill-switch", rateLimit, (req, res) => {
+  const enabled = Boolean(req.body?.enabled);
+  if (!enabled) {
+    if (!isAdminRequest(req)) {
+      const approval = createSafetyApproval({
+        actionType: "kill_switch.disable",
+        summary: "Disable kill switch",
+        payloadRedacted: { enabled: false }
+      });
+      return res.status(403).json({ error: "approval_required", approval });
+    }
+  }
+  const state = setKillSwitch({
+    enabled,
+    reason: enabled ? "manual_enable" : "manual_disable",
+    activatedBy: getUserId(req)
+  });
+  res.json({ ok: true, killSwitch: state });
+});
+
+app.get("/api/audit", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  const limit = Number(req.query.limit || 100);
+  const events = listAuditEvents({ limit });
+  res.json({ events });
+});
+
+app.get("/api/audit/verify", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  const limit = Number(req.query.limit || 5000);
+  res.json(verifyAuditChain({ limit }));
 });
 
 app.post("/api/integrations/connect", (req, res) => {
@@ -3713,11 +4443,25 @@ app.post("/api/integrations/slack/post", async (req, res) => {
   try {
     const { channel, text } = req.body || {};
     if (!channel || !text) return res.status(400).json({ error: "channel_and_text_required" });
-    const data = await sendSlackMessage(channel, text);
-    setProvider("slack", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
-    res.json({ ok: true, data });
+    const result = await executeAction({
+      actionType: "messaging.slackPost",
+      params: { channel, text },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      outboundTargets: ["https://slack.com"],
+      summary: `Send Slack message to ${channel}`,
+      handler: async () => {
+        const data = await sendSlackMessage(channel, text);
+        setProvider("slack", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
+        return data;
+      }
+    });
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
+    }
+    res.json({ ok: true, data: result.data });
   } catch (err) {
-    res.status(500).json({ error: err.message || "slack_failed" });
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "slack_failed", reason: err.reason });
   }
 });
 
@@ -3725,11 +4469,25 @@ app.post("/api/integrations/telegram/send", async (req, res) => {
   try {
     const { chatId, text } = req.body || {};
     if (!chatId || !text) return res.status(400).json({ error: "chatId_and_text_required" });
-    const data = await sendTelegramMessage(chatId, text);
-    setProvider("telegram", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
-    res.json({ ok: true, data });
+    const result = await executeAction({
+      actionType: "messaging.telegramSend",
+      params: { chatId, text },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      outboundTargets: ["https://api.telegram.org"],
+      summary: "Send Telegram message",
+      handler: async () => {
+        const data = await sendTelegramMessage(chatId, text);
+        setProvider("telegram", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
+        return data;
+      }
+    });
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
+    }
+    res.json({ ok: true, data: result.data });
   } catch (err) {
-    res.status(500).json({ error: err.message || "telegram_failed" });
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "telegram_failed", reason: err.reason });
   }
 });
 
@@ -3737,11 +4495,73 @@ app.post("/api/integrations/discord/send", async (req, res) => {
   try {
     const { text } = req.body || {};
     if (!text) return res.status(400).json({ error: "text_required" });
-    const data = await sendDiscordMessage(text);
-    setProvider("discord", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
-    res.json({ ok: true, data });
+    const result = await executeAction({
+      actionType: "messaging.discordSend",
+      params: { text },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      outboundTargets: ["https://discord.com"],
+      summary: "Send Discord message",
+      handler: async () => {
+        const data = await sendDiscordMessage(text);
+        setProvider("discord", { connected: true, connectedAt: new Date().toISOString() }, getUserId(req));
+        return data;
+      }
+    });
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
+    }
+    res.json({ ok: true, data: result.data });
   } catch (err) {
-    res.status(500).json({ error: err.message || "discord_failed" });
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "discord_failed", reason: err.reason });
+  }
+});
+
+app.post("/api/integrations/whatsapp/send", async (req, res) => {
+  try {
+    const { to, text } = req.body || {};
+    if (!text) return res.status(400).json({ error: "text_required" });
+    const result = await executeAction({
+      actionType: "messaging.whatsapp.send",
+      params: { to, text },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      outboundTargets: ["https://graph.facebook.com", "https://api.twilio.com"],
+      summary: "Send WhatsApp message",
+      handler: async () => {
+        return await sendWhatsAppMessage(to || process.env.WHATSAPP_TO || process.env.TWILIO_WHATSAPP_TO, text);
+      }
+    });
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
+    }
+    res.json({ ok: true, data: result.data });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "whatsapp_failed", reason: err.reason });
+  }
+});
+
+app.post("/api/integrations/messages/send", async (req, res) => {
+  try {
+    const { to, text } = req.body || {};
+    if (!text) return res.status(400).json({ error: "text_required" });
+    const result = await executeAction({
+      actionType: "messaging.sms.send",
+      params: { to, text },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      outboundTargets: ["https://api.twilio.com"],
+      summary: "Send SMS message",
+      handler: async () => {
+        return await sendSmsMessage(to || process.env.TWILIO_SMS_TO, text);
+      }
+    });
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
+    }
+    res.json({ ok: true, data: result.data });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "messages_failed", reason: err.reason });
   }
 });
 

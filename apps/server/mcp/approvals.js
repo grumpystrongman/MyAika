@@ -13,7 +13,11 @@ export function createApproval(request) {
   const record = createApprovalRecord({
     tool: toolName,
     request: { params, riskLevel, createdBy, correlationId },
-    preview
+    preview,
+    actionType: toolName,
+    summary: preview,
+    payloadRedacted: params,
+    createdBy
   });
   return {
     id: record.id,
