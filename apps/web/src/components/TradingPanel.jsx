@@ -477,7 +477,37 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [lessonQuery, setLessonQuery] = useState("");
   const [lessons, setLessons] = useState([]);
   const [lessonStatus, setLessonStatus] = useState("");
+  const [tradingTab, setTradingTab] = useState("terminal");
+  const [knowledgeTitle, setKnowledgeTitle] = useState("");
+  const [knowledgeText, setKnowledgeText] = useState("");
+  const [knowledgeTags, setKnowledgeTags] = useState("");
+  const [knowledgeStatus, setKnowledgeStatus] = useState("");
+  const [knowledgeItems, setKnowledgeItems] = useState([]);
+  const [knowledgeQuestion, setKnowledgeQuestion] = useState("");
+  const [knowledgeAnswer, setKnowledgeAnswer] = useState("");
+  const [knowledgeCitations, setKnowledgeCitations] = useState([]);
+  const [knowledgeSyncStatus, setKnowledgeSyncStatus] = useState("");
+  const [sourceList, setSourceList] = useState([]);
+  const [sourceStatus, setSourceStatus] = useState("");
+  const [newSourceUrl, setNewSourceUrl] = useState("");
+  const [newSourceTags, setNewSourceTags] = useState("");
+  const [deleteKnowledgeOnRemove, setDeleteKnowledgeOnRemove] = useState(false);
+  const [scenarioWindow, setScenarioWindow] = useState(30);
+  const [scenarioAssetClass, setScenarioAssetClass] = useState("all");
+  const [scenarioResults, setScenarioResults] = useState([]);
+  const [scenarioStatus, setScenarioStatus] = useState("");
+  const [scenarioHistory, setScenarioHistory] = useState([]);
   const wsRef = useRef(null);
+
+  const switchAssetClass = (next) => {
+    if (next === assetClass) return;
+    setAssetClass(next);
+    setSymbolTouched(false);
+    setSymbol(next === "crypto" ? DEFAULTS.crypto : DEFAULTS.stock);
+    setCandles([]);
+    setDataSource("loading");
+    setError("");
+  };
 
   const applyTickToCandles = (price, size, timeMs, intervalMs) => {
     if (!Number.isFinite(price)) return;
@@ -575,6 +605,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   useEffect(() => {
     loadRecommendations();
+  }, [serverUrl]);
+
+  useEffect(() => {
+    loadKnowledgeItems();
+    loadSources();
+    loadScenarioHistory();
   }, [serverUrl]);
 
   useEffect(() => {
@@ -834,9 +870,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
-  const sendAssistant = async () => {
-    if (!assistantInput.trim()) return;
-    const content = assistantInput.trim();
+  const sendAssistant = async (overrideText = "") => {
+    const content = String(overrideText || assistantInput || "").trim();
+    if (!content) return;
     setAssistantInput("");
     setAssistantMessages(prev => [...prev, { role: "user", content }]);
     try {
@@ -891,6 +927,20 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.detail || "outcome_failed");
       setLessonStatus(data.lesson_summary ? "Loss lesson saved." : "Outcome saved.");
+      if (serverUrl) {
+        fetch(`${serverUrl}/api/trading/outcome`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            symbol,
+            side: order.side,
+            quantity: order.quantity,
+            pnl: outcome.pnl,
+            pnl_pct: outcome.pnlPct,
+            notes: outcome.notes
+          })
+        }).catch(() => {});
+      }
     } catch (err) {
       setLessonStatus(err?.message || "outcome_failed");
     }
@@ -914,6 +964,227 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
+  const loadKnowledgeItems = async () => {
+    if (!serverUrl) return;
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/list?limit=20`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "knowledge_list_failed");
+      setKnowledgeItems(data?.items || []);
+      setKnowledgeStatus("");
+    } catch (err) {
+      setKnowledgeStatus(err?.message || "knowledge_list_failed");
+    }
+  };
+
+  const loadSources = async () => {
+    if (!serverUrl) return;
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources?includeDisabled=1`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "source_list_failed");
+      setSourceList(data?.items || []);
+      setSourceStatus("");
+    } catch (err) {
+      setSourceStatus(err?.message || "source_list_failed");
+    }
+  };
+
+  const syncKnowledgeSources = async () => {
+    if (!serverUrl) return;
+    setKnowledgeSyncStatus("Crawling sources...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/crawl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "knowledge_sync_failed");
+      const visited = Number(data?.visited || data?.total || 0);
+      setKnowledgeSyncStatus(`Crawled ${visited} pages: ${data.ingested || 0} ingested, ${data.skipped || 0} skipped`);
+      await loadKnowledgeItems();
+    } catch (err) {
+      setKnowledgeSyncStatus(err?.message || "knowledge_sync_failed");
+    }
+  };
+
+  const addSource = async () => {
+    if (!serverUrl) return;
+    const url = newSourceUrl.trim();
+    if (!url) {
+      setSourceStatus("Source URL is required.");
+      return;
+    }
+    setSourceStatus("Adding source and queuing crawl...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          tags: newSourceTags.split(/[;,]/).map(t => t.trim()).filter(Boolean)
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "source_add_failed");
+      setSourceStatus("Source added. Crawl queued in background.");
+      setNewSourceUrl("");
+      setNewSourceTags("");
+      await loadSources();
+    } catch (err) {
+      setSourceStatus(err?.message || "source_add_failed");
+    }
+  };
+
+  const toggleSource = async (source) => {
+    if (!serverUrl || !source?.id) return;
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources/${source.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !source.enabled })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "source_update_failed");
+      await loadSources();
+    } catch (err) {
+      setSourceStatus(err?.message || "source_update_failed");
+    }
+  };
+
+  const crawlSource = async (source) => {
+    if (!serverUrl || !source?.id) return;
+    setSourceStatus(`Queued crawl for ${source.url}`);
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources/${source.id}/crawl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "source_crawl_failed");
+    } catch (err) {
+      setSourceStatus(err?.message || "source_crawl_failed");
+    }
+  };
+
+  const removeSource = async (source) => {
+    if (!serverUrl || !source?.id) return;
+    const confirmed = window.confirm(`Remove this source?\n${source.url}`);
+    if (!confirmed) return;
+    setSourceStatus(deleteKnowledgeOnRemove ? "Removing source and deleting knowledge..." : "Removing source...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources/${source.id}?deleteKnowledge=${deleteKnowledgeOnRemove ? "1" : "0"}`, {
+        method: "DELETE"
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "source_delete_failed");
+      setSourceStatus(deleteKnowledgeOnRemove ? `Removed. Deleted ${data.deletedCount || 0} knowledge items.` : "Removed source.");
+      await loadSources();
+      if (deleteKnowledgeOnRemove) await loadKnowledgeItems();
+    } catch (err) {
+      setSourceStatus(err?.message || "source_delete_failed");
+    }
+  };
+
+  const saveHowTo = async () => {
+    if (!serverUrl) return;
+    const title = knowledgeTitle.trim();
+    const text = knowledgeText.trim();
+    if (!title || !text) {
+      setKnowledgeStatus("Title and text are required.");
+      return;
+    }
+    setKnowledgeStatus("Saving...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          text,
+          tags: knowledgeTags.split(/[;,]/).map(t => t.trim()).filter(Boolean)
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "knowledge_ingest_failed");
+      setKnowledgeStatus(`Saved. ${data.chunks || 0} chunks indexed.`);
+      setKnowledgeTitle("");
+      setKnowledgeText("");
+      setKnowledgeTags("");
+      await loadKnowledgeItems();
+    } catch (err) {
+      setKnowledgeStatus(err?.message || "knowledge_ingest_failed");
+    }
+  };
+
+  const askKnowledge = async () => {
+    if (!serverUrl) return;
+    const question = knowledgeQuestion.trim();
+    if (!question) return;
+    setKnowledgeStatus("Thinking...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "knowledge_query_failed");
+      setKnowledgeAnswer(data.answer || "");
+      setKnowledgeCitations(data.citations || []);
+      setKnowledgeStatus("");
+    } catch (err) {
+      setKnowledgeStatus(err?.message || "knowledge_query_failed");
+    }
+  };
+
+  const runScenario = async () => {
+    if (!serverUrl) return;
+    setScenarioStatus("Running scenarios...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/scenarios/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assetClass: scenarioAssetClass,
+          windowDays: scenarioWindow,
+          useDailyPicks: true
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "scenario_run_failed");
+      setScenarioResults(data.results || []);
+      setScenarioStatus("");
+      const historyResp = await fetch(`${serverUrl}/api/trading/scenarios?limit=6`);
+      const historyData = await historyResp.json();
+      if (historyResp.ok) setScenarioHistory(historyData.items || []);
+    } catch (err) {
+      setScenarioStatus(err?.message || "scenario_run_failed");
+    }
+  };
+
+  const loadScenarioHistory = async () => {
+    if (!serverUrl) return;
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/scenarios?limit=6`);
+      const data = await resp.json();
+      if (resp.ok) setScenarioHistory(data.items || []);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRecommendationAnalyze = (item) => {
+    if (!item?.symbol) return;
+    const targetClass = item.assetClass === "crypto" ? "crypto" : "stock";
+    if (targetClass !== assetClass) {
+      switchAssetClass(targetClass);
+    }
+    setSymbol(item.symbol);
+    setSymbolTouched(true);
+    sendAssistant(`Analyze ${item.symbol} and explain why it is a ${item.bias} candidate.`);
+  };
+
   const containerStyle = {
     minHeight: fullPage ? "100vh" : "auto",
     background: "linear-gradient(135deg, #f7f8fb 0%, #eef3ff 35%, #fef7f1 100%)",
@@ -929,37 +1200,62 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
       `}</style>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>Aika Trading Terminal</div>
           <div style={{ fontSize: 12, color: "#475569" }}>Commercial-grade view with real-time feeds (Coinbase live; Alpaca optional for stocks).</div>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <div style={{ fontSize: 12, color: "#64748b" }}>Asset</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
           <div style={{ display: "flex", gap: 6 }}>
-            <button
-              onClick={() => setAssetClass("crypto")}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: assetClass === "crypto" ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
-                background: assetClass === "crypto" ? "#e0f2fe" : "#fff"
-              }}
-            >
-              Crypto
-            </button>
-            <button
-              onClick={() => setAssetClass("stock")}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: assetClass === "stock" ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
-                background: assetClass === "stock" ? "#e0f2fe" : "#fff"
-              }}
-            >
-              Stocks
-            </button>
+            {[
+              { id: "terminal", label: "Terminal" },
+              { id: "knowledge", label: "How-To" },
+              { id: "scenarios", label: "Scenarios" }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setTradingTab(tab.id)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: tradingTab === tab.id ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
+                  background: tradingTab === tab.id ? "#e0f2fe" : "#fff",
+                  fontWeight: 600
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
+          {tradingTab === "terminal" && (
+            <>
+              <div style={{ fontSize: 12, color: "#64748b" }}>Asset</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => switchAssetClass("crypto")}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 999,
+                    border: assetClass === "crypto" ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
+                    background: assetClass === "crypto" ? "#e0f2fe" : "#fff"
+                  }}
+                >
+                  Crypto
+                </button>
+                <button
+                  onClick={() => switchAssetClass("stock")}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 999,
+                    border: assetClass === "stock" ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
+                    background: assetClass === "stock" ? "#e0f2fe" : "#fff"
+                  }}
+                >
+                  Stocks
+                </button>
+              </div>
+            </>
+          )}
           {!fullPage && (
             <a href="/trading" target="_blank" rel="noreferrer" style={{
               padding: "8px 12px",
@@ -975,6 +1271,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         </div>
       </div>
 
+      {tradingTab === "terminal" && (
       <div style={{
         display: "grid",
         gridTemplateColumns: "1.1fr 2.2fr 1.2fr",
@@ -1248,9 +1545,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 </button>
               </div>
             </div>
-            <div style={{ fontSize: 11, color: "#64748b" }}>
-              Ranked picks with rationale from the daily engine.
-            </div>
+              <div style={{ fontSize: 11, color: "#64748b" }}>
+                Ranked picks with rationale (LLM + trading knowledge).
+              </div>
             {recommendationsLoading && (
               <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Loading picks…</div>
             )}
@@ -1261,24 +1558,36 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Crypto</div>
                 {cryptoRecs.length === 0 && <div style={{ fontSize: 11, color: "#94a3b8" }}>No crypto picks.</div>}
-                {cryptoRecs.slice(0, 6).map((item, idx) => (
-                  <div key={`${item.symbol}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, marginBottom: 6 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ fontWeight: 600 }}>{idx + 1}. {item.symbol}</div>
-                      <span style={{
-                        fontSize: 10,
-                        padding: "2px 6px",
-                        borderRadius: 999,
-                        background: item.bias === "BUY" ? "#dcfce7" : item.bias === "SELL" ? "#fee2e2" : "#e2e8f0",
-                        color: item.bias === "BUY" ? "#15803d" : item.bias === "SELL" ? "#b91c1c" : "#475569"
-                      }}>
-                        {item.bias}
-                      </span>
-                    </div>
-                    {Number.isFinite(item.confidence) && (
-                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
-                        Confidence: {(Number(item.confidence) * 100).toFixed(0)}%
+                  {cryptoRecs.slice(0, 6).map((item, idx) => (
+                    <div
+                      key={`${item.symbol}-${idx}`}
+                      onClick={() => handleRecommendationAnalyze(item)}
+                      style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, marginBottom: 6, cursor: "pointer" }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ fontWeight: 600 }}>{idx + 1}. {item.symbol}</div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <span style={{
+                            fontSize: 10,
+                            padding: "2px 6px",
+                            borderRadius: 999,
+                            background: item.bias === "BUY" ? "#dcfce7" : item.bias === "SELL" ? "#fee2e2" : "#e2e8f0",
+                            color: item.bias === "BUY" ? "#15803d" : item.bias === "SELL" ? "#b91c1c" : "#475569"
+                          }}>
+                            {item.bias}
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRecommendationAnalyze(item); }}
+                            style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 10 }}
+                          >
+                            Analyze
+                          </button>
+                        </div>
                       </div>
+                      {Number.isFinite(item.confidence) && (
+                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                          Confidence: {(Number(item.confidence) * 100).toFixed(0)}%
+                        </div>
                     )}
                     <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{item.abstract}</div>
                   </div>
@@ -1287,19 +1596,31 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Stocks</div>
                 {stockRecs.length === 0 && <div style={{ fontSize: 11, color: "#94a3b8" }}>No stock picks.</div>}
-                {stockRecs.slice(0, 6).map((item, idx) => (
-                  <div key={`${item.symbol}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, marginBottom: 6 }}>
+                  {stockRecs.slice(0, 6).map((item, idx) => (
+                    <div
+                      key={`${item.symbol}-${idx}`}
+                      onClick={() => handleRecommendationAnalyze(item)}
+                      style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, marginBottom: 6, cursor: "pointer" }}
+                    >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div style={{ fontWeight: 600 }}>{idx + 1}. {item.symbol}</div>
-                      <span style={{
-                        fontSize: 10,
-                        padding: "2px 6px",
-                        borderRadius: 999,
-                        background: item.bias === "BUY" ? "#dcfce7" : item.bias === "SELL" ? "#fee2e2" : "#e2e8f0",
-                        color: item.bias === "BUY" ? "#15803d" : item.bias === "SELL" ? "#b91c1c" : "#475569"
-                      }}>
-                        {item.bias}
-                      </span>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          borderRadius: 999,
+                          background: item.bias === "BUY" ? "#dcfce7" : item.bias === "SELL" ? "#fee2e2" : "#e2e8f0",
+                          color: item.bias === "BUY" ? "#15803d" : item.bias === "SELL" ? "#b91c1c" : "#475569"
+                        }}>
+                          {item.bias}
+                        </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRecommendationAnalyze(item); }}
+                            style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 10 }}
+                          >
+                            Analyze
+                          </button>
+                      </div>
                     </div>
                     {Number.isFinite(item.confidence) && (
                       <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
@@ -1354,14 +1675,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 "Is volatility rising?",
                 "Give me support and resistance zones",
                 "What should I watch before entering?"
-              ].map(prompt => (
-                <button
-                  key={prompt}
-                  onClick={() => { setAssistantInput(prompt); }}
-                  style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", textAlign: "left", fontSize: 11 }}
-                >
-                  {prompt}
-                </button>
+                ].map(prompt => (
+                  <button
+                    key={prompt}
+                    onClick={() => { sendAssistant(prompt); }}
+                    style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", textAlign: "left", fontSize: 11 }}
+                  >
+                    {prompt}
+                  </button>
               ))}
             </div>
           </div>
@@ -1395,6 +1716,246 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
         </div>
       </div>
+      )}
+
+      {tradingTab === "knowledge" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 16 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Create How-To</div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <input
+                  value={knowledgeTitle}
+                  onChange={(e) => setKnowledgeTitle(e.target.value)}
+                  placeholder="How-To title (e.g., Risk management checklist)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <input
+                  value={knowledgeTags}
+                  onChange={(e) => setKnowledgeTags(e.target.value)}
+                  placeholder="Tags (comma-separated)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <textarea
+                  value={knowledgeText}
+                  onChange={(e) => setKnowledgeText(e.target.value)}
+                  rows={6}
+                  placeholder="Write the trading how-to or playbook here..."
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <button onClick={saveHowTo} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                  Save to Knowledge RAG
+                </button>
+                {knowledgeStatus && <div style={{ fontSize: 12, color: "#475569" }}>{knowledgeStatus}</div>}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Online Sources</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Sources are crawled in the background and refreshed on schedule.
+              </div>
+              <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+                <input
+                  value={newSourceUrl}
+                  onChange={(e) => setNewSourceUrl(e.target.value)}
+                  placeholder="https://example.com/guide"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <input
+                  value={newSourceTags}
+                  onChange={(e) => setNewSourceTags(e.target.value)}
+                  placeholder="Tags (comma-separated)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={addSource} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                    Add + Crawl
+                  </button>
+                  <button onClick={syncKnowledgeSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontWeight: 600 }}>
+                    Crawl All
+                  </button>
+                  <button onClick={loadSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff" }}>
+                    Refresh List
+                  </button>
+                </div>
+              </div>
+              {sourceStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{sourceStatus}</div>}
+              {knowledgeSyncStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{knowledgeSyncStatus}</div>}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={deleteKnowledgeOnRemove}
+                  onChange={(e) => setDeleteKnowledgeOnRemove(e.target.checked)}
+                />
+                <span style={{ fontSize: 11, color: "#64748b" }}>
+                  Delete existing knowledge when removing a source
+                </span>
+              </div>
+              <div style={{ display: "grid", gap: 8, maxHeight: 220, overflow: "auto" }}>
+                {sourceList.length === 0 && (
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>No sources added yet.</div>
+                )}
+                {sourceList.map(source => (
+                  <div key={source.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{source.url}</div>
+                    {source.tags?.length > 0 && (
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Tags: {source.tags.join(", ")}</div>
+                    )}
+                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                      Status: {source.last_status || "idle"} {source.last_crawled_at ? `| ${source.last_crawled_at}` : ""}
+                    </div>
+                    {source.last_error && (
+                      <div style={{ fontSize: 10, color: "#b91c1c", marginTop: 2 }}>{source.last_error}</div>
+                    )}
+                    <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => toggleSource(source)}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                      >
+                        {source.enabled ? "Disable" : "Enable"}
+                      </button>
+                      <button
+                        onClick={() => crawlSource(source)}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 11 }}
+                      >
+                        Crawl
+                      </button>
+                      <button
+                        onClick={() => removeSource(source)}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #fee2e2", background: "#fff", color: "#b91c1c", fontSize: 11 }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Ask Trading Knowledge</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <input
+                  value={knowledgeQuestion}
+                  onChange={(e) => setKnowledgeQuestion(e.target.value)}
+                  placeholder="Ask about strategies, risk, setups..."
+                  style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <button onClick={askKnowledge} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                  Ask
+                </button>
+              </div>
+              {knowledgeAnswer && (
+                <div style={{ fontSize: 12, color: "#334155", marginBottom: 8 }}>
+                  {knowledgeAnswer}
+                </div>
+              )}
+              {knowledgeCitations.length > 0 && (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {knowledgeCitations.map((cite, idx) => (
+                    <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "#64748b", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                      <div style={{ fontWeight: 600 }}>{cite.meeting_title}</div>
+                      <div>{cite.chunk_id}</div>
+                      <div>{cite.snippet}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Knowledge Library</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+                Recent indexed trading notes and sources.
+              </div>
+              <div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto" }}>
+                {knowledgeItems.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No knowledge indexed yet.</div>}
+                {knowledgeItems.map(item => (
+                  <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                    <div style={{ fontWeight: 600 }}>{item.title}</div>
+                    {item.source_url && (
+                      <div style={{ fontSize: 11, color: "#64748b" }}>{item.source_url}</div>
+                    )}
+                    {item.occurred_at && (
+                      <div style={{ fontSize: 10, color: "#94a3b8" }}>{item.occurred_at}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tradingTab === "scenarios" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Scenario Runner</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              <select
+                value={scenarioAssetClass}
+                onChange={(e) => setScenarioAssetClass(e.target.value)}
+                style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+              >
+                <option value="all">All assets</option>
+                <option value="stock">Stocks</option>
+                <option value="crypto">Crypto</option>
+              </select>
+              <select
+                value={scenarioWindow}
+                onChange={(e) => setScenarioWindow(Number(e.target.value))}
+                style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+              >
+                <option value={7}>7 days</option>
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+                <option value={180}>180 days</option>
+              </select>
+              <button onClick={runScenario} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                Run Scenarios
+              </button>
+            </div>
+            {scenarioStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{scenarioStatus}</div>}
+            <div style={{ display: "grid", gap: 6 }}>
+              {scenarioResults.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Run a scenario to see results.</div>}
+              {scenarioResults.map(result => (
+                <div key={`${result.symbol}-${result.windowDays}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontWeight: 600 }}>{result.symbol}</div>
+                    <span style={{ fontSize: 11, color: result.returnPct >= 0 ? "#16a34a" : "#dc2626" }}>
+                      {result.returnPct != null ? `${result.returnPct}%` : "n/a"}
+                    </span>
+                  </div>
+                  {result.error ? (
+                    <div style={{ fontSize: 11, color: "#b91c1c" }}>{result.error}</div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: "#64748b" }}>
+                      Start {formatNumber(result.start)} -> End {formatNumber(result.end)} | {result.points} points
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Scenario History</div>
+            <div style={{ display: "grid", gap: 8, maxHeight: 360, overflow: "auto" }}>
+              {scenarioHistory.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No scenario runs yet.</div>}
+              {scenarioHistory.map(item => (
+                <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                  <div style={{ fontWeight: 600 }}>{item.asset_class} - {item.window_days} days</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>{item.run_at}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>{(item.results || []).length} assets</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -52,6 +52,7 @@ import { buildAmazonAddToCartUrl, runProductResearch } from "./integrations/prod
 import { getProvider, setProvider } from "./integrations/store.js";
 import { searchAmazonItems } from "./integrations/amazon_paapi.js";
 import { buildMetaAuthUrl, exchangeMetaCode, getMetaToken, storeMetaToken } from "./integrations/meta.js";
+import { buildCoinbaseAuthUrl, exchangeCoinbaseCode, normalizeCoinbaseScopes, revokeCoinbaseToken } from "./integrations/coinbase.js";
 import { registry, executor } from "./mcp/index.js";
 import { redactPhi } from "./mcp/policy.js";
 import { listApprovals, denyApproval } from "./mcp/approvals.js";
@@ -97,6 +98,21 @@ import { createAlpacaTradeStream } from "./src/trading/alpacaStream.js";
 import { recordMemoryToRag } from "./src/rag/memoryIngest.js";
 import { indexRecordingToRag } from "./src/rag/recordingsIngest.js";
 import { parseNotifyChannels, sendMeetingNotifications } from "./src/notifications/meetingNotifications.js";
+import {
+  syncTradingSources,
+  crawlTradingSources,
+  ingestTradingHowTo,
+  queryTradingKnowledge,
+  recordTradeAnalysis,
+  startTradingKnowledgeSyncLoop,
+  listTradingKnowledge,
+  listTradingSourcesUi,
+  addTradingSource,
+  updateTradingSourceUi,
+  removeTradingSource,
+  queueTradingSourceCrawl
+} from "./src/trading/knowledgeRag.js";
+import { runTradingScenario, listTradingScenarios } from "./src/trading/scenarios.js";
 import { getPolicy, savePolicy, reloadPolicy, getPolicyMeta } from "./src/safety/policyLoader.js";
 import { executeAction } from "./src/safety/executeAction.js";
 import { listAuditEvents, verifyAuditChain } from "./src/safety/auditLog.js";
@@ -155,6 +171,7 @@ try {
 }
 startFirefliesSyncLoop();
 startDailyPicksLoop();
+startTradingKnowledgeSyncLoop();
 
 const rateMap = new Map();
 let voiceFullTestState = {
@@ -336,7 +353,9 @@ function buildIntegrationsState(userId = "") {
     telegram: { connected: false },
     slack: { connected: false },
     discord: { connected: false },
-    plex: { connected: false }
+    plex: { connected: false },
+    coinbase: { connected: false },
+    robinhood: { connected: false }
   };
   const googleStored = getProvider("google", userId);
   if (googleStored) {
@@ -387,6 +406,16 @@ function buildIntegrationsState(userId = "") {
   if (plexStored?.connected) {
     state.plex.connected = true;
     state.plex.connectedAt = plexStored.connectedAt || new Date().toISOString();
+  }
+  const coinbaseStored = getProvider("coinbase", userId);
+  if (coinbaseStored?.access_token || process.env.COINBASE_ACCESS_TOKEN) {
+    state.coinbase.connected = true;
+    state.coinbase.connectedAt = coinbaseStored?.connectedAt || new Date().toISOString();
+  }
+  const robinhoodStored = getProvider("robinhood", userId);
+  if (robinhoodStored?.access_token || process.env.ROBINHOOD_ACCESS_TOKEN) {
+    state.robinhood.connected = true;
+    state.robinhood.connectedAt = robinhoodStored?.connectedAt || new Date().toISOString();
   }
   return state;
 }
@@ -440,6 +469,38 @@ function buildConnections(userId = "") {
     connectUrl: "/api/integrations/discord/connect",
     connectLabel: "Connect Discord",
     setupHint: "Set DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET (or DISCORD_BOT_TOKEN)"
+  });
+
+  const coinbaseStored = getProvider("coinbase", userId);
+  connections.push({
+    id: "coinbase",
+    label: "Coinbase",
+    detail: "OAuth access for trading data",
+    status: coinbaseStored?.access_token || process.env.COINBASE_ACCESS_TOKEN ? "connected" : "disconnected",
+    scopes: coinbaseStored?.scope ? String(coinbaseStored.scope).split(/\\s|,/).filter(Boolean) : [],
+    lastUsedAt: coinbaseStored?.lastUsedAt || null,
+    connectedAt: coinbaseStored?.connectedAt || null,
+    configured: Boolean(process.env.COINBASE_CLIENT_ID && process.env.COINBASE_CLIENT_SECRET),
+    method: "oauth",
+    connectUrl: "/api/integrations/coinbase/connect",
+    connectLabel: "Connect Coinbase",
+    setupHint: "Set COINBASE_CLIENT_ID and COINBASE_CLIENT_SECRET in apps/server/.env"
+  });
+
+  const robinhoodStored = getProvider("robinhood", userId);
+  connections.push({
+    id: "robinhood",
+    label: "Robinhood (experimental)",
+    detail: "Manual token (read-only stub)",
+    status: robinhoodStored?.access_token || process.env.ROBINHOOD_ACCESS_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: robinhoodStored?.lastUsedAt || null,
+    connectedAt: robinhoodStored?.connectedAt || null,
+    configured: true,
+    method: "token",
+    connectUrl: "/api/integrations/robinhood/connect",
+    connectLabel: "Connect Robinhood",
+    setupHint: "Paste a session token (experimental, read-only)."
   });
 
   const telegramStored = getProvider("telegram", userId);
@@ -678,6 +739,45 @@ function buildTradingPreferenceBlock(training) {
     });
   }
   return lines.join("\n");
+}
+
+async function analyzeTradeOutcome(outcome = {}) {
+  const pnl = Number(outcome.pnl);
+  const pnlPct = Number(outcome.pnl_pct);
+  const fallback = () => {
+    if (Number.isFinite(pnl) && pnl < 0) {
+      return "Loss outcome. Review entry timing, risk sizing, and confirm the thesis still held. Consider tighter stop-loss or smaller position sizing.";
+    }
+    if (Number.isFinite(pnl) && pnl > 0) {
+      return "Positive outcome. Review what worked (trend confirmation, risk sizing, catalyst) and document the pattern to repeat.";
+    }
+    return "Outcome recorded. Add more detail to improve future trade reviews.";
+  };
+
+  if (!process.env.OPENAI_API_KEY) return fallback();
+  try {
+    const system = "You are a trading review assistant. Provide a concise analysis (2-4 sentences) and one improvement suggestion.";
+    const user = [
+      `Symbol: ${outcome.symbol || "unknown"}`,
+      `Side: ${outcome.side || "unknown"}`,
+      `Quantity: ${outcome.quantity || "unknown"}`,
+      `PnL: ${Number.isFinite(pnl) ? pnl : outcome.pnl || "unknown"}`,
+      `PnL%: ${Number.isFinite(pnlPct) ? pnlPct : outcome.pnl_pct || "unknown"}`,
+      outcome.notes ? `Notes: ${outcome.notes}` : ""
+    ].filter(Boolean).join("\n");
+    const response = await client.responses.create({
+      model: OPENAI_MODEL,
+      input: [
+        { role: "system", content: [{ type: "input_text", text: system }] },
+        { role: "user", content: [{ type: "input_text", text: user }] }
+      ],
+      max_output_tokens: 220
+    });
+    const text = response?.output_text || "";
+    return text.trim() || fallback();
+  } catch {
+    return fallback();
+  }
 }
 
 function createOAuthState(provider) {
@@ -2788,6 +2888,52 @@ const tradingRecommendationsSchema = z.object({
   symbols: z.array(z.string()).optional()
 });
 
+const tradingKnowledgeIngestSchema = z.object({
+  title: z.string().min(3),
+  text: z.string().min(20),
+  tags: z.array(z.string()).optional()
+});
+
+const tradingKnowledgeAskSchema = z.object({
+  question: z.string().min(3),
+  topK: z.number().int().min(1).max(12).optional()
+});
+
+const tradingSourceSchema = z.object({
+  url: z.string().url(),
+  tags: z.array(z.string()).optional(),
+  enabled: z.boolean().optional()
+});
+
+const tradingSourceUpdateSchema = z.object({
+  tags: z.array(z.string()).optional(),
+  enabled: z.boolean().optional()
+});
+
+const tradingKnowledgeCrawlSchema = z.object({
+  maxDepth: z.number().int().min(0).max(5).optional(),
+  maxPages: z.number().int().min(1).max(2000).optional(),
+  maxPagesPerDomain: z.number().int().min(1).max(500).optional(),
+  delayMs: z.number().int().min(0).max(5000).optional(),
+  force: z.boolean().optional()
+});
+
+const tradingScenarioSchema = z.object({
+  assetClass: z.enum(["crypto", "stock", "all"]).optional(),
+  windowDays: z.number().int().min(3).max(365).optional(),
+  picks: z.array(z.string()).optional(),
+  useDailyPicks: z.boolean().optional()
+});
+
+const tradingOutcomeSchema = z.object({
+  symbol: z.string().optional(),
+  side: z.string().optional(),
+  quantity: z.string().optional(),
+  pnl: z.union([z.number(), z.string()]).optional(),
+  pnl_pct: z.union([z.number(), z.string()]).optional(),
+  notes: z.string().optional()
+});
+
 const actionPlanSchema = z.object({
   instruction: z.string().min(3),
   startUrl: z.string().optional()
@@ -2907,7 +3053,7 @@ app.post("/api/trading/settings", (req, res) => {
   }
 });
 
-app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
+  app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
   try {
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({ error: "missing_openai_api_key" });
@@ -2931,11 +3077,19 @@ app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
       return res.status(400).json({ error: "watchlist_empty" });
     }
 
-    const preferenceBlock = buildTradingPreferenceBlock(training);
-    const systemPrompt = `
-You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
-Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
-If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
+      const preferenceBlock = buildTradingPreferenceBlock(training);
+      let knowledgeContext = "";
+      try {
+        const knowledgeQuery = `Trading knowledge, risk considerations, and recent trade lessons for: ${watchlist.join(", ")}`;
+        const knowledge = await queryTradingKnowledge(knowledgeQuery, { topK: 6 });
+        knowledgeContext = knowledge?.context || "";
+      } catch {
+        knowledgeContext = "";
+      }
+      const systemPrompt = `
+  You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
+  Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
+  If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
 Return ONLY a JSON array like:
 [
   {"symbol":"BTC-USD","assetClass":"crypto","bias":"BUY","confidence":0.72,"rationale":"..."}
@@ -2944,11 +3098,12 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
 `.trim();
 
     const userPrompt = `
-Asset focus: ${assetClass}
-Requested picks: ${topN}
-Watchlist: ${watchlist.join(", ")}
-${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
-`.trim();
+  Asset focus: ${assetClass}
+  Requested picks: ${topN}
+  Watchlist: ${watchlist.join(", ")}
+  ${knowledgeContext ? `Trading knowledge context:\n${knowledgeContext}` : "Trading knowledge context: (none)"}
+  ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
+  `.trim();
 
     let response;
     try {
@@ -2995,16 +3150,237 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
       .filter(item => item.symbol)
       .slice(0, topN);
 
-    res.json({ picks, source: "llm" });
+      res.json({ picks, source: knowledgeContext ? "llm+rag" : "llm" });
   } catch (err) {
     if (err?.issues) {
       return res.status(400).json({ error: "invalid_request", detail: err.issues });
     }
     res.status(500).json({ error: err?.message || "recommendations_failed" });
-  }
-});
+    }
+  });
 
-app.get("/api/trading/daily-picks/preview", rateLimit, async (_req, res) => {
+  app.post("/api/trading/knowledge/ingest", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingKnowledgeIngestSchema.parse(req.body || {});
+      const result = await ingestTradingHowTo({
+        title: parsed.title,
+        text: parsed.text,
+        tags: parsed.tags || []
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "knowledge_ingest_failed" });
+    }
+  });
+
+  app.post("/api/trading/knowledge/sync", rateLimit, async (_req, res) => {
+    try {
+      const urls = String(process.env.TRADING_RAG_SOURCES || "")
+        .split(/[,\n]/)
+        .map(u => u.trim())
+        .filter(Boolean);
+      if (!urls.length) {
+        return res.status(400).json({ error: "trading_sources_empty" });
+      }
+      const result = await syncTradingSources({ urls });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "knowledge_sync_failed" });
+    }
+  });
+
+  app.post("/api/trading/knowledge/crawl", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingKnowledgeCrawlSchema.parse(req.body || {});
+      const envSources = String(process.env.TRADING_RAG_SOURCES || "").trim();
+      const storedSources = listTradingSourcesUi({ limit: 500, includeDisabled: false });
+      if (!envSources && storedSources.length === 0) {
+        return res.status(400).json({ error: "trading_sources_empty" });
+      }
+      const result = await crawlTradingSources({
+        entries: storedSources.length
+          ? storedSources.map(item => ({
+            id: item.id,
+            url: item.url,
+            tags: item.tags || [],
+            sourceGroup: item.url
+          }))
+          : undefined,
+        maxDepth: parsed.maxDepth,
+        maxPages: parsed.maxPages,
+        maxPagesPerDomain: parsed.maxPagesPerDomain,
+        delayMs: parsed.delayMs,
+        force: parsed.force
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "knowledge_crawl_failed" });
+    }
+  });
+
+  app.get("/api/trading/knowledge/sources", rateLimit, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 100);
+      const search = String(req.query.search || "");
+      const includeDisabled = String(req.query.includeDisabled || "1") !== "0";
+      const items = listTradingSourcesUi({ limit, search, includeDisabled });
+      res.json({ items });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "sources_list_failed" });
+    }
+  });
+
+  app.post("/api/trading/knowledge/sources", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingSourceSchema.parse(req.body || {});
+      const source = addTradingSource(parsed);
+      res.json({ source, queued: true });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "source_add_failed" });
+    }
+  });
+
+  app.patch("/api/trading/knowledge/sources/:id", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingSourceUpdateSchema.parse(req.body || {});
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const source = updateTradingSourceUi(id, parsed);
+      if (!source) return res.status(404).json({ error: "not_found" });
+      res.json({ source });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "source_update_failed" });
+    }
+  });
+
+  app.post("/api/trading/knowledge/sources/:id/crawl", rateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const parsed = tradingKnowledgeCrawlSchema.parse(req.body || {});
+      const result = queueTradingSourceCrawl(id, parsed);
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      const status = err?.message === "not_found" ? 404 : 500;
+      res.status(status).json({ error: err?.message || "source_crawl_failed" });
+    }
+  });
+
+  app.delete("/api/trading/knowledge/sources/:id", rateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const deleteKnowledge = String(req.query.deleteKnowledge || "0") === "1";
+      const result = removeTradingSource(id, { deleteKnowledge });
+      if (!result.ok) return res.status(404).json({ error: "not_found" });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "source_delete_failed" });
+    }
+  });
+
+  app.get("/api/trading/knowledge/list", rateLimit, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 25);
+      const search = String(req.query.search || "");
+      const rows = await listTradingKnowledge({ limit, search });
+      res.json({ items: rows });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "knowledge_list_failed" });
+    }
+  });
+
+  app.post("/api/trading/knowledge/ask", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingKnowledgeAskSchema.parse(req.body || {});
+      const base = await queryTradingKnowledge(parsed.question, { topK: parsed.topK || 6 });
+      let answer = base.answer;
+      if (base.context && process.env.OPENAI_API_KEY) {
+        const system = "Answer using ONLY the provided trading knowledge context. If unsure, say you don't know.";
+        const user = `Question: ${parsed.question}\n\nContext:\n${base.context}`;
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          input: [
+            { role: "system", content: [{ type: "input_text", text: system }] },
+            { role: "user", content: [{ type: "input_text", text: user }] }
+          ],
+          max_output_tokens: 350
+        });
+        answer = response?.output_text || answer;
+      } else if (base.context) {
+        answer = base.context;
+      }
+      res.json({ answer, citations: base.citations || [], debug: base.debug || {} });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "knowledge_query_failed" });
+    }
+  });
+
+  app.post("/api/trading/outcome", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingOutcomeSchema.parse(req.body || {});
+      const analysis = await analyzeTradeOutcome(parsed);
+      const result = await recordTradeAnalysis({
+        outcome: parsed,
+        analysis,
+        source: "manual"
+      });
+      res.json({ ok: true, analysis, rag: result });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "trade_outcome_failed" });
+    }
+  });
+
+  app.post("/api/trading/scenarios/run", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingScenarioSchema.parse(req.body || {});
+      const result = await runTradingScenario({
+        assetClass: parsed.assetClass || "all",
+        windowDays: parsed.windowDays || 30,
+        picks: parsed.picks || [],
+        useDailyPicks: Boolean(parsed.useDailyPicks)
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "scenario_run_failed" });
+    }
+  });
+
+  app.get("/api/trading/scenarios", rateLimit, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 10);
+      const items = listTradingScenarios({ limit });
+      res.json({ items });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "scenario_list_failed" });
+    }
+  });
+
+  app.get("/api/trading/daily-picks/preview", rateLimit, async (_req, res) => {
   try {
     const picks = await generateDailyPicks();
     res.json({ picks });
@@ -4049,6 +4425,122 @@ app.get("/api/integrations/discord/callback", async (req, res) => {
 
 app.post("/api/integrations/discord/disconnect", (_req, res) => {
   setProvider("discord", null, getUserId(_req));
+  res.json({ ok: true });
+});
+
+app.get("/api/integrations/coinbase/connect", (_req, res) => {
+  if (!process.env.COINBASE_CLIENT_ID || !process.env.COINBASE_CLIENT_SECRET) {
+    return res.status(400).send("coinbase_oauth_not_configured");
+  }
+  const redirectUri = process.env.COINBASE_REDIRECT_URI || `${getBaseUrl()}/api/integrations/coinbase/callback`;
+  const scopes = normalizeCoinbaseScopes(
+    process.env.COINBASE_SCOPES || "wallet:accounts:read wallet:transactions:read"
+  );
+  const state = createOAuthState("coinbase");
+  const url = buildCoinbaseAuthUrl({
+    clientId: process.env.COINBASE_CLIENT_ID,
+    redirectUri,
+    scope: scopes,
+    state
+  });
+  res.redirect(url);
+});
+
+app.get("/api/integrations/coinbase/callback", async (req, res) => {
+  try {
+    const { code, state } = req.query || {};
+    validateOAuthState("coinbase", String(state || ""));
+    const redirectUri = process.env.COINBASE_REDIRECT_URI || `${getBaseUrl()}/api/integrations/coinbase/callback`;
+    const token = await exchangeCoinbaseCode({
+      clientId: process.env.COINBASE_CLIENT_ID,
+      clientSecret: process.env.COINBASE_CLIENT_SECRET,
+      code: String(code || ""),
+      redirectUri
+    });
+    setProvider("coinbase", {
+      access_token: token.access_token,
+      refresh_token: token.refresh_token || null,
+      expires_in: token.expires_in || null,
+      scope: token.scope || null,
+      token_type: token.token_type || null,
+      connectedAt: new Date().toISOString()
+    }, getUserId(req));
+    writeAudit({
+      type: "connection_token_stored",
+      at: new Date().toISOString(),
+      provider: "coinbase",
+      userId: getUserId(req)
+    });
+    res.redirect(`${getUiBaseUrl()}/?integration=coinbase&status=success`);
+  } catch (err) {
+    res.redirect(`${getUiBaseUrl()}/?integration=coinbase&status=error`);
+  }
+});
+
+app.post("/api/integrations/coinbase/disconnect", async (req, res) => {
+  const stored = getProvider("coinbase", getUserId(req));
+  if (stored?.access_token && process.env.COINBASE_CLIENT_ID && process.env.COINBASE_CLIENT_SECRET) {
+    await revokeCoinbaseToken({
+      clientId: process.env.COINBASE_CLIENT_ID,
+      clientSecret: process.env.COINBASE_CLIENT_SECRET,
+      token: stored.access_token
+    }).catch(() => {});
+  }
+  setProvider("coinbase", null, getUserId(req));
+  res.json({ ok: true });
+});
+
+app.get("/api/integrations/robinhood/connect", (_req, res) => {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Connect Robinhood</title>
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; padding: 24px; background: #f8fafc; }
+      .card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; max-width: 480px; margin: 0 auto; }
+      label { display: block; font-size: 12px; color: #475569; margin-bottom: 6px; }
+      input { width: 100%; padding: 8px; border: 1px solid #cbd5f5; border-radius: 8px; }
+      button { margin-top: 12px; padding: 8px 12px; border-radius: 8px; border: 1px solid #0ea5e9; background: #e0f2fe; }
+      .note { font-size: 12px; color: #64748b; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h3>Robinhood (Experimental)</h3>
+      <p class="note">Paste a session token or API token. Stored locally and encrypted.</p>
+      <form method="POST" action="/api/integrations/robinhood/connect">
+        <label>Access Token</label>
+        <input name="access_token" type="password" placeholder="token..." required />
+        <button type="submit">Save Connection</button>
+      </form>
+    </div>
+  </body>
+</html>`);
+});
+
+app.post("/api/integrations/robinhood/connect", (req, res) => {
+  const token = String(req.body?.access_token || "").trim();
+  if (!token) {
+    return res.status(400).send("token_required");
+  }
+  setProvider("robinhood", {
+    access_token: token,
+    connectedAt: new Date().toISOString(),
+    mode: "manual"
+  }, getUserId(req));
+  writeAudit({
+    type: "connection_token_stored",
+    at: new Date().toISOString(),
+    provider: "robinhood",
+    userId: getUserId(req)
+  });
+  res.redirect(`${getUiBaseUrl()}/?integration=robinhood&status=success`);
+});
+
+app.post("/api/integrations/robinhood/disconnect", (req, res) => {
+  setProvider("robinhood", null, getUserId(req));
   res.json({ ok: true });
 });
 

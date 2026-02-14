@@ -59,6 +59,7 @@ function ensureSchema() {
       title TEXT,
       occurred_at TEXT,
       participants_json TEXT,
+      source_group TEXT,
       source_url TEXT,
       raw_transcript TEXT,
       created_at TEXT
@@ -114,8 +115,21 @@ function ensureSchema() {
       embedding BLOB
     );
 
+    CREATE TABLE IF NOT EXISTS trading_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      url TEXT UNIQUE,
+      tags_json TEXT,
+      enabled INTEGER,
+      created_at TEXT,
+      updated_at TEXT,
+      last_crawled_at TEXT,
+      last_status TEXT,
+      last_error TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chunks_meeting ON chunks(meeting_id);
     CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(occurred_at);
+    CREATE INDEX IF NOT EXISTS idx_trading_sources_enabled ON trading_sources(enabled);
   `);
 }
 
@@ -133,6 +147,7 @@ function ensureMigrations() {
   ensureColumn("meeting_summaries", "next_steps_json", "TEXT");
   ensureColumn("meeting_summaries", "updated_at", "TEXT");
   ensureColumn("meeting_emails", "error", "TEXT");
+  ensureColumn("meetings", "source_group", "TEXT");
 }
 
 function getMeta(key) {
@@ -143,6 +158,16 @@ function getMeta(key) {
 function setMeta(key, value) {
   db.prepare("INSERT INTO rag_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
     .run(key, value);
+}
+
+export function getRagMeta(key) {
+  initRagStore();
+  return getMeta(key);
+}
+
+export function setRagMeta(key, value) {
+  initRagStore();
+  setMeta(key, value);
 }
 
 function ensureVecTable(dim) {
@@ -196,12 +221,13 @@ export function upsertMeeting(meeting) {
   initRagStore();
   const now = nowIso();
   db.prepare(`
-    INSERT INTO meetings (id, title, occurred_at, participants_json, source_url, raw_transcript, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO meetings (id, title, occurred_at, participants_json, source_group, source_url, raw_transcript, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       occurred_at = excluded.occurred_at,
       participants_json = excluded.participants_json,
+      source_group = excluded.source_group,
       source_url = excluded.source_url,
       raw_transcript = excluded.raw_transcript
   `).run(
@@ -209,6 +235,7 @@ export function upsertMeeting(meeting) {
     meeting.title || "",
     meeting.occurred_at || "",
     meeting.participants_json || "",
+    meeting.source_group || "",
     meeting.source_url || "",
     meeting.raw_transcript || "",
     meeting.created_at || now
@@ -228,6 +255,120 @@ export function deleteMeetingChunks(meetingId) {
     hnswDirty = true;
   }
   return chunkIds.length;
+}
+
+export function deleteMeetingById(meetingId) {
+  initRagStore();
+  deleteMeetingChunks(meetingId);
+  db.prepare("DELETE FROM meeting_summaries WHERE meeting_id = ?").run(meetingId);
+  db.prepare("DELETE FROM meeting_emails WHERE meeting_id = ?").run(meetingId);
+  db.prepare("DELETE FROM meeting_notifications WHERE meeting_id = ?").run(meetingId);
+  db.prepare("DELETE FROM meetings WHERE id = ?").run(meetingId);
+}
+
+export function deleteMeetingsBySourceGroup(sourceGroup) {
+  initRagStore();
+  const ids = db.prepare("SELECT id FROM meetings WHERE source_group = ?").all(sourceGroup).map(r => r.id);
+  ids.forEach(id => deleteMeetingById(id));
+  return ids.length;
+}
+
+function normalizeTradingSourceRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    url: row.url,
+    tags: row.tags_json ? JSON.parse(row.tags_json) : [],
+    enabled: Boolean(row.enabled),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    last_crawled_at: row.last_crawled_at,
+    last_status: row.last_status,
+    last_error: row.last_error
+  };
+}
+
+export function listTradingSources({ limit = 100, offset = 0, search = "", includeDisabled = true } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  if (!includeDisabled) {
+    where.push("enabled = 1");
+  }
+  if (search) {
+    where.push("url LIKE ?");
+    params.push(`%${search}%`);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = db.prepare(`
+    SELECT * FROM trading_sources
+    ${whereSql}
+    ORDER BY created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, Number(limit || 100), Number(offset || 0));
+  return rows.map(normalizeTradingSourceRow).filter(Boolean);
+}
+
+export function getTradingSource(id) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM trading_sources WHERE id = ?").get(id);
+  return normalizeTradingSourceRow(row);
+}
+
+export function getTradingSourceByUrl(url) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM trading_sources WHERE url = ?").get(url);
+  return normalizeTradingSourceRow(row);
+}
+
+export function upsertTradingSource({ url, tags = [], enabled = true }) {
+  initRagStore();
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO trading_sources (url, tags_json, enabled, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(url) DO UPDATE SET
+      tags_json = excluded.tags_json,
+      enabled = excluded.enabled,
+      updated_at = excluded.updated_at
+  `).run(
+    url,
+    JSON.stringify(tags || []),
+    enabled ? 1 : 0,
+    now,
+    now
+  );
+  return getTradingSourceByUrl(url);
+}
+
+export function updateTradingSource(id, { tags, enabled } = {}) {
+  initRagStore();
+  const existing = getTradingSource(id);
+  if (!existing) return null;
+  const nextTags = tags ? JSON.stringify(tags) : JSON.stringify(existing.tags || []);
+  const nextEnabled = enabled == null ? (existing.enabled ? 1 : 0) : (enabled ? 1 : 0);
+  const now = nowIso();
+  db.prepare(`
+    UPDATE trading_sources
+    SET tags_json = ?, enabled = ?, updated_at = ?
+    WHERE id = ?
+  `).run(nextTags, nextEnabled, now, id);
+  return getTradingSource(id);
+}
+
+export function deleteTradingSource(id) {
+  initRagStore();
+  db.prepare("DELETE FROM trading_sources WHERE id = ?").run(id);
+}
+
+export function markTradingSourceCrawl({ id, status = "ok", error = "", crawledAt } = {}) {
+  initRagStore();
+  const now = crawledAt || nowIso();
+  db.prepare(`
+    UPDATE trading_sources
+    SET last_crawled_at = ?, last_status = ?, last_error = ?, updated_at = ?
+    WHERE id = ?
+  `).run(now, status, error || "", now, id);
 }
 
 export function upsertChunks(chunks) {
@@ -503,6 +644,10 @@ export function getChunksByIds(chunkIds = [], filters = {}) {
     where.push("m.title LIKE ?");
     params.push(`%${filters.titleContains}%`);
   }
+  if (filters?.meetingIdPrefix) {
+    where.push("c.meeting_id LIKE ?");
+    params.push(`${filters.meetingIdPrefix}%`);
+  }
   if (filters?.dateFrom) {
     where.push("m.occurred_at >= ?");
     params.push(filters.dateFrom);
@@ -559,10 +704,13 @@ export function listMeetings({ type = "all", limit = 20, offset = 0, search = ""
     where.push("m.id LIKE 'feedback:%'");
   } else if (normalizedType === "recordings" || normalizedType === "recording") {
     where.push("m.id LIKE 'recording:%'");
+  } else if (normalizedType === "trading") {
+    where.push("m.id LIKE 'trading:%'");
   } else if (normalizedType === "fireflies") {
     where.push("m.id NOT LIKE 'memory:%'");
     where.push("m.id NOT LIKE 'feedback:%'");
     where.push("m.id NOT LIKE 'recording:%'");
+    where.push("m.id NOT LIKE 'trading:%'");
   }
 
   if (search) {
@@ -590,13 +738,15 @@ export function getRagCounts() {
   const memoryMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'memory:%'").get()?.count || 0;
   const feedbackMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'feedback:%'").get()?.count || 0;
   const recordingMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'recording:%'").get()?.count || 0;
-  const firefliesMeetings = totalMeetings - memoryMeetings - feedbackMeetings - recordingMeetings;
+  const tradingMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'trading:%'").get()?.count || 0;
+  const firefliesMeetings = totalMeetings - memoryMeetings - feedbackMeetings - recordingMeetings - tradingMeetings;
   return {
     totalMeetings,
     totalChunks,
     firefliesMeetings: Math.max(0, firefliesMeetings),
     recordingMeetings,
     memoryMeetings,
-    feedbackMeetings
+    feedbackMeetings,
+    tradingMeetings
   };
 }
