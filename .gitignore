@@ -36,3 +36,6 @@ secrets/
 logs/
 .tools/
 apps/web/certificates/
+__pycache__/
+*.pyc
+aika-trading-assistant/*.db
