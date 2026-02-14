@@ -13,7 +13,9 @@ const SENSITIVE_PROVIDERS = new Set([
   "meta",
   "facebook",
   "instagram",
-  "whatsapp"
+  "whatsapp",
+  "coinbase",
+  "robinhood"
 ]);
 
 function ensureDir() {

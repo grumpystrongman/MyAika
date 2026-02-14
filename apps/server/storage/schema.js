@@ -262,6 +262,20 @@ const migrations = [
       updated_at TEXT
     );
     `
+  },
+  {
+    id: 7,
+    sql: `
+    CREATE TABLE IF NOT EXISTS trading_scenarios (
+      id TEXT PRIMARY KEY,
+      run_at TEXT,
+      asset_class TEXT,
+      window_days INTEGER,
+      picks_json TEXT,
+      results_json TEXT,
+      notes TEXT
+    );
+    `
   }
 ];
 

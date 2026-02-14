@@ -116,7 +116,7 @@ export default function ConnectionsPanel({ serverUrl }) {
                     <button onClick={() => revokeConnection(conn.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
                       Revoke
                     </button>
-                  ) : conn.method === "oauth" && conn.connectUrl ? (
+                  ) : conn.connectUrl ? (
                     <button
                       onClick={() => connectOauth(conn)}
                       disabled={conn.configured === false}
