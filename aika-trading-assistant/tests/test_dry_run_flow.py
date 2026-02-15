@@ -5,6 +5,7 @@ import uuid
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
 os.environ["APPROVAL_SIGNING_KEY"] = "test-signing-key"
+os.environ["REDIS_URL"] = ""
 
 from aika_trading.db.session import init_db, SessionLocal
 from aika_trading.security.policy import PolicyEngine

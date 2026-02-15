@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { chunkTranscript } from "../rag/chunking.js";
 import { getEmbedding } from "../rag/embeddings.js";
+import { extractPdfText } from "./pdfUtils.js";
 import {
   getMeeting,
   upsertMeeting,
@@ -10,6 +13,7 @@ import {
   searchChunkIds,
   getChunksByIds,
   listMeetings,
+  listMeetingsRaw,
   getRagMeta,
   setRagMeta,
   listTradingSources,
@@ -31,6 +35,12 @@ const DEFAULT_CRAWL_DELAY_MS = Number(process.env.TRADING_RAG_CRAWL_DELAY_MS || 
 const DEFAULT_CRAWL_INTERVAL_MINUTES = Number(process.env.TRADING_RAG_CRAWL_INTERVAL_MINUTES || process.env.TRADING_RAG_SYNC_INTERVAL_MINUTES || 0);
 const CRAWL_ON_STARTUP = String(process.env.TRADING_RAG_CRAWL_ON_STARTUP || process.env.TRADING_RAG_SYNC_ON_STARTUP || "0") === "1";
 const RESPECT_ROBOTS = String(process.env.TRADING_RAG_CRAWL_RESPECT_ROBOTS || "1") !== "0";
+const USE_SITEMAP = String(process.env.TRADING_RAG_CRAWL_USE_SITEMAP || "1") !== "0";
+const SITEMAP_MAX_URLS = Number(process.env.TRADING_RAG_SITEMAP_MAX_URLS || 300);
+const PDF_MAX_BYTES = Number(process.env.TRADING_RAG_PDF_MAX_BYTES || 15000000);
+const OCR_DEFAULT = String(process.env.TRADING_RAG_OCR_DEFAULT || "1") !== "0";
+const OCR_MAX_PAGES = Number(process.env.TRADING_RAG_OCR_MAX_PAGES || 0);
+const OCR_SCALE = Number(process.env.TRADING_RAG_OCR_SCALE || 2.0);
 const TRADING_PREFIX = "trading";
 
 function nowIso() {
@@ -43,6 +53,21 @@ function hashSeed(input) {
 
 function normalizeText(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function isPdfName(name) {
+  const lower = String(name || "").toLowerCase();
+  return lower.endsWith(".pdf");
+}
+
+function extractTagsFromRaw(raw = "") {
+  const text = String(raw || "");
+  const match = text.match(/Tags:\s*([^\n\r]+)/i);
+  if (!match) return [];
+  return match[1]
+    .split(",")
+    .map(tag => tag.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 const crawlQueue = [];
@@ -144,6 +169,7 @@ function extractLinks(html, baseUrl) {
 }
 
 const robotsCache = new Map();
+const sitemapCache = new Map();
 async function allowsCrawl(url) {
   if (!RESPECT_ROBOTS) return true;
   let host = "";
@@ -184,6 +210,75 @@ async function allowsCrawl(url) {
     robotsCache.set(host, true);
     return true;
   }
+}
+
+function extractSitemapUrls(xml) {
+  const urls = [];
+  const regex = /<loc>([^<]+)<\/loc>/gi;
+  let match;
+  while ((match = regex.exec(xml || ""))) {
+    const loc = String(match[1] || "").trim();
+    if (loc) urls.push(loc);
+  }
+  return urls;
+}
+
+async function fetchSitemapUrls(origin, maxUrls = SITEMAP_MAX_URLS) {
+  if (!USE_SITEMAP) return [];
+  if (!origin) return [];
+  if (sitemapCache.has(origin)) return sitemapCache.get(origin);
+  const collected = new Set();
+  const candidates = [
+    `${origin}/sitemap.xml`,
+    `${origin}/sitemap_index.xml`
+  ];
+  const fetchXml = async (url) => {
+    try {
+      const resp = await fetch(url, { headers: { "User-Agent": "AikaTradingRAG/1.0" } });
+      if (!resp.ok) return "";
+      const contentType = String(resp.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("xml") && !contentType.includes("text")) return "";
+      return await resp.text();
+    } catch {
+      return "";
+    }
+  };
+
+  for (const candidate of candidates) {
+    const xml = await fetchXml(candidate);
+    if (!xml) continue;
+    const locs = extractSitemapUrls(xml);
+    const isIndex = xml.includes("<sitemapindex");
+    if (isIndex) {
+      const sitemapUrls = locs.filter(loc => loc.endsWith(".xml")).slice(0, 10);
+      for (const sitemapUrl of sitemapUrls) {
+        const subXml = await fetchXml(sitemapUrl);
+        if (!subXml) continue;
+        extractSitemapUrls(subXml).forEach(loc => {
+          if (collected.size >= maxUrls) return;
+          collected.add(loc);
+        });
+      }
+    } else {
+      locs.forEach(loc => {
+        if (collected.size >= maxUrls) return;
+        collected.add(loc);
+      });
+    }
+    if (collected.size >= maxUrls) break;
+  }
+
+  const filtered = Array.from(collected).filter(loc => {
+    if (isSkippableUrl(loc)) return false;
+    try {
+      const url = new URL(loc);
+      return url.origin === origin;
+    } catch {
+      return false;
+    }
+  });
+  sitemapCache.set(origin, filtered);
+  return filtered;
 }
 
 function enqueueSourceCrawl(source, options = {}) {
@@ -268,7 +363,7 @@ function buildHeader({ title, sourceUrl, tags }) {
   return parts.join("\n");
 }
 
-async function ingestTradingDocument({
+export async function ingestTradingDocument({
   kind,
   title,
   sourceUrl,
@@ -350,6 +445,26 @@ async function fetchUrlText(url) {
   }
 }
 
+async function fetchUrlBuffer(url, { maxBytes = MAX_FETCH_BYTES } = {}) {
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.TRADING_RAG_FETCH_TIMEOUT_MS || 20000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "AikaTradingRAG/1.0" },
+      signal: controller.signal
+    });
+    if (!resp.ok) throw new Error(`fetch_failed_${resp.status}`);
+    const arrayBuffer = await resp.arrayBuffer();
+    if (maxBytes && arrayBuffer.byteLength > maxBytes) {
+      throw new Error("fetch_too_large");
+    }
+    return { buffer: Buffer.from(arrayBuffer), contentType: resp.headers.get("content-type") || "" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function syncTradingSources({ urls = [], entries = [], force = false } = {}) {
   const list = entries?.length ? entries : parseSourceEntries(urls?.length ? urls : process.env.TRADING_RAG_SOURCES);
   const results = {
@@ -413,6 +528,37 @@ export async function crawlTradingSources({
     skipped: 0,
     errors: []
   };
+
+  if (USE_SITEMAP) {
+    const origins = Array.from(new Set(queue.map(item => {
+      try {
+        return new URL(item.url).origin;
+      } catch {
+        return "";
+      }
+    }).filter(Boolean)));
+    for (const origin of origins) {
+      const urls = await fetchSitemapUrls(origin);
+      if (!urls.length) continue;
+      urls.forEach(url => {
+        if (visited.has(url)) return;
+        const seed = queue.find(item => {
+          try {
+            return new URL(item.url).origin === origin;
+          } catch {
+            return false;
+          }
+        });
+        queue.push({
+          url,
+          depth: 0,
+          tags: seed?.tags || [],
+          sourceGroup: seed?.sourceGroup || origin,
+          id: seed?.id
+        });
+      });
+    }
+  }
 
   while (queue.length && results.total < maxPages) {
     const current = queue.shift();
@@ -499,6 +645,101 @@ export async function ingestTradingHowTo({ title, text, tags = [] } = {}) {
   });
 }
 
+export async function ingestTradingUrl({
+  url,
+  title,
+  tags = [],
+  useOcr = OCR_DEFAULT,
+  ocrMaxPages = OCR_MAX_PAGES,
+  ocrScale = OCR_SCALE,
+  force = false
+} = {}) {
+  const sourceUrl = normalizeUrl(url);
+  if (!sourceUrl) {
+    return { ok: false, error: "invalid_url" };
+  }
+  const isPdf = isPdfName(sourceUrl);
+  if (isPdf) {
+    const { buffer } = await fetchUrlBuffer(sourceUrl, { maxBytes: PDF_MAX_BYTES || MAX_FETCH_BYTES });
+    const pdfText = await extractPdfText(buffer, {
+      useOcr,
+      cacheKey: sourceUrl,
+      ocrMaxPages,
+      ocrScale
+    });
+    const text = String(pdfText?.text || "");
+    if (!text.trim()) {
+      return { ok: false, error: "empty_pdf_text" };
+    }
+    const finalTitle = title || sourceUrl.split("/").pop() || "PDF Document";
+    return ingestTradingDocument({
+      kind: "pdf",
+      title: finalTitle,
+      sourceUrl,
+      text,
+      tags: ["pdf", "url", ...tags].filter(Boolean),
+      sourceGroup: sourceUrl,
+      force
+    });
+  }
+
+  const html = await fetchUrlText(sourceUrl);
+  const docTitle = title || extractTitleFromHtml(html) || sourceUrl;
+  const text = stripHtml(html);
+  return ingestTradingDocument({
+    kind: "source",
+    title: docTitle,
+    sourceUrl,
+    text,
+    tags: ["source", ...tags],
+    sourceGroup: sourceUrl,
+    force
+  });
+}
+
+export async function ingestTradingFile({
+  filePath,
+  originalName = "",
+  title,
+  tags = [],
+  useOcr = OCR_DEFAULT,
+  ocrMaxPages = OCR_MAX_PAGES,
+  ocrScale = OCR_SCALE,
+  force = false
+} = {}) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { ok: false, error: "file_not_found" };
+  }
+  const ext = path.extname(originalName || filePath).toLowerCase();
+  const isPdf = ext === ".pdf";
+  let text = "";
+  if (isPdf) {
+    const buffer = fs.readFileSync(filePath);
+    const pdfText = await extractPdfText(buffer, {
+      useOcr,
+      cacheKey: originalName || filePath,
+      ocrMaxPages,
+      ocrScale
+    });
+    text = String(pdfText?.text || "");
+    if (!text.trim()) {
+      return { ok: false, error: "empty_pdf_text" };
+    }
+  } else {
+    text = fs.readFileSync(filePath, "utf8");
+  }
+  const finalTitle = title || originalName || path.basename(filePath);
+  return ingestTradingDocument({
+    kind: "file",
+    title: finalTitle,
+    sourceUrl: originalName ? `file://${originalName}` : "",
+    text,
+    tags: [isPdf ? "pdf" : "file", "upload", ...tags].filter(Boolean),
+    sourceGroup: "local-file",
+    force
+  });
+}
+
 export async function recordTradeAnalysis({ outcome, analysis, source } = {}) {
   const payload = outcome || {};
   const title = payload.symbol ? `Trade Analysis ${payload.symbol}` : "Trade Analysis";
@@ -555,16 +796,116 @@ export async function queryTradingKnowledge(question, { topK = 6 } = {}) {
   };
 }
 
-export async function listTradingKnowledge({ limit = 25, offset = 0, search = "" } = {}) {
+export async function listTradingKnowledge({ limit = 25, offset = 0, search = "", tag = "" } = {}) {
+  const tagValue = String(tag || "").trim().toLowerCase();
+  if (tagValue) {
+    const rawRows = listMeetingsRaw({ type: "trading", limit: Math.max(limit * 4, limit), offset: 0 });
+    const filtered = rawRows.filter(row => {
+      const tags = extractTagsFromRaw(row.raw_transcript || "");
+      if (!tags.includes(tagValue)) return false;
+      if (!search) return true;
+      const needle = String(search).toLowerCase();
+      return String(row.title || "").toLowerCase().includes(needle)
+        || String(row.raw_transcript || "").toLowerCase().includes(needle);
+    });
+    return filtered.slice(0, limit).map(row => ({
+      id: row.id,
+      title: row.title,
+      occurred_at: row.occurred_at,
+      source_url: row.source_url || "",
+      summary: null
+    }));
+  }
   const rows = listMeetings({ type: "trading", limit, offset, search });
-  const filtered = rows.filter(row => !row.source_url || !isSkippableUrl(row.source_url));
-  return filtered.map(row => ({
+  return rows.map(row => ({
     id: row.id,
     title: row.title,
     occurred_at: row.occurred_at,
     source_url: row.source_url || "",
     summary: row.summary_json ? JSON.parse(row.summary_json) : null
   }));
+}
+
+export function getTradingKnowledgeStats({ limit = 500 } = {}) {
+  const rows = listMeetingsRaw({ type: "trading", limit, offset: 0 });
+  const tagCounts = new Map();
+  const sourceMap = new Map();
+  let earliest = null;
+  let latest = null;
+
+  rows.forEach(row => {
+    const occurred = row.occurred_at || row.created_at || "";
+    const ts = occurred ? Date.parse(occurred) : NaN;
+    if (Number.isFinite(ts)) {
+      if (earliest == null || ts < earliest) earliest = ts;
+      if (latest == null || ts > latest) latest = ts;
+    }
+    const tags = extractTagsFromRaw(row.raw_transcript || "");
+    tags.forEach(tag => {
+      tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+    });
+    const sourceKey = row.source_url || row.source_group || row.title || "manual";
+    const existing = sourceMap.get(sourceKey);
+    if (!existing) {
+      sourceMap.set(sourceKey, {
+        key: sourceKey,
+        title: row.title || sourceKey,
+        source_url: row.source_url || "",
+        source_group: row.source_group || "",
+        first_seen: occurred || "",
+        last_seen: occurred || "",
+        count: 1
+      });
+    } else {
+      existing.count += 1;
+      if (occurred && (!existing.first_seen || occurred < existing.first_seen)) {
+        existing.first_seen = occurred;
+      }
+      if (occurred && (!existing.last_seen || occurred > existing.last_seen)) {
+        existing.last_seen = occurred;
+      }
+    }
+  });
+
+  const tagsSorted = Array.from(tagCounts.entries())
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 24);
+
+  const topTagSet = new Set(tagsSorted.map(t => t.tag));
+  const linkMap = new Map();
+  rows.forEach(row => {
+    const tags = extractTagsFromRaw(row.raw_transcript || "").filter(tag => topTagSet.has(tag));
+    for (let i = 0; i < tags.length; i += 1) {
+      for (let j = i + 1; j < tags.length; j += 1) {
+        const key = [tags[i], tags[j]].sort().join("::");
+        linkMap.set(key, (linkMap.get(key) || 0) + 1);
+      }
+    }
+  });
+  const links = Array.from(linkMap.entries()).map(([key, weight]) => {
+    const [source, target] = key.split("::");
+    return { source, target, weight };
+  });
+
+  const sources = Array.from(sourceMap.values()).map(source => {
+    const last = source.last_seen ? Date.parse(source.last_seen) : NaN;
+    const ageDays = Number.isFinite(last) ? Math.round((Date.now() - last) / 86400000) : null;
+    return { ...source, age_days: ageDays };
+  }).sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+
+  return {
+    totalDocuments: rows.length,
+    totalTags: tagCounts.size,
+    earliest: earliest ? new Date(earliest).toISOString() : "",
+    latest: latest ? new Date(latest).toISOString() : "",
+    sources,
+    tags: tagsSorted,
+    graph: {
+      nodes: tagsSorted.map(item => ({ id: item.tag, count: item.count })),
+      links
+    }
+  };
 }
 
 export function listTradingSourcesUi({ limit = 100, offset = 0, search = "", includeDisabled = true } = {}) {

@@ -37,6 +37,9 @@ dev = [
 embeddings = [
   "sentence-transformers>=2.7.0"
 ]
+ccxt = [
+  "ccxt>=4.0.0"
+]
 
 [tool.ruff]
 line-length = 100

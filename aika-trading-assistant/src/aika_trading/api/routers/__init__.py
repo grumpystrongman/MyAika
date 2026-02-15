@@ -1,3 +1,3 @@
-from . import health, oauth, trades, approvals, strategies, knowledge
+from . import health, oauth, trades, approvals, strategies, knowledge, core_router
 
-__all__ = ["health", "oauth", "trades", "approvals", "strategies", "knowledge"]
+__all__ = ["health", "oauth", "trades", "approvals", "strategies", "knowledge", "core_router"]

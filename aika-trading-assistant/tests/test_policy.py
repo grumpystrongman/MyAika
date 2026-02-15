@@ -1,8 +1,14 @@
 import os
 
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
+os.environ["REDIS_URL"] = ""
 
+from aika_trading.db.session import init_db
 from aika_trading.security.policy import PolicyEngine
+
+
+def setup_module():
+    init_db()
 
 
 def test_policy_requires_approval_by_default():

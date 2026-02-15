@@ -25,7 +25,12 @@ class PolicyEngine:
         self._redis = None
         if settings.redis_url:
             try:
-                self._redis = redis.Redis.from_url(settings.redis_url)
+                self._redis = redis.Redis.from_url(
+                    settings.redis_url,
+                    socket_connect_timeout=1,
+                    socket_timeout=1,
+                    retry_on_timeout=False,
+                )
                 self._redis.ping()
             except Exception:
                 self._redis = None

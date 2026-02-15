@@ -108,6 +108,54 @@ Losses automatically create a lesson summary and embed it into Qdrant.
 pytest -q
 ```
 
+## Core quant engine (local)
+Paper run (synthetic data, deterministic):
+```
+python -m aika_trading.core.cli trade run --mode paper --symbols AAPL,BTC-USD --strategy volatility_momentum --timeframe 1h
+```
+
+Backtest (synthetic data):
+```
+python -m aika_trading.core.cli backtest run --symbol AAPL --strategy mean_reversion --timeframe 1h
+```
+
+Core API (FastAPI):
+- `POST /core/run` run a paper cycle
+- `GET /core/dashboard` latest run summary
+- `GET /core/trades` recent fills
+
+Safety: live mode is blocked by default. To enable, set `CORE_MODE=live` and `CORE_CONFIRM_LIVE=1` with `CORE_CONFIRM_TOKEN=I_UNDERSTAND_LIVE_TRADING`.
+Artifacts: run configs and logs are stored in `aika-trading-assistant/data/core/runs`.
+
+### Backtest grid search + walk-forward
+Grid search (pass params as JSON):
+```
+python -m aika_trading.core.cli backtest grid --symbol AAPL --strategy volatility_momentum --grid "{\"lookback\":[20,50,80]}"
+```
+
+Walk-forward:
+```
+python -m aika_trading.core.cli backtest walk-forward --symbol AAPL --strategy mean_reversion --train 120 --test 40 --step 40
+```
+
+Artifacts are saved under `data/core/runs/<run_id>/`.
+
+### Real market data providers
+Set `CORE_DATA_SOURCE=alpaca` or `CORE_DATA_SOURCE=ccxt` to switch from synthetic data.
+- Alpaca uses `ALPACA_API_KEY`, `ALPACA_API_SECRET`, and `ALPACA_DATA_BASE` (default `https://data.alpaca.markets`).
+- CCXT uses `CCXT_EXCHANGE`, `CCXT_API_KEY`, and `CCXT_API_SECRET` (install with `pip install .[ccxt]`).
+
+### Options (beginner-friendly)
+API endpoints:
+- `POST /core/options/chain` with `{ "symbol": "AAPL", "provider": "synthetic" | "polygon" }`
+  - Supports `min_days`, `max_days`, `strike_min`, `strike_max`, `option_type` to filter the chain.
+- `POST /core/options/strategy` with `{ "strategy": "covered_call", "params": { ... } }`
+- `POST /core/options/scan` with filters for IV rank, delta, POP
+- `POST /core/options/backtest` for wheel, covered call, and verticals
+
+If you want real option contracts, set `POLYGON_API_KEY` and choose provider `"polygon"` in the UI.
+For live prices, the Polygon snapshot endpoint is used when available. You can override the path via `POLYGON_SNAPSHOT_PATH`.
+
 ## Security expectations
 - Use strict redirect URIs and rotate keys regularly.
 - Never log secrets or tokens.

@@ -102,16 +102,29 @@ import {
   syncTradingSources,
   crawlTradingSources,
   ingestTradingHowTo,
+  ingestTradingUrl,
+  ingestTradingFile,
   queryTradingKnowledge,
   recordTradeAnalysis,
   startTradingKnowledgeSyncLoop,
   listTradingKnowledge,
+  getTradingKnowledgeStats,
   listTradingSourcesUi,
   addTradingSource,
   updateTradingSourceUi,
   removeTradingSource,
   queueTradingSourceCrawl
 } from "./src/trading/knowledgeRag.js";
+import {
+  crawlTradingRssSources,
+  startTradingRssLoop,
+  listTradingRssSourcesUi,
+  addTradingRssSource,
+  updateTradingRssSourceUi,
+  removeTradingRssSource,
+  seedRssSourcesFromFeedspot,
+  listTradingRssItemsUi
+} from "./src/trading/rssIngest.js";
 import { runTradingScenario, listTradingScenarios } from "./src/trading/scenarios.js";
 import { getPolicy, savePolicy, reloadPolicy, getPolicyMeta } from "./src/safety/policyLoader.js";
 import { executeAction } from "./src/safety/executeAction.js";
@@ -172,6 +185,7 @@ try {
 startFirefliesSyncLoop();
 startDailyPicksLoop();
 startTradingKnowledgeSyncLoop();
+startTradingRssLoop();
 
 const rateMap = new Map();
 let voiceFullTestState = {
@@ -197,6 +211,16 @@ function rateLimit(req, res, next) {
   next();
 }
 
+function parseTagList(input) {
+  if (Array.isArray(input)) {
+    return input.map(item => String(item || "").trim()).filter(Boolean);
+  }
+  if (typeof input === "string") {
+    return input.split(/[;,]/).map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 const serverRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
 const webPublicDir = path.resolve(serverRoot, "..", "web", "public");
 const live2dDir = path.join(webPublicDir, "assets", "aika", "live2d");
@@ -205,6 +229,9 @@ const live2dCoreWasm = path.join(live2dDir, "live2dcubismcore.wasm");
 const uploadDir = path.resolve(serverRoot, "..", "..", "data", "_live2d_uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
+const tradingUploadDir = path.resolve(serverRoot, "..", "..", "data", "_trading_uploads");
+if (!fs.existsSync(tradingUploadDir)) fs.mkdirSync(tradingUploadDir, { recursive: true });
+const tradingUpload = multer({ dest: tradingUploadDir });
 const recordingsDir = getRecordingBaseDir();
 const sttUploadDir = path.resolve(serverRoot, "..", "..", "data", "_stt_uploads");
 if (!fs.existsSync(sttUploadDir)) fs.mkdirSync(sttUploadDir, { recursive: true });
@@ -2894,6 +2921,25 @@ const tradingKnowledgeIngestSchema = z.object({
   tags: z.array(z.string()).optional()
 });
 
+const tradingKnowledgeUrlSchema = z.object({
+  url: z.string().url(),
+  title: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  useOcr: z.boolean().optional(),
+  ocrMaxPages: z.number().int().min(0).max(50).optional(),
+  ocrScale: z.number().min(1).max(6).optional(),
+  force: z.boolean().optional()
+});
+
+const tradingKnowledgeUploadSchema = z.object({
+  title: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  useOcr: z.boolean().optional(),
+  ocrMaxPages: z.number().int().min(0).max(50).optional(),
+  ocrScale: z.number().min(1).max(6).optional(),
+  force: z.boolean().optional()
+});
+
 const tradingKnowledgeAskSchema = z.object({
   question: z.string().min(3),
   topK: z.number().int().min(1).max(12).optional()
@@ -2922,6 +2968,30 @@ const tradingKnowledgeCrawlSchema = z.object({
   maxPagesPerDomain: z.number().int().min(1).max(500).optional(),
   delayMs: z.number().int().min(0).max(5000).optional(),
   force: z.boolean().optional()
+});
+
+const tradingRssSourceSchema = z.object({
+  url: z.string().url(),
+  title: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  enabled: z.boolean().optional(),
+  includeForeign: z.boolean().optional()
+});
+
+const tradingRssSourceUpdateSchema = z.object({
+  title: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  enabled: z.boolean().optional(),
+  includeForeign: z.boolean().optional()
+});
+
+const tradingRssCrawlSchema = z.object({
+  force: z.boolean().optional(),
+  maxItemsPerFeed: z.number().int().min(1).max(200).optional()
+});
+
+const tradingRssSeedSchema = z.object({
+  url: z.string().url().optional()
 });
 
 const tradingScenarioSchema = z.object({
@@ -3182,6 +3252,76 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
     }
   });
 
+  app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingKnowledgeUrlSchema.parse(req.body || {});
+      const result = await ingestTradingUrl({
+        url: parsed.url,
+        title: parsed.title,
+        tags: parsed.tags || [],
+        useOcr: parsed.useOcr,
+        ocrMaxPages: parsed.ocrMaxPages,
+        ocrScale: parsed.ocrScale,
+        force: parsed.force
+      });
+      if (!result?.ok) {
+        return res.status(400).json({ error: result?.error || "knowledge_ingest_failed" });
+      }
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "knowledge_ingest_failed" });
+    }
+  });
+
+  app.post("/api/trading/knowledge/upload", rateLimit, tradingUpload.single("file"), async (req, res) => {
+    try {
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "file_required" });
+      const payload = {
+        title: req.body?.title || "",
+        tags: parseTagList(req.body?.tags),
+        useOcr: req.body?.useOcr === "true" || req.body?.useOcr === true,
+        ocrMaxPages: req.body?.ocrMaxPages ? Number(req.body.ocrMaxPages) : undefined,
+        ocrScale: req.body?.ocrScale ? Number(req.body.ocrScale) : undefined,
+        force: req.body?.force === "true" || req.body?.force === true
+      };
+      const parsed = tradingKnowledgeUploadSchema.parse({
+        title: payload.title || undefined,
+        tags: payload.tags,
+        useOcr: payload.useOcr,
+        ocrMaxPages: Number.isFinite(payload.ocrMaxPages) ? payload.ocrMaxPages : undefined,
+        ocrScale: Number.isFinite(payload.ocrScale) ? payload.ocrScale : undefined,
+        force: payload.force
+      });
+      const result = await ingestTradingFile({
+        filePath: file.path,
+        originalName: file.originalname,
+        title: parsed.title,
+        tags: parsed.tags || [],
+        useOcr: parsed.useOcr,
+        ocrMaxPages: parsed.ocrMaxPages,
+        ocrScale: parsed.ocrScale,
+        force: parsed.force
+      });
+      if (!result?.ok) {
+        return res.status(400).json({ error: result?.error || "knowledge_ingest_failed" });
+      }
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "knowledge_upload_failed" });
+    } finally {
+      if (req.file?.path) {
+        fs.unlink(req.file.path, () => {});
+      }
+    }
+  });
+
   app.post("/api/trading/knowledge/sync", rateLimit, async (_req, res) => {
     try {
       const urls = String(process.env.TRADING_RAG_SOURCES || "")
@@ -3304,10 +3444,141 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
     try {
       const limit = Number(req.query.limit || 25);
       const search = String(req.query.search || "");
-      const rows = await listTradingKnowledge({ limit, search });
+      const tag = String(req.query.tag || "");
+      const rows = await listTradingKnowledge({ limit, search, tag });
       res.json({ items: rows });
     } catch (err) {
       res.status(500).json({ error: err?.message || "knowledge_list_failed" });
+    }
+  });
+
+  app.get("/api/trading/knowledge/stats", rateLimit, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 500);
+      const stats = getTradingKnowledgeStats({ limit });
+      res.json(stats);
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "knowledge_stats_failed" });
+    }
+  });
+
+  app.get("/api/trading/rss/sources", rateLimit, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 100);
+      const search = String(req.query.search || "");
+      const includeDisabled = String(req.query.includeDisabled || "1") !== "0";
+      const items = listTradingRssSourcesUi({ limit, search, includeDisabled });
+      res.json({ items });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "rss_sources_list_failed" });
+    }
+  });
+
+  app.post("/api/trading/rss/sources", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingRssSourceSchema.parse(req.body || {});
+      const source = addTradingRssSource({
+        url: parsed.url,
+        title: parsed.title,
+        tags: parsed.tags || [],
+        enabled: parsed.enabled !== false,
+        includeForeign: parsed.includeForeign || false
+      });
+      res.json({ source });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "rss_source_add_failed" });
+    }
+  });
+
+  app.patch("/api/trading/rss/sources/:id", rateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const parsed = tradingRssSourceUpdateSchema.parse(req.body || {});
+      const source = updateTradingRssSourceUi(id, parsed);
+      if (!source) return res.status(404).json({ error: "not_found" });
+      res.json({ source });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "rss_source_update_failed" });
+    }
+  });
+
+  app.delete("/api/trading/rss/sources/:id", rateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const result = removeTradingRssSource(id);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "rss_source_delete_failed" });
+    }
+  });
+
+  app.post("/api/trading/rss/crawl", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingRssCrawlSchema.parse(req.body || {});
+      const result = await crawlTradingRssSources({
+        force: parsed.force,
+        maxItemsPerFeed: parsed.maxItemsPerFeed
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "rss_crawl_failed" });
+    }
+  });
+
+  app.post("/api/trading/rss/sources/:id/crawl", rateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const parsed = tradingRssCrawlSchema.parse(req.body || {});
+      const source = listTradingRssSourcesUi({ includeDisabled: true }).find(item => item.id === id);
+      if (!source) return res.status(404).json({ error: "not_found" });
+      const result = await crawlTradingRssSources({
+        entries: [source],
+        force: parsed.force,
+        maxItemsPerFeed: parsed.maxItemsPerFeed
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "rss_crawl_failed" });
+    }
+  });
+
+  app.post("/api/trading/rss/seed", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingRssSeedSchema.parse(req.body || {});
+      const seedUrl = parsed.url || "https://rss.feedspot.com/stock_market_news_rss_feeds/";
+      const result = await seedRssSourcesFromFeedspot(seedUrl);
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "rss_seed_failed" });
+    }
+  });
+
+  app.get("/api/trading/rss/items", rateLimit, async (req, res) => {
+    try {
+      const sourceId = req.query.sourceId ? Number(req.query.sourceId) : undefined;
+      const limit = Number(req.query.limit || 50);
+      const items = listTradingRssItemsUi({ sourceId, limit });
+      res.json({ items });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "rss_items_failed" });
     }
   });
 

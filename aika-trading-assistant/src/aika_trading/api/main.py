@@ -6,7 +6,7 @@ import time
 from ..config import settings
 from ..logging import setup_logging
 from ..db.session import init_db
-from .routers import health, oauth, trades, approvals, strategies, knowledge
+from .routers import health, oauth, trades, approvals, strategies, knowledge, core_router
 
 setup_logging()
 init_db()
@@ -44,3 +44,4 @@ app.include_router(trades.router)
 app.include_router(approvals.router)
 app.include_router(strategies.router)
 app.include_router(knowledge.router)
+app.include_router(core_router.router)

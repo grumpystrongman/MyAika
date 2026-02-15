@@ -13,6 +13,12 @@ const INTERVALS = [
   { label: "1d", value: "1d" }
 ];
 
+const CORE_STRATEGIES = [
+  { label: "Volatility Momentum", value: "volatility_momentum" },
+  { label: "Mean Reversion", value: "mean_reversion" },
+  { label: "Breakout + ATR", value: "breakout_atr" }
+];
+
 const GLOSSARY = [
   { term: "Candlestick", def: "A price bar showing open, high, low, close." },
   { term: "Doji", def: "Small real body; indecision candle." },
@@ -487,6 +493,22 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [knowledgeAnswer, setKnowledgeAnswer] = useState("");
   const [knowledgeCitations, setKnowledgeCitations] = useState([]);
   const [knowledgeSyncStatus, setKnowledgeSyncStatus] = useState("");
+  const [knowledgeUrl, setKnowledgeUrl] = useState("");
+  const [knowledgeUrlTitle, setKnowledgeUrlTitle] = useState("");
+  const [knowledgeUrlTags, setKnowledgeUrlTags] = useState("");
+  const [knowledgeUrlOcr, setKnowledgeUrlOcr] = useState(true);
+  const [knowledgeUrlStatus, setKnowledgeUrlStatus] = useState("");
+  const [knowledgeFile, setKnowledgeFile] = useState(null);
+  const [knowledgeFileTitle, setKnowledgeFileTitle] = useState("");
+  const [knowledgeFileTags, setKnowledgeFileTags] = useState("");
+  const [knowledgeFileOcr, setKnowledgeFileOcr] = useState(true);
+  const [knowledgeFileStatus, setKnowledgeFileStatus] = useState("");
+  const [knowledgeStats, setKnowledgeStats] = useState(null);
+  const [knowledgeStatsStatus, setKnowledgeStatsStatus] = useState("");
+  const [knowledgeSelectedTag, setKnowledgeSelectedTag] = useState("");
+  const [rssSources, setRssSources] = useState([]);
+  const [rssStatus, setRssStatus] = useState("");
+  const [rssSeedUrl, setRssSeedUrl] = useState("https://rss.feedspot.com/stock_market_news_rss_feeds/");
   const [qaQuestion, setQaQuestion] = useState("");
   const [qaAnswer, setQaAnswer] = useState("");
   const [qaCitations, setQaCitations] = useState([]);
@@ -503,7 +525,132 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [scenarioResults, setScenarioResults] = useState([]);
   const [scenarioStatus, setScenarioStatus] = useState("");
   const [scenarioHistory, setScenarioHistory] = useState([]);
+  const [coreSymbols, setCoreSymbols] = useState("AAPL");
+  const [coreStrategy, setCoreStrategy] = useState("volatility_momentum");
+  const [coreTimeframe, setCoreTimeframe] = useState("1h");
+  const [coreStatus, setCoreStatus] = useState("");
+  const [coreDashboard, setCoreDashboard] = useState(null);
+  const [coreTrades, setCoreTrades] = useState([]);
+  const [backtestSymbol, setBacktestSymbol] = useState("AAPL");
+  const [backtestStrategy, setBacktestStrategy] = useState("volatility_momentum");
+  const [backtestTimeframe, setBacktestTimeframe] = useState("1h");
+  const [backtestGrid, setBacktestGrid] = useState("{\"lookback\":[20,50,80]}");
+  const [backtestStatus, setBacktestStatus] = useState("");
+  const [backtestResult, setBacktestResult] = useState(null);
+  const [backtestArtifacts, setBacktestArtifacts] = useState(null);
+  const [backtestArtifactsStatus, setBacktestArtifactsStatus] = useState("");
+  const [optionsSymbol, setOptionsSymbol] = useState("AAPL");
+  const [optionsProvider, setOptionsProvider] = useState("synthetic");
+  const [optionsStatus, setOptionsStatus] = useState("");
+  const [optionsChain, setOptionsChain] = useState([]);
+  const [optionsUnderlying, setOptionsUnderlying] = useState(0);
+  const [optionsStrategy, setOptionsStrategy] = useState("covered_call");
+  const [optionsOutcome, setOptionsOutcome] = useState(null);
+  const [optionsFilter, setOptionsFilter] = useState("");
+  const [optionsChainMinDays, setOptionsChainMinDays] = useState("7");
+  const [optionsChainMaxDays, setOptionsChainMaxDays] = useState("60");
+  const [optionsStrikeMin, setOptionsStrikeMin] = useState("");
+  const [optionsStrikeMax, setOptionsStrikeMax] = useState("");
+  const [optionsExpiryFrom, setOptionsExpiryFrom] = useState("");
+  const [optionsExpiryTo, setOptionsExpiryTo] = useState("");
+  const [optionsScanMinDelta, setOptionsScanMinDelta] = useState("0.2");
+  const [optionsScanMaxDelta, setOptionsScanMaxDelta] = useState("0.4");
+  const [optionsScanMinIVRank, setOptionsScanMinIVRank] = useState("0.5");
+  const [optionsScanMinIVRankHist, setOptionsScanMinIVRankHist] = useState("0.5");
+  const [optionsScanMinPOP, setOptionsScanMinPOP] = useState("0.6");
+  const [optionsScanMinDays, setOptionsScanMinDays] = useState("14");
+  const [optionsScanMaxDays, setOptionsScanMaxDays] = useState("60");
+  const [optionsScanResults, setOptionsScanResults] = useState([]);
+  const [optionsBacktestStrategy, setOptionsBacktestStrategy] = useState("wheel");
+  const [optionsBacktestHoldDays, setOptionsBacktestHoldDays] = useState("30");
+  const [optionsBacktestOtmPct, setOptionsBacktestOtmPct] = useState("0.05");
+  const [optionsBacktestSpread, setOptionsBacktestSpread] = useState("0.05");
+  const [optionsBacktestInitialCash, setOptionsBacktestInitialCash] = useState("10000");
+  const [optionsBacktestResult, setOptionsBacktestResult] = useState(null);
+  const [optionsPayoff, setOptionsPayoff] = useState([]);
+  const [optionsPayoffMin, setOptionsPayoffMin] = useState("");
+  const [optionsPayoffMax, setOptionsPayoffMax] = useState("");
+  const [optionsOutlook, setOptionsOutlook] = useState("bullish");
+  const [optionsGoal, setOptionsGoal] = useState("income");
+  const [optionsRisk, setOptionsRisk] = useState("low");
+  const [optionsInputs, setOptionsInputs] = useState({
+    spot: "",
+    strike: "",
+    premium: "",
+    long_strike: "",
+    long_premium: "",
+    short_strike: "",
+    short_premium: "",
+    short_put_strike: "",
+    short_put_premium: "",
+    long_put_strike: "",
+    long_put_premium: "",
+    short_call_strike: "",
+    short_call_premium: "",
+    long_call_strike: "",
+    long_call_premium: ""
+  });
   const wsRef = useRef(null);
+
+  const regimeSummary = useMemo(() => {
+    const labels = coreDashboard?.regime_labels || [];
+    if (!labels.length) return [];
+    const counts = labels.reduce((acc, label) => {
+      acc[label] = (acc[label] || 0) + 1;
+      return acc;
+    }, {});
+    const total = labels.length || 1;
+    return Object.entries(counts)
+      .map(([label, count]) => ({ label, pct: count / total }))
+      .sort((a, b) => b.pct - a.pct);
+  }, [coreDashboard]);
+
+  const ensembleWeights = useMemo(() => {
+    return coreDashboard?.ensemble_weights || {};
+  }, [coreDashboard]);
+
+  const optionsRecommendation = useMemo(() => {
+    const mapping = {
+      bullish: {
+        income: { strategy: "covered_call", note: "If you own shares, sell a call to collect premium." },
+        growth: { strategy: "bull_call_spread", note: "Buy a call spread to cap risk." }
+      },
+      bearish: {
+        income: { strategy: "bear_put_spread", note: "Use a put spread for defined risk." },
+        growth: { strategy: "bear_put_spread", note: "Directional put spread with capped loss." }
+      },
+      neutral: {
+        income: { strategy: "iron_condor", note: "Collect premium if price stays in a range." },
+        growth: { strategy: "iron_condor", note: "Range-bound strategy with defined risk." }
+      }
+    };
+    const rec = mapping[optionsOutlook]?.[optionsGoal] || { strategy: "covered_call", note: "" };
+    return rec;
+  }, [optionsOutlook, optionsGoal]);
+
+  const filteredOptions = useMemo(() => {
+    if (!optionsFilter) return optionsChain;
+    const needle = optionsFilter.toLowerCase();
+    return optionsChain.filter(opt =>
+      String(opt.strike).includes(needle) ||
+      String(opt.expiration).toLowerCase().includes(needle) ||
+      String(opt.option_type).toLowerCase().includes(needle)
+    );
+  }, [optionsChain, optionsFilter]);
+
+  const topicNodes = useMemo(() => {
+    const nodes = knowledgeStats?.graph?.nodes || [];
+    if (!nodes.length) return [];
+    const radius = 120;
+    const center = { x: 160, y: 130 };
+    return nodes.map((node, idx) => {
+      const angle = (Math.PI * 2 * idx) / nodes.length;
+      const x = center.x + radius * Math.cos(angle);
+      const y = center.y + radius * Math.sin(angle);
+      const size = 6 + Math.min(10, node.count || 0);
+      return { ...node, x, y, size };
+    });
+  }, [knowledgeStats]);
 
   const switchAssetClass = (next) => {
     if (next === assetClass) return;
@@ -616,8 +763,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   useEffect(() => {
     loadKnowledgeItems();
     loadSources();
+    loadKnowledgeStats();
+    loadRssSources();
     loadScenarioHistory();
   }, [serverUrl]);
+
+  useEffect(() => {
+    if (tradingTab !== "paper") return;
+    fetchCoreDashboard();
+    fetchCoreTrades();
+  }, [tradingTab, tradeApiUrl]);
 
   useEffect(() => {
     if (!symbolTouched) {
@@ -970,16 +1125,33 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
-  const loadKnowledgeItems = async () => {
+  const loadKnowledgeItems = async (tagOverride) => {
     if (!serverUrl) return;
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/knowledge/list?limit=20`);
+      const tag = typeof tagOverride === "string" ? tagOverride : knowledgeSelectedTag;
+      const query = new URLSearchParams({ limit: "20" });
+      if (tag) query.set("tag", tag);
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/list?${query.toString()}`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "knowledge_list_failed");
       setKnowledgeItems(data?.items || []);
       setKnowledgeStatus("");
     } catch (err) {
       setKnowledgeStatus(err?.message || "knowledge_list_failed");
+    }
+  };
+
+  const loadKnowledgeStats = async () => {
+    if (!serverUrl) return;
+    setKnowledgeStatsStatus("Loading knowledge stats...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/stats?limit=500`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "knowledge_stats_failed");
+      setKnowledgeStats(data);
+      setKnowledgeStatsStatus("");
+    } catch (err) {
+      setKnowledgeStatsStatus(err?.message || "knowledge_stats_failed");
     }
   };
 
@@ -996,6 +1168,106 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
+  const loadRssSources = async () => {
+    if (!serverUrl) return;
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/rss/sources?includeDisabled=1`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rss_sources_failed");
+      setRssSources(data?.items || []);
+      setRssStatus("");
+    } catch (err) {
+      setRssStatus(err?.message || "rss_sources_failed");
+    }
+  };
+
+  const seedRssSources = async () => {
+    if (!serverUrl) return;
+    setRssStatus("Seeding RSS feeds from Feedspot...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/rss/seed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: rssSeedUrl })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rss_seed_failed");
+      setRssStatus(`Seeded ${data.added || 0} feeds. Disabled ${data.disabled || 0} foreign feeds.`);
+      await loadRssSources();
+    } catch (err) {
+      setRssStatus(err?.message || "rss_seed_failed");
+    }
+  };
+
+  const crawlRssSources = async () => {
+    if (!serverUrl) return;
+    setRssStatus("Crawling RSS feeds...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/rss/crawl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rss_crawl_failed");
+      setRssStatus(`Crawled ${data.total || 0} feeds: ${data.ingested || 0} ingested, ${data.skipped || 0} skipped`);
+      await loadRssSources();
+      await loadKnowledgeItems();
+      await loadKnowledgeStats();
+    } catch (err) {
+      setRssStatus(err?.message || "rss_crawl_failed");
+    }
+  };
+
+  const toggleRssSource = async (source) => {
+    if (!serverUrl || !source?.id) return;
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/rss/sources/${source.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !source.enabled })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rss_update_failed");
+      await loadRssSources();
+    } catch (err) {
+      setRssStatus(err?.message || "rss_update_failed");
+    }
+  };
+
+  const crawlRssSource = async (source) => {
+    if (!serverUrl || !source?.id) return;
+    setRssStatus(`Queued crawl for ${source.url}`);
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/rss/sources/${source.id}/crawl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rss_crawl_failed");
+      await loadRssSources();
+    } catch (err) {
+      setRssStatus(err?.message || "rss_crawl_failed");
+    }
+  };
+
+  const removeRssSource = async (source) => {
+    if (!serverUrl || !source?.id) return;
+    const confirmed = window.confirm(`Remove this RSS source?\n${source.url}`);
+    if (!confirmed) return;
+    setRssStatus("Removing RSS source...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/rss/sources/${source.id}`, {
+        method: "DELETE"
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rss_delete_failed");
+      setRssStatus("RSS source removed.");
+      await loadRssSources();
+    } catch (err) {
+      setRssStatus(err?.message || "rss_delete_failed");
+    }
+  };
+
   const syncKnowledgeSources = async () => {
     if (!serverUrl) return;
     setKnowledgeSyncStatus("Crawling sources...");
@@ -1009,6 +1281,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       const visited = Number(data?.visited || data?.total || 0);
       setKnowledgeSyncStatus(`Crawled ${visited} pages: ${data.ingested || 0} ingested, ${data.skipped || 0} skipped`);
       await loadKnowledgeItems();
+      await loadKnowledgeStats();
     } catch (err) {
       setKnowledgeSyncStatus(err?.message || "knowledge_sync_failed");
     }
@@ -1087,6 +1360,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       setSourceStatus(deleteKnowledgeOnRemove ? `Removed. Deleted ${data.deletedCount || 0} knowledge items.` : "Removed source.");
       await loadSources();
       if (deleteKnowledgeOnRemove) await loadKnowledgeItems();
+      if (deleteKnowledgeOnRemove) await loadKnowledgeStats();
     } catch (err) {
       setSourceStatus(err?.message || "source_delete_failed");
     }
@@ -1118,6 +1392,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       setKnowledgeText("");
       setKnowledgeTags("");
       await loadKnowledgeItems();
+      await loadKnowledgeStats();
     } catch (err) {
       setKnowledgeStatus(err?.message || "knowledge_ingest_failed");
     }
@@ -1141,6 +1416,68 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       setKnowledgeStatus("");
     } catch (err) {
       setKnowledgeStatus(err?.message || "knowledge_query_failed");
+    }
+  };
+
+  const ingestKnowledgeUrl = async () => {
+    if (!serverUrl) return;
+    const url = knowledgeUrl.trim();
+    if (!url) {
+      setKnowledgeUrlStatus("URL is required.");
+      return;
+    }
+    setKnowledgeUrlStatus("Fetching and indexing...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/ingest-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          title: knowledgeUrlTitle.trim() || undefined,
+          tags: knowledgeUrlTags.split(/[;,]/).map(t => t.trim()).filter(Boolean),
+          useOcr: knowledgeUrlOcr
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "knowledge_url_failed");
+      setKnowledgeUrlStatus(`Ingested. ${data.chunks || 0} chunks indexed.`);
+      setKnowledgeUrl("");
+      setKnowledgeUrlTitle("");
+      setKnowledgeUrlTags("");
+      await loadKnowledgeItems();
+      await loadKnowledgeStats();
+    } catch (err) {
+      setKnowledgeUrlStatus(err?.message || "knowledge_url_failed");
+    }
+  };
+
+  const uploadKnowledgeFile = async () => {
+    if (!serverUrl) return;
+    if (!knowledgeFile) {
+      setKnowledgeFileStatus("File is required.");
+      return;
+    }
+    setKnowledgeFileStatus("Uploading and indexing...");
+    try {
+      const form = new FormData();
+      form.append("file", knowledgeFile);
+      if (knowledgeFileTitle.trim()) form.append("title", knowledgeFileTitle.trim());
+      if (knowledgeFileTags.trim()) form.append("tags", knowledgeFileTags.trim());
+      form.append("useOcr", knowledgeFileOcr ? "true" : "false");
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/upload`, {
+        method: "POST",
+        body: form
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "knowledge_upload_failed");
+      setKnowledgeFileStatus(`Ingested. ${data.chunks || 0} chunks indexed.`);
+      setKnowledgeFile(null);
+      setKnowledgeFileTitle("");
+      setKnowledgeFileTags("");
+      await loadKnowledgeItems();
+      await loadKnowledgeStats();
+    } catch (err) {
+      setKnowledgeFileStatus(err?.message || "knowledge_upload_failed");
     }
   };
 
@@ -1205,6 +1542,285 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
+  const fetchCoreDashboard = async () => {
+    if (!tradeApiUrl) return;
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/dashboard`);
+      const data = await resp.json();
+      if (resp.ok) setCoreDashboard(data.latest || null);
+    } catch {
+      // ignore
+    }
+  };
+
+  const fetchCoreTrades = async () => {
+    if (!tradeApiUrl) return;
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/trades?limit=25`);
+      const data = await resp.json();
+      if (resp.ok) setCoreTrades(data.fills || []);
+    } catch {
+      // ignore
+    }
+  };
+
+  const runCorePaper = async () => {
+    if (!tradeApiUrl) return;
+    setCoreStatus("Running paper cycle...");
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "paper",
+          symbols: coreSymbols.split(",").map(s => s.trim()).filter(Boolean),
+          strategy: coreStrategy,
+          timeframe: coreTimeframe
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "core_run_failed");
+      setCoreStatus("Paper run completed.");
+      setCoreDashboard(data.run || null);
+      setCoreTrades(data.fills || []);
+    } catch (err) {
+      setCoreStatus(err?.message || "core_run_failed");
+    }
+  };
+
+  const runBacktest = async () => {
+    if (!tradeApiUrl) return;
+    setBacktestStatus("Running backtest...");
+    setBacktestResult(null);
+    setBacktestArtifacts(null);
+    setBacktestArtifactsStatus("");
+    let gridPayload = {};
+    try {
+      gridPayload = backtestGrid ? JSON.parse(backtestGrid) : {};
+    } catch (err) {
+      setBacktestStatus("Grid JSON invalid.");
+      return;
+    }
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/backtest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: backtestSymbol.trim() || "AAPL",
+          strategy: backtestStrategy,
+          timeframe: backtestTimeframe,
+          grid: gridPayload,
+          walk_forward: { train: 120, test: 40, step: 40, limit: 300 }
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "backtest_failed");
+      setBacktestResult(data);
+      setBacktestStatus("Backtest complete.");
+      if (data?.run_id) {
+        loadBacktestArtifacts(data.run_id, data.grid?.run_id);
+      }
+    } catch (err) {
+      setBacktestStatus(err?.message || "backtest_failed");
+    }
+  };
+
+  const loadBacktestArtifacts = async (runId, gridRunId = "") => {
+    if (!tradeApiUrl || !runId) return;
+    setBacktestArtifactsStatus("Loading artifacts...");
+    try {
+      const query = gridRunId ? `?grid_run_id=${encodeURIComponent(gridRunId)}` : "";
+      const resp = await fetch(`${tradeApiUrl}/core/backtest/artifacts/${runId}${query}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "artifacts_failed");
+      setBacktestArtifacts(data);
+      setBacktestArtifactsStatus("Artifacts loaded.");
+    } catch (err) {
+      setBacktestArtifactsStatus(err?.message || "artifacts_failed");
+    }
+  };
+
+  const fetchOptionsChain = async () => {
+    if (!tradeApiUrl) return;
+    setOptionsStatus("Loading option chain...");
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/options/chain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: optionsSymbol.trim(),
+          provider: optionsProvider,
+          limit: 40,
+          min_days: Number(optionsChainMinDays || 0),
+          max_days: Number(optionsChainMaxDays || 0),
+          strike_min: optionsStrikeMin ? Number(optionsStrikeMin) : undefined,
+          strike_max: optionsStrikeMax ? Number(optionsStrikeMax) : undefined,
+          expiry_from: optionsExpiryFrom || undefined,
+          expiry_to: optionsExpiryTo || undefined
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "options_chain_failed");
+      setOptionsChain(data.contracts || []);
+      setOptionsUnderlying(data.underlying_price || 0);
+      setOptionsInputs(prev => ({ ...prev, spot: data.underlying_price?.toFixed(2) || prev.spot }));
+      setOptionsStatus("");
+    } catch (err) {
+      setOptionsStatus(err?.message || "options_chain_failed");
+    }
+  };
+
+  const runOptionsStrategy = async () => {
+    if (!tradeApiUrl) return;
+    setOptionsOutcome(null);
+    setOptionsStatus("Calculating strategy...");
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/options/strategy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy: optionsStrategy, params: optionsInputs })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "options_strategy_failed");
+      setOptionsOutcome(data);
+      setOptionsStatus("");
+    } catch (err) {
+      setOptionsStatus(err?.message || "options_strategy_failed");
+    }
+  };
+
+  const runOptionsScan = async () => {
+    if (!tradeApiUrl) return;
+    setOptionsStatus("Scanning options...");
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/options/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: optionsSymbol.trim(),
+          provider: optionsProvider,
+          limit: 25,
+          filters: {
+            min_delta: Number(optionsScanMinDelta || 0),
+            max_delta: Number(optionsScanMaxDelta || 1),
+            min_iv_rank: Number(optionsScanMinIVRank || 0),
+            min_iv_rank_hist: Number(optionsScanMinIVRankHist || 0),
+            min_pop: Number(optionsScanMinPOP || 0),
+            min_days: Number(optionsScanMinDays || 0),
+            max_days: Number(optionsScanMaxDays || 365),
+            abs_delta: true,
+            side: "short"
+          }
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "options_scan_failed");
+      setOptionsScanResults(data.results || []);
+      setOptionsStatus("");
+    } catch (err) {
+      setOptionsStatus(err?.message || "options_scan_failed");
+    }
+  };
+
+  const runOptionsBacktest = async () => {
+    if (!tradeApiUrl) return;
+    setOptionsStatus("Running options backtest...");
+    setOptionsBacktestResult(null);
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/options/backtest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: optionsSymbol.trim(),
+          strategy: optionsBacktestStrategy,
+          hold_days: Number(optionsBacktestHoldDays || 30),
+          otm_pct: Number(optionsBacktestOtmPct || 0.05),
+          spread_width: Number(optionsBacktestSpread || 0.05),
+          initial_cash: Number(optionsBacktestInitialCash || 10000),
+          timeframe: "1d"
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "options_backtest_failed");
+      setOptionsBacktestResult(data);
+      setOptionsStatus("");
+    } catch (err) {
+      setOptionsStatus(err?.message || "options_backtest_failed");
+    }
+  };
+
+  const buildPayoffLegs = () => {
+    const num = (value, fallback = 0) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const spot = num(optionsInputs.spot, optionsUnderlying || 0);
+    const strike = num(optionsInputs.strike, spot);
+    const premium = num(optionsInputs.premium, 0);
+    const longStrike = num(optionsInputs.long_strike, strike);
+    const longPremium = num(optionsInputs.long_premium, 0);
+    const shortStrike = num(optionsInputs.short_strike, strike);
+    const shortPremium = num(optionsInputs.short_premium, 0);
+    const legs = [];
+    if (optionsStrategy === "covered_call") {
+      legs.push({ instrument: "stock", side: "long", quantity: 100, entry: spot });
+      legs.push({ option_type: "call", side: "short", strike, premium, quantity: 1, multiplier: 100 });
+    } else if (optionsStrategy === "cash_secured_put") {
+      legs.push({ option_type: "put", side: "short", strike, premium, quantity: 1, multiplier: 100 });
+    } else if (optionsStrategy === "bull_call_spread") {
+      legs.push({ option_type: "call", side: "long", strike: longStrike, premium: longPremium, quantity: 1, multiplier: 100 });
+      legs.push({ option_type: "call", side: "short", strike: shortStrike, premium: shortPremium, quantity: 1, multiplier: 100 });
+    } else if (optionsStrategy === "bear_put_spread") {
+      legs.push({ option_type: "put", side: "long", strike: longStrike, premium: longPremium, quantity: 1, multiplier: 100 });
+      legs.push({ option_type: "put", side: "short", strike: shortStrike, premium: shortPremium, quantity: 1, multiplier: 100 });
+    } else if (optionsStrategy === "iron_condor") {
+      legs.push({ option_type: "put", side: "short", strike: num(optionsInputs.short_put_strike, strike), premium: num(optionsInputs.short_put_premium, 0), quantity: 1, multiplier: 100 });
+      legs.push({ option_type: "put", side: "long", strike: num(optionsInputs.long_put_strike, strike), premium: num(optionsInputs.long_put_premium, 0), quantity: 1, multiplier: 100 });
+      legs.push({ option_type: "call", side: "short", strike: num(optionsInputs.short_call_strike, strike), premium: num(optionsInputs.short_call_premium, 0), quantity: 1, multiplier: 100 });
+      legs.push({ option_type: "call", side: "long", strike: num(optionsInputs.long_call_strike, strike), premium: num(optionsInputs.long_call_premium, 0), quantity: 1, multiplier: 100 });
+    }
+    return { legs, spot };
+  };
+
+  const runOptionsPayoff = async () => {
+    if (!tradeApiUrl) return;
+    const { legs, spot } = buildPayoffLegs();
+    if (!legs.length) return;
+    const minPrice = optionsPayoffMin ? Number(optionsPayoffMin) : Math.max(1, spot * 0.5);
+    const maxPrice = optionsPayoffMax ? Number(optionsPayoffMax) : Math.max(minPrice + 1, spot * 1.5);
+    try {
+      const resp = await fetch(`${tradeApiUrl}/core/options/payoff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          legs,
+          min_price: minPrice,
+          max_price: maxPrice,
+          steps: 60
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || "options_payoff_failed");
+      setOptionsPayoff(data.curve || []);
+    } catch (err) {
+      setOptionsStatus(err?.message || "options_payoff_failed");
+    }
+  };
+
+  const applyOptionsRecommendation = () => {
+    const spot = Number(optionsUnderlying) || Number(optionsInputs.spot) || 0;
+    const callStrike = spot ? (spot * 1.05) : 0;
+    const putStrike = spot ? (spot * 0.95) : 0;
+    setOptionsStrategy(optionsRecommendation.strategy);
+    setOptionsInputs(prev => ({
+      ...prev,
+      spot: spot ? spot.toFixed(2) : prev.spot,
+      strike: optionsRecommendation.strategy === "cash_secured_put" ? (putStrike ? putStrike.toFixed(2) : prev.strike) : (callStrike ? callStrike.toFixed(2) : prev.strike),
+      long_strike: optionsRecommendation.strategy.includes("spread") ? (spot ? spot.toFixed(2) : prev.long_strike) : prev.long_strike,
+      short_strike: optionsRecommendation.strategy.includes("spread") ? (callStrike ? callStrike.toFixed(2) : prev.short_strike) : prev.short_strike,
+    }));
+  };
+
   const handleRecommendationAnalyze = (item) => {
     if (!item?.symbol) return;
     const targetClass = item.assetClass === "crypto" ? "crypto" : "stock";
@@ -1240,6 +1856,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { id: "terminal", label: "Terminal" },
+              { id: "paper", label: "Paper" },
+              { id: "backtest", label: "Backtest" },
+              { id: "options", label: "Options" },
               { id: "qa", label: "Q&A" },
               { id: "knowledge", label: "How-To" },
               { id: "scenarios", label: "Scenarios" }
@@ -1750,6 +2369,741 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       </div>
       )}
 
+      {tradingTab === "paper" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.5fr", gap: 16 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Beginner Checklist</div>
+              <div style={{ fontSize: 12, color: "#64748b", display: "grid", gap: 6 }}>
+                <div>1) Decide direction: bullish, bearish, or neutral.</div>
+                <div>2) Pick your max loss first. Never size from profit.</div>
+                <div>3) Check breakeven and probability ITM.</div>
+                <div>4) Keep position size small while learning.</div>
+              </div>
+            </div>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Paper Runner</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Deterministic synthetic data runs through the core strategy stack and logs fills.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <input
+                  value={coreSymbols}
+                  onChange={(e) => setCoreSymbols(e.target.value)}
+                  placeholder="Symbols (comma-separated)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <select
+                    value={coreStrategy}
+                    onChange={(e) => setCoreStrategy(e.target.value)}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  >
+                    {CORE_STRATEGIES.map(item => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={coreTimeframe}
+                    onChange={(e) => setCoreTimeframe(e.target.value)}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  >
+                    {INTERVALS.map(item => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    onClick={runCorePaper}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  >
+                    Run Paper Cycle
+                  </button>
+                  <button
+                    onClick={() => { fetchCoreDashboard(); fetchCoreTrades(); }}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 600 }}
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {coreStatus && <div style={{ fontSize: 12, color: "#475569" }}>{coreStatus}</div>}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Trade Log</div>
+              {coreTrades.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No fills yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 8, maxHeight: 320, overflow: "auto" }}>
+                  {coreTrades.map((fill, idx) => (
+                    <div key={`${fill.order_id || idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ fontWeight: 600 }}>{fill.symbol}</div>
+                        <span style={{ fontSize: 10, color: fill.side === "buy" ? "#16a34a" : "#dc2626" }}>{fill.side}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>
+                        Qty {Number(fill.quantity || 0).toFixed(4)} @ {formatNumber(fill.price || 0, 4)}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                        Fee {formatNumber(fill.fee || 0, 4)} | {fill.filled_at || ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Latest Run</div>
+              {!coreDashboard ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No paper runs yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
+                  <div><strong>Run:</strong> {coreDashboard.run_id}</div>
+                  <div><strong>Mode:</strong> {coreDashboard.mode}</div>
+                  <div><strong>Strategy:</strong> {coreDashboard.strategy}</div>
+                  <div><strong>Symbols:</strong> {(coreDashboard.symbols || []).join(", ")}</div>
+                  <div><strong>Equity:</strong> {formatNumber(coreDashboard.equity || 0, 2)}</div>
+                  <div><strong>Cash:</strong> {formatNumber(coreDashboard.cash || 0, 2)}</div>
+                  <div><strong>Exposure:</strong> {formatNumber(coreDashboard.exposure || 0, 2)}</div>
+                  <div><strong>Status:</strong> {coreDashboard.status}</div>
+                  {coreDashboard.metrics?.backtest && (
+                    <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                      <div><strong>Sharpe:</strong> {formatNumber(coreDashboard.metrics.backtest.sharpe || 0, 2)}</div>
+                      <div><strong>Max DD:</strong> {formatNumber(coreDashboard.metrics.backtest.max_drawdown || 0, 2)}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Risk Flags</div>
+              {(coreDashboard?.risk_flags || []).length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No risk flags.</div>
+              ) : (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {(coreDashboard.risk_flags || []).map(flag => (
+                    <span key={flag} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#fee2e2", color: "#b91c1c" }}>
+                      {flag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Equity Curve</div>
+              <IndicatorPanel
+                title="Equity"
+                series={(coreDashboard?.equity_curve || []).map(value => Number(value))}
+                height={160}
+              />
+              <div style={{ marginTop: 10 }}>
+                <IndicatorPanel
+                  title="Drawdown"
+                  series={(coreDashboard?.drawdown_curve || []).map(value => Number(value))}
+                  min={0}
+                  max={1}
+                  height={120}
+                />
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Regime Mix</div>
+              {regimeSummary.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No regime labels yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {regimeSummary.map(item => (
+                    <div key={item.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span>{item.label}</span>
+                      <span style={{ color: "#64748b" }}>{(item.pct * 100).toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Ensemble Weights</div>
+              {Object.keys(ensembleWeights).length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No weights available.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {Object.entries(ensembleWeights).map(([name, weight]) => (
+                    <div key={name} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span>{name}</span>
+                      <span style={{ color: "#64748b" }}>{(Number(weight) * 100).toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tradingTab === "backtest" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.5fr", gap: 16 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Backtest Wizard</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Paste a symbol, pick a strategy, and click Run. Grid search is optional.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <input
+                  value={backtestSymbol}
+                  onChange={(e) => setBacktestSymbol(e.target.value.toUpperCase())}
+                  placeholder="Symbol (e.g., AAPL)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <select
+                    value={backtestStrategy}
+                    onChange={(e) => setBacktestStrategy(e.target.value)}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  >
+                    {CORE_STRATEGIES.map(item => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={backtestTimeframe}
+                    onChange={(e) => setBacktestTimeframe(e.target.value)}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  >
+                    {INTERVALS.map(item => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <textarea
+                  value={backtestGrid}
+                  onChange={(e) => setBacktestGrid(e.target.value)}
+                  rows={5}
+                  placeholder='Grid JSON (optional) e.g. {"lookback":[20,50,80]}'
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5", fontFamily: "'IBM Plex Mono', monospace" }}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={runBacktest}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  >
+                    Run Backtest
+                  </button>
+                </div>
+                {backtestStatus && <div style={{ fontSize: 12, color: "#475569" }}>{backtestStatus}</div>}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Grid Search</div>
+              {!backtestResult?.grid?.best ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>Run a backtest to see best params.</div>
+              ) : (
+                <div style={{ fontSize: 12, display: "grid", gap: 6 }}>
+                  <div><strong>Objective:</strong> {backtestResult.grid.objective}</div>
+                  <div><strong>Best Params:</strong> {JSON.stringify(backtestResult.grid.best.params)}</div>
+                  <div><strong>Best Sharpe:</strong> {formatNumber(backtestResult.grid.best.metrics?.sharpe || 0, 2)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Backtest Metrics</div>
+              {!backtestResult ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No backtest yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
+                  <div><strong>Run ID:</strong> {backtestResult.run_id}</div>
+                  <div><strong>CAGR:</strong> {formatNumber(backtestResult.metrics?.cagr || 0, 3)}</div>
+                  <div><strong>Sharpe:</strong> {formatNumber(backtestResult.metrics?.sharpe || 0, 2)}</div>
+                  <div><strong>Max Drawdown:</strong> {formatNumber(backtestResult.metrics?.max_drawdown || 0, 2)}</div>
+                  {backtestResult.artifacts && (
+                    <div><strong>Artifacts:</strong> {backtestResult.artifacts.base_dir} (Run {backtestResult.artifacts.backtest_run})</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontWeight: 600 }}>Artifacts (Direct)</div>
+                <button
+                  onClick={() => loadBacktestArtifacts(backtestResult?.run_id, backtestResult?.grid?.run_id)}
+                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                >
+                  Reload
+                </button>
+              </div>
+              {!backtestArtifacts ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>Run a backtest to load artifacts.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
+                  <div><strong>Folder:</strong> {backtestArtifacts.base_dir}</div>
+                  <div><strong>Equity points:</strong> {(backtestArtifacts.equity_curve || []).length}</div>
+                  <div><strong>Trades:</strong> {(backtestArtifacts.trades || []).length}</div>
+                  <div><strong>Grid trials:</strong> {(backtestArtifacts.grid?.results || []).length}</div>
+                  <div><strong>Walk-forward windows:</strong> {(backtestArtifacts.walk_forward || []).length}</div>
+                </div>
+              )}
+              {backtestArtifactsStatus && (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#475569" }}>{backtestArtifactsStatus}</div>
+              )}
+              <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>
+                Includes config.json, metrics.json, equity_curve.json, trades.csv, grid_results.json, walk_forward.json.
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Walk-Forward Windows</div>
+              {!backtestResult?.walk_forward?.length ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No walk-forward output yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, maxHeight: 240, overflow: "auto" }}>
+                  {backtestResult.walk_forward.slice(0, 6).map((item, idx) => (
+                    <div key={`${item.test_start}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, fontSize: 11 }}>
+                      <div><strong>Test:</strong> {item.test_start} -> {item.test_end}</div>
+                      <div>Sharpe: {formatNumber(item.metrics?.sharpe || 0, 2)} | MaxDD: {formatNumber(item.metrics?.max_drawdown || 0, 2)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tradingTab === "options" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.4fr", gap: 16 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Options Search (Step 1)</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Type a ticker and load a simple options chain. Default provider is synthetic.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <input
+                  value={optionsSymbol}
+                  onChange={(e) => setOptionsSymbol(e.target.value.toUpperCase())}
+                  placeholder="Underlying symbol (e.g., AAPL)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <select
+                  value={optionsProvider}
+                  onChange={(e) => setOptionsProvider(e.target.value)}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                >
+                  <option value="synthetic">Synthetic (demo)</option>
+                  <option value="polygon">Polygon (API key required)</option>
+                </select>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsChainMinDays}
+                    onChange={(e) => setOptionsChainMinDays(e.target.value)}
+                    placeholder="Min days (7)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsChainMaxDays}
+                    onChange={(e) => setOptionsChainMaxDays(e.target.value)}
+                    placeholder="Max days (60)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsStrikeMin}
+                    onChange={(e) => setOptionsStrikeMin(e.target.value)}
+                    placeholder="Strike min"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsStrikeMax}
+                    onChange={(e) => setOptionsStrikeMax(e.target.value)}
+                    placeholder="Strike max"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <div style={{ fontSize: 11, color: "#94a3b8" }}>Optional expiry range:</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    type="date"
+                    value={optionsExpiryFrom}
+                    onChange={(e) => setOptionsExpiryFrom(e.target.value)}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    type="date"
+                    value={optionsExpiryTo}
+                    onChange={(e) => setOptionsExpiryTo(e.target.value)}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <button
+                  onClick={fetchOptionsChain}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                >
+                  Load Chain
+                </button>
+                {optionsStatus && <div style={{ fontSize: 12, color: "#475569" }}>{optionsStatus}</div>}
+                {optionsUnderlying ? (
+                  <div style={{ fontSize: 12, color: "#475569" }}>Underlying price: {formatNumber(optionsUnderlying, 2)}</div>
+                ) : null}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Options Chain (Simplified)</div>
+              <input
+                value={optionsFilter}
+                onChange={(e) => setOptionsFilter(e.target.value)}
+                placeholder="Filter by strike, expiry, call/put"
+                style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5", marginBottom: 8 }}
+              />
+              {optionsChain.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>Load a chain to see contracts.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, maxHeight: 320, overflow: "auto" }}>
+                  {filteredOptions.slice(0, 25).map((opt, idx) => (
+                    <div key={`${opt.symbol}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, fontSize: 11 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <div style={{ fontWeight: 600 }}>{opt.option_type.toUpperCase()} {opt.strike}</div>
+                        <div style={{ color: "#64748b" }}>{opt.expiration}</div>
+                      </div>
+                      <div style={{ color: "#64748b" }}>
+                        Bid {formatNumber(opt.bid || 0, 2)} | Ask {formatNumber(opt.ask || 0, 2)} | IV {(Number(opt.iv || 0) * 100).toFixed(1)}%
+                      </div>
+                      {opt.greeks && (
+                        <div style={{ color: "#94a3b8" }}>
+                          Delta {formatNumber(opt.greeks.delta || 0, 2)} | Gamma {formatNumber(opt.greeks.gamma || 0, 3)} | Theta {formatNumber(opt.greeks.theta || 0, 2)} | P(ITM) {formatNumber((opt.greeks.prob_itm || 0) * 100, 1)}%
+                        </div>
+                      )}
+                      {opt.greeks && (
+                        <div style={{ color: "#cbd5f5" }}>
+                          IV Rank {formatNumber((opt.greeks.iv_rank_chain || 0) * 100, 0)}% | IV Rank (Hist) {formatNumber((opt.greeks.iv_rank_hist || 0) * 100, 0)}%
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Entry Assistant (Step 0)</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Answer 3 simple questions and get a suggested strategy.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <select
+                  value={optionsOutlook}
+                  onChange={(e) => setOptionsOutlook(e.target.value)}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                >
+                  <option value="bullish">Bullish</option>
+                  <option value="bearish">Bearish</option>
+                  <option value="neutral">Neutral</option>
+                </select>
+                <select
+                  value={optionsGoal}
+                  onChange={(e) => setOptionsGoal(e.target.value)}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                >
+                  <option value="income">Income</option>
+                  <option value="growth">Growth</option>
+                </select>
+                <select
+                  value={optionsRisk}
+                  onChange={(e) => setOptionsRisk(e.target.value)}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                >
+                  <option value="low">Low Risk</option>
+                  <option value="medium">Medium Risk</option>
+                  <option value="high">High Risk</option>
+                </select>
+                <div style={{ fontSize: 12, color: "#334155" }}>
+                  <strong>Suggested:</strong> {optionsRecommendation.strategy.replace("_", " ")} — {optionsRecommendation.note}
+                </div>
+                <button
+                  onClick={applyOptionsRecommendation}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                >
+                  Use Suggested Strategy
+                </button>
+              </div>
+            </div>
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Strategy Builder (Step 2)</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Pick a beginner-friendly strategy and fill in the fields below.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <select
+                  value={optionsStrategy}
+                  onChange={(e) => setOptionsStrategy(e.target.value)}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                >
+                  <option value="covered_call">Covered Call</option>
+                  <option value="cash_secured_put">Cash-Secured Put</option>
+                  <option value="bull_call_spread">Bull Call Spread</option>
+                  <option value="bear_put_spread">Bear Put Spread</option>
+                  <option value="iron_condor">Iron Condor</option>
+                </select>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsInputs.spot}
+                    onChange={(e) => setOptionsInputs(prev => ({ ...prev, spot: e.target.value }))}
+                    placeholder="Spot price"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsInputs.strike}
+                    onChange={(e) => setOptionsInputs(prev => ({ ...prev, strike: e.target.value }))}
+                    placeholder="Strike"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <input
+                  value={optionsInputs.premium}
+                  onChange={(e) => setOptionsInputs(prev => ({ ...prev, premium: e.target.value }))}
+                  placeholder="Premium (per share)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsInputs.long_strike}
+                    onChange={(e) => setOptionsInputs(prev => ({ ...prev, long_strike: e.target.value }))}
+                    placeholder="Long strike"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsInputs.long_premium}
+                    onChange={(e) => setOptionsInputs(prev => ({ ...prev, long_premium: e.target.value }))}
+                    placeholder="Long premium"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsInputs.short_strike}
+                    onChange={(e) => setOptionsInputs(prev => ({ ...prev, short_strike: e.target.value }))}
+                    placeholder="Short strike"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsInputs.short_premium}
+                    onChange={(e) => setOptionsInputs(prev => ({ ...prev, short_premium: e.target.value }))}
+                    placeholder="Short premium"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <button
+                  onClick={runOptionsStrategy}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                >
+                  Calculate Strategy
+                </button>
+                {optionsOutcome && (
+                  <div style={{ fontSize: 12, color: "#334155" }}>
+                    <div><strong>Max Profit:</strong> {formatNumber(optionsOutcome.max_profit || 0, 2)}</div>
+                    <div><strong>Max Loss:</strong> {formatNumber(optionsOutcome.max_loss || 0, 2)}</div>
+                    <div><strong>Breakeven:</strong> {(optionsOutcome.breakevens || []).map(v => formatNumber(v, 2)).join(", ")}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Payoff Chart</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+                Visualize P/L at expiration for the strategy above.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsPayoffMin}
+                    onChange={(e) => setOptionsPayoffMin(e.target.value)}
+                    placeholder="Min price (optional)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsPayoffMax}
+                    onChange={(e) => setOptionsPayoffMax(e.target.value)}
+                    placeholder="Max price (optional)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <button
+                  onClick={runOptionsPayoff}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                >
+                  Show Payoff
+                </button>
+                {optionsPayoff.length > 0 && (
+                  <IndicatorPanel
+                    title="Payoff"
+                    series={optionsPayoff.map(point => point.pnl)}
+                    height={140}
+                  />
+                )}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Options Scanner (Step 3)</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Finds contracts with high IV rank, acceptable delta, and good POP for short premium.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsScanMinDelta}
+                    onChange={(e) => setOptionsScanMinDelta(e.target.value)}
+                    placeholder="Min delta (0.2)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsScanMaxDelta}
+                    onChange={(e) => setOptionsScanMaxDelta(e.target.value)}
+                    placeholder="Max delta (0.4)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsScanMinIVRank}
+                    onChange={(e) => setOptionsScanMinIVRank(e.target.value)}
+                    placeholder="Min IV rank (0.5)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsScanMinIVRankHist}
+                    onChange={(e) => setOptionsScanMinIVRankHist(e.target.value)}
+                    placeholder="Min IV rank hist (0.5)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsScanMinPOP}
+                    onChange={(e) => setOptionsScanMinPOP(e.target.value)}
+                    placeholder="Min POP (0.6)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsScanMinDays}
+                    onChange={(e) => setOptionsScanMinDays(e.target.value)}
+                    placeholder="Min days (14)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsScanMaxDays}
+                    onChange={(e) => setOptionsScanMaxDays(e.target.value)}
+                    placeholder="Max days (60)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <div style={{ fontSize: 11, color: "#94a3b8", alignSelf: "center" }}>
+                    Leave blank to ignore a filter.
+                  </div>
+                </div>
+                <button
+                  onClick={runOptionsScan}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                >
+                  Run Scanner
+                </button>
+                {optionsScanResults.length > 0 && (
+                  <div style={{ display: "grid", gap: 6, maxHeight: 200, overflow: "auto" }}>
+                    {optionsScanResults.map((item, idx) => (
+                      <div key={`${item.symbol}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, fontSize: 11 }}>
+                        <div style={{ fontWeight: 600 }}>{item.option_type.toUpperCase()} {item.strike} - {item.expiration}</div>
+                        <div style={{ color: "#64748b" }}>
+                          IV Rank {((item.iv_rank || 0) * 100).toFixed(0)}% | IV Rank (Hist) {((item.iv_rank_hist || 0) * 100).toFixed(0)}% | Delta {formatNumber(item.delta, 2)} | POP {(item.pop * 100).toFixed(0)}%
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Options Backtest (Step 4)</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Run a simple historical simulation (daily bars) for wheel, covered call, or vertical spreads.
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <select
+                  value={optionsBacktestStrategy}
+                  onChange={(e) => setOptionsBacktestStrategy(e.target.value)}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                >
+                  <option value="wheel">Wheel</option>
+                  <option value="covered_call">Covered Call</option>
+                  <option value="bull_call_spread">Bull Call Spread</option>
+                  <option value="bear_put_spread">Bear Put Spread</option>
+                </select>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsBacktestHoldDays}
+                    onChange={(e) => setOptionsBacktestHoldDays(e.target.value)}
+                    placeholder="Hold days (30)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsBacktestInitialCash}
+                    onChange={(e) => setOptionsBacktestInitialCash(e.target.value)}
+                    placeholder="Initial cash (10000)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input
+                    value={optionsBacktestOtmPct}
+                    onChange={(e) => setOptionsBacktestOtmPct(e.target.value)}
+                    placeholder="OTM % (0.05)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <input
+                    value={optionsBacktestSpread}
+                    onChange={(e) => setOptionsBacktestSpread(e.target.value)}
+                    placeholder="Spread width % (0.05)"
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                </div>
+                <button
+                  onClick={runOptionsBacktest}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                >
+                  Run Options Backtest
+                </button>
+                {optionsBacktestResult && (
+                  <div style={{ fontSize: 12, color: "#334155" }}>
+                    <div><strong>CAGR:</strong> {formatNumber(optionsBacktestResult.metrics?.cagr || 0, 3)}</div>
+                    <div><strong>Sharpe:</strong> {formatNumber(optionsBacktestResult.metrics?.sharpe || 0, 2)}</div>
+                    <div><strong>Max DD:</strong> {formatNumber(optionsBacktestResult.metrics?.max_drawdown || 0, 2)}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {tradingTab === "qa" && (
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 12 }}>
@@ -1870,6 +3224,78 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             </div>
 
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Import PDFs & Files</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Paste a PDF URL or upload a local file. OCR is used as a fallback for scanned PDFs.
+              </div>
+              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                <input
+                  value={knowledgeUrl}
+                  onChange={(e) => setKnowledgeUrl(e.target.value)}
+                  placeholder="https://example.com/report.pdf"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <input
+                  value={knowledgeUrlTitle}
+                  onChange={(e) => setKnowledgeUrlTitle(e.target.value)}
+                  placeholder="Optional title override"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <input
+                  value={knowledgeUrlTags}
+                  onChange={(e) => setKnowledgeUrlTags(e.target.value)}
+                  placeholder="Tags (comma-separated)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <label style={{ fontSize: 11, color: "#64748b", display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={knowledgeUrlOcr}
+                    onChange={(e) => setKnowledgeUrlOcr(e.target.checked)}
+                  />
+                  Use OCR fallback for scanned PDFs
+                </label>
+                <button onClick={ingestKnowledgeUrl} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                  Ingest URL
+                </button>
+                {knowledgeUrlStatus && <div style={{ fontSize: 12, color: "#475569" }}>{knowledgeUrlStatus}</div>}
+              </div>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                <input
+                  type="file"
+                  accept=".pdf,.txt,.md,.csv"
+                  onChange={(e) => setKnowledgeFile(e.target.files?.[0] || null)}
+                  style={{ fontSize: 12 }}
+                />
+                <input
+                  value={knowledgeFileTitle}
+                  onChange={(e) => setKnowledgeFileTitle(e.target.value)}
+                  placeholder="Optional file title override"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <input
+                  value={knowledgeFileTags}
+                  onChange={(e) => setKnowledgeFileTags(e.target.value)}
+                  placeholder="Tags (comma-separated)"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <label style={{ fontSize: 11, color: "#64748b", display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={knowledgeFileOcr}
+                    onChange={(e) => setKnowledgeFileOcr(e.target.checked)}
+                  />
+                  Use OCR fallback for scanned PDFs
+                </label>
+                <button onClick={uploadKnowledgeFile} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontWeight: 600 }}>
+                  Upload & Ingest
+                </button>
+                {knowledgeFileStatus && <div style={{ fontSize: 12, color: "#475569" }}>{knowledgeFileStatus}</div>}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Online Sources</div>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
                 Sources are crawled in the background and refreshed on schedule.
@@ -1951,6 +3377,70 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 ))}
               </div>
             </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>RSS Feeds (Daily AI Review)</div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Feeds are reviewed by AI before ingestion. Foreign-market feeds are disabled by default.
+              </div>
+              <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+                <input
+                  value={rssSeedUrl}
+                  onChange={(e) => setRssSeedUrl(e.target.value)}
+                  placeholder="https://rss.feedspot.com/stock_market_news_rss_feeds/"
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={seedRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                    Seed Feedspot
+                  </button>
+                  <button onClick={crawlRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontWeight: 600 }}>
+                    Crawl Now
+                  </button>
+                  <button onClick={loadRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff" }}>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              {rssStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{rssStatus}</div>}
+              <div style={{ display: "grid", gap: 8, maxHeight: 220, overflow: "auto" }}>
+                {rssSources.length === 0 && (
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>No RSS feeds added yet.</div>
+                )}
+                {rssSources.map(source => (
+                  <div key={source.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{source.title || source.url}</div>
+                    <div style={{ fontSize: 11, color: "#64748b" }}>{source.url}</div>
+                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                      Status: {source.last_status || "idle"} {source.last_crawled_at ? `| ${source.last_crawled_at}` : ""}
+                    </div>
+                    {source.last_error && (
+                      <div style={{ fontSize: 10, color: "#b91c1c", marginTop: 2 }}>{source.last_error}</div>
+                    )}
+                    <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => toggleRssSource(source)}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                      >
+                        {source.enabled ? "Disable" : "Enable"}
+                      </button>
+                      <button
+                        onClick={() => crawlRssSource(source)}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 11 }}
+                      >
+                        Crawl
+                      </button>
+                      <button
+                        onClick={() => removeRssSource(source)}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #fee2e2", background: "#fff", color: "#b91c1c", fontSize: 11 }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
@@ -1986,9 +3476,89 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             </div>
 
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Knowledge Library</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontWeight: 600 }}>Knowledge Map</div>
+                <button
+                  onClick={loadKnowledgeStats}
+                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                >
+                  Refresh
+                </button>
+              </div>
+              {knowledgeStatsStatus && <div style={{ fontSize: 11, color: "#475569", marginBottom: 6 }}>{knowledgeStatsStatus}</div>}
+              {!knowledgeStats ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No stats yet.</div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: "#64748b", marginBottom: 10 }}>
+                    <span>Docs: {knowledgeStats.totalDocuments || 0}</span>
+                    <span>Sources: {(knowledgeStats.sources || []).length}</span>
+                    <span>Tags: {knowledgeStats.totalTags || 0}</span>
+                    {knowledgeStats.latest && <span>Latest: {knowledgeStats.latest}</span>}
+                  </div>
+                  <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 8, background: "#f8fafc" }}>
+                    {topicNodes.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#94a3b8" }}>Not enough tag data for a map yet.</div>
+                    ) : (
+                      <svg width="320" height="260">
+                        <circle cx="160" cy="130" r="28" fill="#0ea5e9" opacity="0.15" />
+                        <text x="160" y="134" textAnchor="middle" fontSize="11" fill="#0f172a">Trading RAG</text>
+                        {topicNodes.map(node => (
+                          <g key={node.id} onClick={() => { setKnowledgeSelectedTag(node.id); loadKnowledgeItems(node.id); }} style={{ cursor: "pointer" }}>
+                            <line x1="160" y1="130" x2={node.x} y2={node.y} stroke="#cbd5f5" strokeWidth="1" />
+                            <circle cx={node.x} cy={node.y} r={node.size} fill={knowledgeSelectedTag === node.id ? "#f97316" : "#38bdf8"} opacity="0.85" />
+                            <text x={node.x} y={node.y - node.size - 4} textAnchor="middle" fontSize="9" fill="#334155">
+                              {node.id}
+                            </text>
+                          </g>
+                        ))}
+                      </svg>
+                    )}
+                  </div>
+                  {knowledgeSelectedTag && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
+                      Selected tag: <strong>{knowledgeSelectedTag}</strong>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Sources & Age</div>
+              {!knowledgeStats || (knowledgeStats.sources || []).length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>No sources indexed yet.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 8, maxHeight: 220, overflow: "auto" }}>
+                  {(knowledgeStats.sources || []).map((source, idx) => (
+                    <div key={`${source.key}-${idx}`} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{source.title}</div>
+                      {source.source_url && (
+                        <div style={{ fontSize: 10, color: "#64748b" }}>{source.source_url}</div>
+                      )}
+                      <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                        Docs: {source.count} {Number.isFinite(source.age_days) ? `| ${source.age_days}d since last update` : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontWeight: 600 }}>Knowledge Library</div>
+                {knowledgeSelectedTag && (
+                  <button
+                    onClick={() => { setKnowledgeSelectedTag(""); loadKnowledgeItems(""); }}
+                    style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                  >
+                    Clear Tag Filter
+                  </button>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
-                Recent indexed trading notes and sources.
+                {knowledgeSelectedTag ? `Filtered by tag: ${knowledgeSelectedTag}` : "Recent indexed trading notes and sources."}
               </div>
               <div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto" }}>
                 {knowledgeItems.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No knowledge indexed yet.</div>}
@@ -2052,7 +3622,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     <div style={{ fontSize: 11, color: "#b91c1c" }}>{result.error}</div>
                   ) : (
                     <div style={{ fontSize: 11, color: "#64748b" }}>
-                      Start {formatNumber(result.start)} -> End {formatNumber(result.end)} | {result.points} points
+                      Start {formatNumber(result.start)} to End {formatNumber(result.end)} | {result.points} points
                     </div>
                   )}
                 </div>

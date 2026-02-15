@@ -127,9 +127,39 @@ function ensureSchema() {
       last_error TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS trading_rss_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      url TEXT UNIQUE,
+      title TEXT,
+      tags_json TEXT,
+      enabled INTEGER,
+      include_foreign INTEGER,
+      created_at TEXT,
+      updated_at TEXT,
+      last_crawled_at TEXT,
+      last_status TEXT,
+      last_error TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS trading_rss_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER,
+      guid TEXT,
+      url TEXT,
+      title TEXT,
+      published_at TEXT,
+      seen_at TEXT,
+      decision TEXT,
+      reason TEXT,
+      content_hash TEXT,
+      UNIQUE(source_id, guid),
+      FOREIGN KEY(source_id) REFERENCES trading_rss_sources(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chunks_meeting ON chunks(meeting_id);
     CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(occurred_at);
     CREATE INDEX IF NOT EXISTS idx_trading_sources_enabled ON trading_sources(enabled);
+    CREATE INDEX IF NOT EXISTS idx_trading_rss_sources_enabled ON trading_rss_sources(enabled);
   `);
 }
 
@@ -148,6 +178,16 @@ function ensureMigrations() {
   ensureColumn("meeting_summaries", "updated_at", "TEXT");
   ensureColumn("meeting_emails", "error", "TEXT");
   ensureColumn("meetings", "source_group", "TEXT");
+  ensureColumn("trading_rss_sources", "tags_json", "TEXT");
+  ensureColumn("trading_rss_sources", "include_foreign", "INTEGER");
+  ensureColumn("trading_rss_sources", "updated_at", "TEXT");
+  ensureColumn("trading_rss_sources", "last_crawled_at", "TEXT");
+  ensureColumn("trading_rss_sources", "last_status", "TEXT");
+  ensureColumn("trading_rss_sources", "last_error", "TEXT");
+  ensureColumn("trading_rss_items", "published_at", "TEXT");
+  ensureColumn("trading_rss_items", "decision", "TEXT");
+  ensureColumn("trading_rss_items", "reason", "TEXT");
+  ensureColumn("trading_rss_items", "content_hash", "TEXT");
 }
 
 function getMeta(key) {
@@ -369,6 +409,156 @@ export function markTradingSourceCrawl({ id, status = "ok", error = "", crawledA
     SET last_crawled_at = ?, last_status = ?, last_error = ?, updated_at = ?
     WHERE id = ?
   `).run(now, status, error || "", now, id);
+}
+
+function normalizeTradingRssRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    url: row.url,
+    title: row.title || "",
+    tags: row.tags_json ? JSON.parse(row.tags_json) : [],
+    enabled: Boolean(row.enabled),
+    include_foreign: Boolean(row.include_foreign),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    last_crawled_at: row.last_crawled_at,
+    last_status: row.last_status,
+    last_error: row.last_error
+  };
+}
+
+export function listTradingRssSources({ limit = 100, offset = 0, search = "", includeDisabled = true } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  if (!includeDisabled) {
+    where.push("enabled = 1");
+  }
+  if (search) {
+    where.push("url LIKE ? OR title LIKE ?");
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = db.prepare(`
+    SELECT * FROM trading_rss_sources
+    ${whereSql}
+    ORDER BY created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, Number(limit || 100), Number(offset || 0));
+  return rows.map(normalizeTradingRssRow).filter(Boolean);
+}
+
+export function getTradingRssSource(id) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM trading_rss_sources WHERE id = ?").get(id);
+  return normalizeTradingRssRow(row);
+}
+
+export function getTradingRssSourceByUrl(url) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM trading_rss_sources WHERE url = ?").get(url);
+  return normalizeTradingRssRow(row);
+}
+
+export function upsertTradingRssSource({ url, title = "", tags = [], enabled = true, includeForeign = false } = {}) {
+  initRagStore();
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO trading_rss_sources (url, title, tags_json, enabled, include_foreign, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(url) DO UPDATE SET
+      title = excluded.title,
+      tags_json = excluded.tags_json,
+      enabled = excluded.enabled,
+      include_foreign = excluded.include_foreign,
+      updated_at = excluded.updated_at
+  `).run(
+    url,
+    title || "",
+    JSON.stringify(tags || []),
+    enabled ? 1 : 0,
+    includeForeign ? 1 : 0,
+    now,
+    now
+  );
+  return getTradingRssSourceByUrl(url);
+}
+
+export function updateTradingRssSource(id, { title, tags, enabled, includeForeign } = {}) {
+  initRagStore();
+  const existing = getTradingRssSource(id);
+  if (!existing) return null;
+  const nextTags = tags ? JSON.stringify(tags) : JSON.stringify(existing.tags || []);
+  const nextEnabled = enabled == null ? (existing.enabled ? 1 : 0) : (enabled ? 1 : 0);
+  const nextIncludeForeign = includeForeign == null ? (existing.include_foreign ? 1 : 0) : (includeForeign ? 1 : 0);
+  const now = nowIso();
+  db.prepare(`
+    UPDATE trading_rss_sources
+    SET title = ?, tags_json = ?, enabled = ?, include_foreign = ?, updated_at = ?
+    WHERE id = ?
+  `).run(title ?? existing.title, nextTags, nextEnabled, nextIncludeForeign, now, id);
+  return getTradingRssSource(id);
+}
+
+export function deleteTradingRssSource(id) {
+  initRagStore();
+  db.prepare("DELETE FROM trading_rss_sources WHERE id = ?").run(id);
+  db.prepare("DELETE FROM trading_rss_items WHERE source_id = ?").run(id);
+}
+
+export function markTradingRssCrawl({ id, status = "ok", error = "", crawledAt } = {}) {
+  initRagStore();
+  const now = crawledAt || nowIso();
+  db.prepare(`
+    UPDATE trading_rss_sources
+    SET last_crawled_at = ?, last_status = ?, last_error = ?, updated_at = ?
+    WHERE id = ?
+  `).run(now, status, error || "", now, id);
+}
+
+export function hasTradingRssItem({ sourceId, guid }) {
+  initRagStore();
+  const row = db.prepare("SELECT id FROM trading_rss_items WHERE source_id = ? AND guid = ?").get(sourceId, guid);
+  return Boolean(row?.id);
+}
+
+export function recordTradingRssItem({ sourceId, guid, url, title, publishedAt, decision, reason, contentHash } = {}) {
+  initRagStore();
+  const now = nowIso();
+  db.prepare(`
+    INSERT OR IGNORE INTO trading_rss_items
+      (source_id, guid, url, title, published_at, seen_at, decision, reason, content_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sourceId,
+    guid,
+    url || "",
+    title || "",
+    publishedAt || "",
+    now,
+    decision || "",
+    reason || "",
+    contentHash || ""
+  );
+}
+
+export function listTradingRssItems({ sourceId, limit = 50 } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  if (sourceId) {
+    where.push("source_id = ?");
+    params.push(sourceId);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = db.prepare(`
+    SELECT * FROM trading_rss_items
+    ${whereSql}
+    ORDER BY published_at DESC
+    LIMIT ?
+  `).all(...params, Number(limit || 50));
+  return rows;
 }
 
 export function upsertChunks(chunks) {
@@ -729,6 +919,43 @@ export function listMeetings({ type = "all", limit = 20, offset = 0, search = ""
     LIMIT ? OFFSET ?
   `;
   return db.prepare(sql).all(...params, Number(limit || 20), Number(offset || 0));
+}
+
+export function listMeetingsRaw({ type = "all", limit = 200, offset = 0, search = "" } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  const normalizedType = String(type || "all").toLowerCase();
+
+  if (normalizedType === "memory") {
+    where.push("m.id LIKE 'memory:%'");
+  } else if (normalizedType === "feedback") {
+    where.push("m.id LIKE 'feedback:%'");
+  } else if (normalizedType === "recordings" || normalizedType === "recording") {
+    where.push("m.id LIKE 'recording:%'");
+  } else if (normalizedType === "trading") {
+    where.push("m.id LIKE 'trading:%'");
+  } else if (normalizedType === "fireflies") {
+    where.push("m.id NOT LIKE 'memory:%'");
+    where.push("m.id NOT LIKE 'feedback:%'");
+    where.push("m.id NOT LIKE 'recording:%'");
+    where.push("m.id NOT LIKE 'trading:%'");
+  }
+
+  if (search) {
+    where.push("(m.title LIKE ? OR m.raw_transcript LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const sql = `
+    SELECT m.id, m.title, m.occurred_at, m.source_url, m.source_group, m.raw_transcript, m.created_at
+    FROM meetings m
+    ${whereSql}
+    ORDER BY m.occurred_at DESC
+    LIMIT ? OFFSET ?
+  `;
+  return db.prepare(sql).all(...params, Number(limit || 200), Number(offset || 0));
 }
 
 export function getRagCounts() {
