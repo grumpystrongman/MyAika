@@ -56,8 +56,10 @@ export function detectSecrets(text) {
 
 export function detectPhi(text) {
   const value = String(text || "");
+  // Avoid flagging numeric IDs embedded in URLs as PHI.
+  const scrubbed = value.replace(/https?:\/\/\S+/gi, " ");
   for (const re of PHI_PATTERNS) {
-    if (re.test(value)) return true;
+    if (re.test(scrubbed)) return true;
   }
   return false;
 }
