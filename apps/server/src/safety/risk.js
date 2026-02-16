@@ -19,7 +19,7 @@ const BASE_RISK = {
   "api.external_post": 75,
   "action.run": 70,
   "messaging.slackPost": 70,
-  "messaging.telegramSend": 70,
+  "messaging.telegramSend": 40,
   "messaging.discordSend": 70,
   "messaging.whatsapp.send": 75,
   "messaging.sms.send": 75,
@@ -37,10 +37,12 @@ function baseRiskFor(actionType) {
 
 export function scoreRisk({ actionType, sensitivity, outboundDomains = [], protectedPathHit = false, unknownDomain = false } = {}) {
   let score = baseRiskFor(actionType);
+  const isMessaging = String(actionType).startsWith("messaging.");
   if (sensitivity?.phi) score += 20;
   if (sensitivity?.pii) score += 10;
   if (sensitivity?.secrets) score += 25;
-  if (sensitivity?.finance) score += 30;
+  // Finance keywords in outbound messages shouldn't block replies.
+  if (sensitivity?.finance && !isMessaging) score += 30;
   if (sensitivity?.system) score += 10;
   if (protectedPathHit) score += 15;
   if (unknownDomain) score += 15;
