@@ -189,6 +189,27 @@ function detectPattern(candle, prev) {
   return "Trend Candle";
 }
 
+function classifyPattern(pattern = "") {
+  const name = String(pattern || "").toLowerCase();
+  if (!name) return { bias: "neutral", strength: 0, note: "" };
+  if (name.includes("bullish engulfing")) {
+    return { bias: "bullish", strength: 3, note: "Bullish reversal pattern; confirm with follow-through." };
+  }
+  if (name.includes("bearish engulfing")) {
+    return { bias: "bearish", strength: 3, note: "Bearish reversal pattern; confirm with follow-through." };
+  }
+  if (name.includes("hammer")) {
+    return { bias: "bullish", strength: 2, note: "Potential rebound; watch for higher close." };
+  }
+  if (name.includes("shooting star")) {
+    return { bias: "bearish", strength: 2, note: "Potential pullback; watch for lower close." };
+  }
+  if (name.includes("doji")) {
+    return { bias: "neutral", strength: 1, note: "Indecision candle; wait for confirmation." };
+  }
+  return { bias: "neutral", strength: 1, note: "Continuation candle; defer to the broader trend." };
+}
+
 function KnowledgeGraph({ graph, width = 560, height = 360, selectedId = "", onSelect }) {
   const canvasRef = useRef(null);
   const simRef = useRef(null);
@@ -465,7 +486,7 @@ function KnowledgeGraph({ graph, width = 560, height = 360, selectedId = "", onS
   );
 }
 
-function CandlestickChart({ candles, vwap = [], width = 640, height = 360 }) {
+function CandlestickChart({ candles, vwap = [], signals = [], width = 640, height = 360 }) {
   const canvasRef = useRef(null);
   const [hover, setHover] = useState(null);
 
@@ -534,6 +555,40 @@ function CandlestickChart({ candles, vwap = [], width = 640, height = 360 }) {
         ctx.strokeRect(x - 2, padding, candleWidth * 0.8 + 4, chartH);
       }
     });
+
+    if (signals.length) {
+      signals.forEach(signal => {
+        const idx = signal.index;
+        if (idx == null || idx < 0 || idx >= candles.length) return;
+        const candle = candles[idx];
+        const x = padding + idx * candleWidth + candleWidth * 0.4;
+        const yHigh = padding + (1 - (candle.h - min) / range) * chartH;
+        const yLow = padding + (1 - (candle.l - min) / range) * chartH;
+        const bias = signal.bias || "neutral";
+        const color = bias === "bullish" ? "#16a34a" : bias === "bearish" ? "#dc2626" : "#94a3b8";
+
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (bias === "bullish") {
+          ctx.moveTo(x, yLow + 6);
+          ctx.lineTo(x - 5, yLow + 16);
+          ctx.lineTo(x + 5, yLow + 16);
+          ctx.closePath();
+          ctx.fill();
+        } else if (bias === "bearish") {
+          ctx.moveTo(x, yHigh - 6);
+          ctx.lineTo(x - 5, yHigh - 16);
+          ctx.lineTo(x + 5, yHigh - 16);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          ctx.arc(x, yHigh - 6, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    }
 
     if (vwap?.length) {
       ctx.strokeStyle = "#38bdf8";
@@ -745,7 +800,7 @@ function MacdPanel({ macd = [], signal = [], histogram = [], width = 640, height
 export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [assetClass, setAssetClass] = useState("crypto");
   const [symbol, setSymbol] = useState(DEFAULTS.crypto);
-  const [interval, setInterval] = useState("1h");
+  const [interval, setInterval] = useState("1d");
   const [candles, setCandles] = useState([]);
   const [dataSource, setDataSource] = useState("loading");
   const [loading, setLoading] = useState(false);
@@ -778,6 +833,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [recommendationsError, setRecommendationsError] = useState("");
   const [recommendationsSource, setRecommendationsSource] = useState("llm");
+  const [recommendationsWarnings, setRecommendationsWarnings] = useState([]);
   const [recommendationDetail, setRecommendationDetail] = useState(null);
   const [recommendationDetailStatus, setRecommendationDetailStatus] = useState("");
   const [watchlistQuery, setWatchlistQuery] = useState("");
@@ -1172,11 +1228,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     if (!serverUrl) return;
     setRecommendationsLoading(true);
     setRecommendationsError("");
+    setRecommendationsWarnings([]);
     try {
       const resp = await fetch(`${serverUrl}/api/trading/recommendations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetClass: "all", topN: 12 })
+        body: JSON.stringify({ assetClass: "all", topN: 12, horizonDays: 180, includeSignals: true })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "recommendations_failed");
@@ -1186,11 +1243,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             assetClass: item.assetClass || item.asset_class || "stock",
             bias: item.bias || "WATCH",
             abstract: item.rationale || item.abstract || "",
-            confidence: item.confidence
+            confidence: item.confidence,
+            signal: item.signal || null
           }))
         : [];
       setRecommendations(picks);
       setRecommendationsSource(data?.source || "llm");
+      setRecommendationsWarnings(Array.isArray(data?.warnings) ? data.warnings : []);
     } catch (err) {
       setRecommendationsError(err?.message || "recommendations_failed");
     } finally {
@@ -1548,14 +1607,28 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const changePct = last && prev ? (change / prev.c) * 100 : 0;
   const liveTag = dataSource && String(dataSource).includes("ws") ? " (live)" : "";
 
-  const patterns = useMemo(() => {
+  const signalEvents = useMemo(() => {
     if (candles.length < 3) return [];
-    const items = [];
-    for (let i = candles.length - 1; i >= Math.max(0, candles.length - 4); i -= 1) {
-      items.push(detectPattern(candles[i], candles[i - 1]));
+    const lookback = Math.min(12, candles.length - 1);
+    const start = Math.max(1, candles.length - lookback);
+    const events = [];
+    for (let i = start; i < candles.length; i += 1) {
+      const pattern = detectPattern(candles[i], candles[i - 1]);
+      if (!pattern) continue;
+      const meta = classifyPattern(pattern);
+      events.push({
+        index: i,
+        pattern,
+        bias: meta.bias,
+        strength: meta.strength,
+        note: meta.note,
+        time: candles[i].t
+      });
     }
-    return items;
+    return events;
   }, [candles]);
+
+  const latestSignal = signalEvents.length ? signalEvents[signalEvents.length - 1] : null;
 
   const vwapSeries = useMemo(() => (showVwap ? computeVWAP(candles) : []), [candles, showVwap]);
   const rsiSeries = useMemo(() => (showRsi ? computeRSI(candles) : []), [candles, showRsi]);
@@ -1569,6 +1642,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     () => recommendations.filter(item => item.assetClass === "stock"),
     [recommendations]
   );
+
+  const weeklyPlan = useMemo(() => {
+    return recommendations
+      .filter(item => item.signal && typeof item.signal.score === "number")
+      .slice()
+      .sort((a, b) => (b.signal.score || 0) - (a.signal.score || 0))
+      .slice(0, 6);
+  }, [recommendations]);
 
   const trainingContext = useMemo(() => {
     const notes = String(tradingProfile?.training?.notes || "").trim();
@@ -2980,7 +3061,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div style={{ fontWeight: 600 }}>Price Action</div>
               <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Pattern: {patterns[0] || "--"}</div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>
+                  Pattern: {latestSignal?.pattern || "--"} {latestSignal?.bias ? `(${latestSignal.bias})` : ""}
+                </div>
                 {liveStatus && <div style={{ fontSize: 11, color: "#0ea5e9" }}>{liveStatus}</div>}
               </div>
             </div>
@@ -3012,7 +3095,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
             <div style={{ height: 360 }}>
-              <CandlestickChart candles={candles} vwap={vwapSeries} width={760} height={360} />
+              <CandlestickChart candles={candles} vwap={vwapSeries} signals={signalEvents} width={760} height={360} />
             </div>
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
               {showRsi && (
@@ -3040,11 +3123,46 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Candle Signals</div>
-              {patterns.map((p, idx) => (
-                <div key={`${p}-${idx}`} style={{ fontSize: 12, color: "#475569" }}>? {p}</div>
-              ))}
-              {patterns.length === 0 && <div style={{ fontSize: 12, color: "#64748b" }}>Not enough data.</div>}
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Signal Highlights</div>
+              {latestSignal ? (
+                <div style={{ marginBottom: 10, padding: 8, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                  <div style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase" }}>Latest signal</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                    <span style={{
+                      fontSize: 10,
+                      padding: "2px 6px",
+                      borderRadius: 999,
+                      background: latestSignal.bias === "bullish" ? "#dcfce7" : latestSignal.bias === "bearish" ? "#fee2e2" : "#e2e8f0",
+                      color: latestSignal.bias === "bullish" ? "#15803d" : latestSignal.bias === "bearish" ? "#b91c1c" : "#475569"
+                    }}>
+                      {latestSignal.bias.toUpperCase()}
+                    </span>
+                    <div style={{ fontWeight: 600, fontSize: 12 }}>{latestSignal.pattern}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                    {latestSignal.note}
+                  </div>
+                </div>
+              ) : null}
+              {signalEvents.length ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {signalEvents.slice(-6).reverse().map((signal, idx) => (
+                    <div key={`${signal.pattern}-${signal.index}-${idx}`} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 999,
+                        background: signal.bias === "bullish" ? "#22c55e" : signal.bias === "bearish" ? "#ef4444" : "#94a3b8"
+                      }} />
+                      <div style={{ fontSize: 12, color: "#334155" }}>
+                        {signal.pattern} · {signal.bias}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: "#64748b" }}>Not enough data.</div>
+              )}
             </div>
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Market Depth</div>
@@ -3153,6 +3271,27 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <div style={{ fontSize: 11, color: "#64748b" }}>
                 Ranked picks with rationale (LLM + trading knowledge).
               </div>
+            {recommendationsWarnings.length > 0 && (
+              <div style={{ fontSize: 11, color: "#b45309", marginTop: 6 }}>
+                {recommendationsWarnings.join(" ")}
+              </div>
+            )}
+            {weeklyPlan.length > 0 && (
+              <div style={{ marginTop: 8, padding: 8, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>Weekly Action Plan</div>
+                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+                  Designed for slower, weekly reviews (not intraday trading).
+                </div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  {weeklyPlan.map((item, idx) => (
+                    <div key={`${item.symbol}-${idx}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11 }}>
+                      <div style={{ fontWeight: 600 }}>{item.symbol}</div>
+                      <div style={{ color: "#475569" }}>{item.signal?.action || "HOLD"} · score {item.signal?.score}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {recommendationsLoading && (
               <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Loading picks…</div>
             )}
@@ -3181,6 +3320,25 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                           }}>
                             {item.bias}
                           </span>
+                          {item.signal?.action && (
+                            <span style={{
+                              fontSize: 10,
+                              padding: "2px 6px",
+                              borderRadius: 999,
+                              background: item.signal.action.includes("ACCUMULATE") || item.signal.action.includes("BUY")
+                                ? "#dbeafe"
+                                : item.signal.action.includes("REDUCE") || item.signal.action.includes("AVOID")
+                                  ? "#fee2e2"
+                                  : "#f1f5f9",
+                              color: item.signal.action.includes("ACCUMULATE") || item.signal.action.includes("BUY")
+                                ? "#1d4ed8"
+                                : item.signal.action.includes("REDUCE") || item.signal.action.includes("AVOID")
+                                  ? "#b91c1c"
+                                  : "#475569"
+                            }}>
+                              {item.signal.action}
+                            </span>
+                          )}
                           <button
                             onClick={(e) => { e.stopPropagation(); handleRecommendationAnalyze(item); }}
                             style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 10 }}
@@ -3193,6 +3351,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
                           Confidence: {(Number(item.confidence) * 100).toFixed(0)}%
                         </div>
+                    )}
+                    {item.signal?.score != null && (
+                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                        Signal score: {item.signal.score} (horizon {item.signal.horizonDays}d)
+                      </div>
                     )}
                     <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{item.abstract}</div>
                   </div>
@@ -3219,6 +3382,25 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         }}>
                           {item.bias}
                         </span>
+                        {item.signal?.action && (
+                          <span style={{
+                            fontSize: 10,
+                            padding: "2px 6px",
+                            borderRadius: 999,
+                            background: item.signal.action.includes("ACCUMULATE") || item.signal.action.includes("BUY")
+                              ? "#dbeafe"
+                              : item.signal.action.includes("REDUCE") || item.signal.action.includes("AVOID")
+                                ? "#fee2e2"
+                                : "#f1f5f9",
+                            color: item.signal.action.includes("ACCUMULATE") || item.signal.action.includes("BUY")
+                              ? "#1d4ed8"
+                              : item.signal.action.includes("REDUCE") || item.signal.action.includes("AVOID")
+                                ? "#b91c1c"
+                                : "#475569"
+                          }}>
+                            {item.signal.action}
+                          </span>
+                        )}
                           <button
                             onClick={(e) => { e.stopPropagation(); handleRecommendationAnalyze(item); }}
                             style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 10 }}
@@ -3230,6 +3412,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     {Number.isFinite(item.confidence) && (
                       <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
                         Confidence: {(Number(item.confidence) * 100).toFixed(0)}%
+                      </div>
+                    )}
+                    {item.signal?.score != null && (
+                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                        Signal score: {item.signal.score} (horizon {item.signal.horizonDays}d)
                       </div>
                     )}
                     <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{item.abstract}</div>

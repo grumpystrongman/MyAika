@@ -103,6 +103,7 @@ import {
   syncTradingSources,
   crawlTradingSources,
   ingestTradingHowTo,
+  ingestTradingDocument,
   ingestTradingUrl,
   ingestTradingFile,
   queryTradingKnowledge,
@@ -133,6 +134,7 @@ import {
 import { runTradingScenario, listTradingScenarios, getScenarioDetail } from "./src/trading/scenarios.js";
 import { searchSymbols } from "./src/trading/symbolSearch.js";
 import { buildRecommendationDetail } from "./src/trading/recommendationDetail.js";
+import { buildLongTermSignal } from "./src/trading/signalEngine.js";
 import { getPolicy, savePolicy, reloadPolicy, getPolicyMeta } from "./src/safety/policyLoader.js";
 import { executeAction } from "./src/safety/executeAction.js";
 import { listAuditEvents, verifyAuditChain } from "./src/safety/auditLog.js";
@@ -162,7 +164,7 @@ import {
   exportRemindersText,
   startReminderScheduler
 } from "./skills/index.js";
-import { getTradingSettings, updateTradingSettings, getTradingEmailSettings, getTradingTrainingSettings } from "./storage/trading_settings.js";
+import { getTradingSettings, updateTradingSettings, getTradingEmailSettings, getTradingTrainingSettings, getDefaultTradingUniverse } from "./storage/trading_settings.js";
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -3222,7 +3224,9 @@ const tradingSettingsSchema = z.object({
 const tradingRecommendationsSchema = z.object({
   assetClass: z.enum(["crypto", "stock", "all"]).optional(),
   topN: z.number().int().min(1).max(20).optional(),
-  symbols: z.array(z.string()).optional()
+  symbols: z.array(z.string()).optional(),
+  horizonDays: z.number().int().min(30).max(365).optional(),
+  includeSignals: z.boolean().optional()
 });
 
 const tradingKnowledgeIngestSchema = z.object({
@@ -3507,6 +3511,8 @@ app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
     const parsed = tradingRecommendationsSchema.parse(req.body || {});
     const assetClass = parsed.assetClass || "all";
     const topN = parsed.topN || 12;
+    const horizonDays = parsed.horizonDays || Number(process.env.TRADING_RECOMMENDATION_WINDOW_DAYS || 180);
+    const includeSignals = parsed.includeSignals !== false;
     const emailSettings = getTradingEmailSettings(getUserId(req));
     const training = getTradingTrainingSettings(getUserId(req));
 
@@ -3519,6 +3525,15 @@ app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
     else if (assetClass === "crypto") watchlist = cryptoList;
     else watchlist = [...stockList, ...cryptoList];
 
+    let fallbackUniverse = null;
+    if (!watchlist.length) {
+      fallbackUniverse = getDefaultTradingUniverse();
+      const fallbackStocks = Array.isArray(fallbackUniverse?.stocks) ? fallbackUniverse.stocks : [];
+      const fallbackCryptos = Array.isArray(fallbackUniverse?.cryptos) ? fallbackUniverse.cryptos : [];
+      if (assetClass === "stock") watchlist = fallbackStocks;
+      else if (assetClass === "crypto") watchlist = fallbackCryptos;
+      else watchlist = [...fallbackStocks, ...fallbackCryptos];
+    }
     if (!watchlist.length) {
       return res.status(400).json({ error: "watchlist_empty" });
     }
@@ -3608,7 +3623,53 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
       source = "daily_picks";
     }
 
-    res.json({ picks, source });
+    if (includeSignals && picks.length) {
+      const signalResults = await Promise.all(picks.map(async pick => {
+        try {
+          const detail = await getScenarioDetail({
+            symbol: pick.symbol,
+            assetClass: pick.assetClass,
+            windowDays: horizonDays
+          });
+          if (!detail || detail.error) return null;
+          return buildLongTermSignal(detail, { horizonDays });
+        } catch {
+          return null;
+        }
+      }));
+      picks = picks.map((pick, idx) => ({
+        ...pick,
+        signal: signalResults[idx] || null
+      }));
+    }
+
+    const historyEnabled = String(process.env.TRADING_RECOMMENDATIONS_STORE_HISTORY || "1") !== "0";
+    if (historyEnabled && picks.length) {
+      const header = [
+        `Recommendation run (${new Date().toISOString()})`,
+        `Asset focus: ${assetClass}`,
+        `Horizon days: ${horizonDays}`,
+        `Source: ${source}`
+      ];
+      const lines = picks.map((pick, idx) => {
+        const signal = pick.signal?.action ? `Signal: ${pick.signal.action} (${pick.signal.score})` : "";
+        return `${idx + 1}. ${pick.symbol} ${pick.bias} ${signal} ${pick.rationale || ""}`.trim();
+      });
+      const text = [...header, "", ...lines].join("\n");
+      ingestTradingDocument({
+        kind: "recommendations",
+        title: `Recommendation Run - ${new Date().toLocaleDateString()}`,
+        text,
+        tags: ["recommendations", "signals", "weekly"],
+        sourceGroup: "recommendations"
+      }).catch(() => {});
+    }
+
+    const warnings = [];
+    if (fallbackUniverse) {
+      warnings.push("Watchlist was empty; using default universe. Add tickers to personalize.");
+    }
+    res.json({ picks, source, horizonDays, warnings });
   } catch (err) {
     if (err?.issues) {
       return res.status(400).json({ error: "invalid_request", detail: err.issues });

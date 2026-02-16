@@ -228,3 +228,11 @@ export function getTradingEmailSettings(userId = "local") {
 export function getTradingTrainingSettings(userId = "local") {
   return getTradingSettings(userId).training;
 }
+
+export function getDefaultTradingUniverse() {
+  const defaults = defaultEmailSettings();
+  return {
+    stocks: Array.isArray(defaults.stocks) ? defaults.stocks : [],
+    cryptos: Array.isArray(defaults.cryptos) ? defaults.cryptos : []
+  };
+}
