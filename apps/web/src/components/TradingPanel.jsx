@@ -73,6 +73,39 @@ function intervalToMs(interval) {
   return lookup[interval] || 60 * 60_000;
 }
 
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatAxisTime(ts, intervalMs) {
+  if (!ts) return "";
+  const date = new Date(ts);
+  if (intervalMs >= 24 * 60 * 60 * 1000) {
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  if (intervalMs >= 60 * 60 * 1000) {
+    return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit" });
+  }
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function drawTimeAxis(ctx, times, width, height, padding, intervalMs) {
+  if (!times.length) return;
+  const ticks = 4;
+  const candleWidth = (width - padding * 2) / times.length;
+  ctx.fillStyle = "rgba(226, 232, 240, 0.7)";
+  ctx.font = "10px 'IBM Plex Mono', monospace";
+  ctx.textAlign = "center";
+  for (let i = 0; i <= ticks; i += 1) {
+    const idx = Math.min(times.length - 1, Math.round((times.length - 1) * (i / ticks)));
+    const x = padding + idx * candleWidth + candleWidth * 0.4;
+    const label = formatAxisTime(times[idx], intervalMs);
+    if (!label) continue;
+    ctx.fillText(label, x, height - padding + 16);
+  }
+}
+
 function computeEMA(values, period) {
   const result = Array(values.length).fill(null);
   if (values.length < period) return result;
@@ -486,9 +519,22 @@ function KnowledgeGraph({ graph, width = 560, height = 360, selectedId = "", onS
   );
 }
 
-function CandlestickChart({ candles, vwap = [], signals = [], width = 640, height = 360 }) {
+function CandlestickChart({
+  candles,
+  vwap = [],
+  signals = [],
+  width = 640,
+  height = 360,
+  intervalMs = 60_000,
+  view,
+  totalCount,
+  onViewChange,
+  hoverIndex,
+  onHoverIndex
+}) {
   const canvasRef = useRef(null);
   const [hover, setHover] = useState(null);
+  const dragRef = useRef({ active: false, lastX: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -603,19 +649,97 @@ function CandlestickChart({ candles, vwap = [], signals = [], width = 640, heigh
       });
       ctx.stroke();
     }
-  }, [candles, hover, vwap]);
+
+    const activeHover = hover != null ? hover : (hoverIndex != null ? hoverIndex : null);
+    if (activeHover != null && activeHover >= 0 && activeHover < candles.length) {
+      const candle = candles[activeHover];
+      const candleWidth = chartW / candles.length;
+      const x = padding + activeHover * candleWidth + candleWidth * 0.4;
+      ctx.strokeStyle = "rgba(148,163,184,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, padding);
+      ctx.lineTo(x, padding + chartH);
+      ctx.stroke();
+
+      const label = formatAxisTime(candle.t, intervalMs);
+      if (label) {
+        ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
+        ctx.font = "10px 'IBM Plex Mono', monospace";
+        const textWidth = ctx.measureText(label).width;
+        const boxW = textWidth + 12;
+        const boxH = 16;
+        ctx.fillRect(x - boxW / 2, height - padding + 4, boxW, boxH);
+        ctx.fillStyle = "#e2e8f0";
+        ctx.textAlign = "center";
+        ctx.fillText(label, x, height - padding + 16);
+      }
+    }
+
+    drawTimeAxis(ctx, candles.map(c => c.t), w, h, padding, intervalMs);
+  }, [candles, hover, vwap, signals, intervalMs, hoverIndex]);
 
   const onMove = (evt) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !candles.length) return;
     const rect = canvas.getBoundingClientRect();
     const x = evt.clientX - rect.left;
     const candleWidth = rect.width / candles.length;
     const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(x / candleWidth)));
     setHover(idx);
+    if (onHoverIndex && view?.start != null) {
+      onHoverIndex(view.start + idx);
+    }
   };
 
-  const onLeave = () => setHover(null);
+  const onLeave = () => {
+    setHover(null);
+    if (onHoverIndex) onHoverIndex(null);
+  };
+
+  const onWheel = (evt) => {
+    if (!onViewChange || !view || !totalCount) return;
+    evt.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = evt.clientX - rect.left;
+    const candleWidth = rect.width / Math.max(1, candles.length);
+    const localIdx = Math.min(candles.length - 1, Math.max(0, Math.floor(x / candleWidth)));
+    const anchorIndex = view.start + localIdx;
+    const scale = evt.deltaY > 0 ? 1.2 : 0.8;
+    const minWindow = Math.min(20, totalCount);
+    const nextWindow = clampNumber(Math.round(view.window * scale), minWindow, totalCount);
+    const anchorRatio = view.window ? (anchorIndex - view.start) / view.window : 0.5;
+    const nextStart = clampNumber(Math.round(anchorIndex - anchorRatio * nextWindow), 0, Math.max(0, totalCount - nextWindow));
+    const nextOffset = Math.max(0, totalCount - (nextStart + nextWindow));
+    onViewChange({ window: nextWindow, offset: nextOffset });
+  };
+
+  const onMouseDown = (evt) => {
+    if (!onViewChange || !view || !totalCount) return;
+    dragRef.current = { active: true, lastX: evt.clientX };
+  };
+
+  const onMouseUp = () => {
+    dragRef.current.active = false;
+  };
+
+  const onMouseDrag = (evt) => {
+    if (!dragRef.current.active || !onViewChange || !view || !totalCount) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const candleWidth = rect.width / Math.max(1, candles.length);
+    const dx = evt.clientX - dragRef.current.lastX;
+    if (Math.abs(dx) < candleWidth) return;
+    const deltaBars = Math.round(dx / candleWidth);
+    if (!deltaBars) return;
+    const nextStart = clampNumber(view.start - deltaBars, 0, Math.max(0, totalCount - view.window));
+    const nextOffset = Math.max(0, totalCount - (nextStart + view.window));
+    dragRef.current.lastX = evt.clientX;
+    onViewChange({ window: view.window, offset: nextOffset });
+  };
 
   const hovered = hover != null ? candles[hover] : null;
 
@@ -627,6 +751,11 @@ function CandlestickChart({ candles, vwap = [], signals = [], width = 640, heigh
         height={height}
         onMouseMove={onMove}
         onMouseLeave={onLeave}
+        onWheel={onWheel}
+        onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
+        onMouseLeaveCapture={onMouseUp}
+        onMouseMoveCapture={onMouseDrag}
         style={{ width: "100%", height: "100%", borderRadius: 16, border: "1px solid #1f2937" }}
       />
       {hovered && (
@@ -641,6 +770,7 @@ function CandlestickChart({ candles, vwap = [], signals = [], width = 640, heigh
           fontSize: 12,
           fontFamily: "'IBM Plex Mono', monospace"
         }}>
+          <div>{formatAxisTime(hovered.t, intervalMs)}</div>
           <div>O {formatNumber(hovered.o)}</div>
           <div>H {formatNumber(hovered.h)}</div>
           <div>L {formatNumber(hovered.l)}</div>
@@ -651,8 +781,25 @@ function CandlestickChart({ candles, vwap = [], signals = [], width = 640, heigh
   );
 }
 
-function IndicatorPanel({ title, series = [], width = 640, height = 120, min = null, max = null, thresholds = [] }) {
+function IndicatorPanel({
+  title,
+  series = [],
+  width = 640,
+  height = 120,
+  min = null,
+  max = null,
+  thresholds = [],
+  times = [],
+  intervalMs = 60_000,
+  view,
+  totalCount,
+  onViewChange,
+  hoverIndex,
+  onHoverIndex
+}) {
   const canvasRef = useRef(null);
+  const dragRef = useRef({ active: false, lastX: 0 });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -708,7 +855,80 @@ function IndicatorPanel({ title, series = [], width = 640, height = 120, min = n
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
-  }, [series, width, height, min, max, thresholds]);
+
+    if (hoverIndex != null && hoverIndex >= 0 && hoverIndex < series.length) {
+      const x = padding + (hoverIndex / (series.length - 1 || 1)) * chartW;
+      ctx.strokeStyle = "rgba(148,163,184,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, padding);
+      ctx.lineTo(x, padding + chartH);
+      ctx.stroke();
+    }
+
+    if (times?.length) {
+      drawTimeAxis(ctx, times, w, h, padding, intervalMs);
+    }
+  }, [series, width, height, min, max, thresholds, times, intervalMs, hoverIndex]);
+
+  const handleMove = (evt) => {
+    if (!series.length) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = evt.clientX - rect.left;
+    const step = rect.width / series.length;
+    const idx = Math.min(series.length - 1, Math.max(0, Math.floor(x / step)));
+    if (onHoverIndex && view?.start != null) onHoverIndex(view.start + idx);
+  };
+
+  const handleLeave = () => {
+    if (onHoverIndex) onHoverIndex(null);
+  };
+
+  const handleWheel = (evt) => {
+    if (!onViewChange || !view || !totalCount || !series.length) return;
+    evt.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = evt.clientX - rect.left;
+    const step = rect.width / series.length;
+    const localIdx = Math.min(series.length - 1, Math.max(0, Math.floor(x / step)));
+    const anchorIndex = view.start + localIdx;
+    const scale = evt.deltaY > 0 ? 1.2 : 0.8;
+    const minWindow = Math.min(20, totalCount);
+    const nextWindow = clampNumber(Math.round(view.window * scale), minWindow, totalCount);
+    const anchorRatio = view.window ? (anchorIndex - view.start) / view.window : 0.5;
+    const nextStart = clampNumber(Math.round(anchorIndex - anchorRatio * nextWindow), 0, Math.max(0, totalCount - nextWindow));
+    const nextOffset = Math.max(0, totalCount - (nextStart + nextWindow));
+    onViewChange({ window: nextWindow, offset: nextOffset });
+  };
+
+  const handleDown = (evt) => {
+    if (!onViewChange || !view || !totalCount) return;
+    dragRef.current = { active: true, lastX: evt.clientX };
+  };
+
+  const handleUp = () => {
+    dragRef.current.active = false;
+  };
+
+  const handleDrag = (evt) => {
+    if (!dragRef.current.active || !onViewChange || !view || !totalCount || !series.length) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const step = rect.width / series.length;
+    const dx = evt.clientX - dragRef.current.lastX;
+    if (Math.abs(dx) < step) return;
+    const deltaBars = Math.round(dx / step);
+    if (!deltaBars) return;
+    const nextStart = clampNumber(view.start - deltaBars, 0, Math.max(0, totalCount - view.window));
+    const nextOffset = Math.max(0, totalCount - (nextStart + view.window));
+    dragRef.current.lastX = evt.clientX;
+    onViewChange({ window: view.window, offset: nextOffset });
+  };
 
   return (
     <div style={{ display: "grid", gap: 6 }}>
@@ -717,14 +937,36 @@ function IndicatorPanel({ title, series = [], width = 640, height = 120, min = n
         ref={canvasRef}
         width={width}
         height={height}
+        onMouseMove={handleMove}
+        onMouseLeave={handleLeave}
+        onWheel={handleWheel}
+        onMouseDown={handleDown}
+        onMouseUp={handleUp}
+        onMouseLeaveCapture={handleUp}
+        onMouseMoveCapture={handleDrag}
         style={{ width: "100%", height: "100%", borderRadius: 12, border: "1px solid #1f2937" }}
       />
     </div>
   );
 }
 
-function MacdPanel({ macd = [], signal = [], histogram = [], width = 640, height = 140 }) {
+function MacdPanel({
+  macd = [],
+  signal = [],
+  histogram = [],
+  width = 640,
+  height = 140,
+  times = [],
+  intervalMs = 60_000,
+  view,
+  totalCount,
+  onViewChange,
+  hoverIndex,
+  onHoverIndex
+}) {
   const canvasRef = useRef(null);
+  const dragRef = useRef({ active: false, lastX: 0 });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -782,7 +1024,80 @@ function MacdPanel({ macd = [], signal = [], histogram = [], width = 640, height
 
     drawLine(macd, "#38bdf8");
     drawLine(signal, "#f59e0b");
-  }, [macd, signal, histogram, width, height]);
+
+    if (hoverIndex != null && hoverIndex >= 0 && hoverIndex < macd.length) {
+      const x = padding + (hoverIndex / (macd.length - 1 || 1)) * chartW;
+      ctx.strokeStyle = "rgba(148,163,184,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, padding);
+      ctx.lineTo(x, padding + chartH);
+      ctx.stroke();
+    }
+
+    if (times?.length) {
+      drawTimeAxis(ctx, times, w, h, padding, intervalMs);
+    }
+  }, [macd, signal, histogram, width, height, times, intervalMs, hoverIndex]);
+
+  const handleMove = (evt) => {
+    if (!macd.length) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = evt.clientX - rect.left;
+    const step = rect.width / macd.length;
+    const idx = Math.min(macd.length - 1, Math.max(0, Math.floor(x / step)));
+    if (onHoverIndex && view?.start != null) onHoverIndex(view.start + idx);
+  };
+
+  const handleLeave = () => {
+    if (onHoverIndex) onHoverIndex(null);
+  };
+
+  const handleWheel = (evt) => {
+    if (!onViewChange || !view || !totalCount || !macd.length) return;
+    evt.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = evt.clientX - rect.left;
+    const step = rect.width / macd.length;
+    const localIdx = Math.min(macd.length - 1, Math.max(0, Math.floor(x / step)));
+    const anchorIndex = view.start + localIdx;
+    const scale = evt.deltaY > 0 ? 1.2 : 0.8;
+    const minWindow = Math.min(20, totalCount);
+    const nextWindow = clampNumber(Math.round(view.window * scale), minWindow, totalCount);
+    const anchorRatio = view.window ? (anchorIndex - view.start) / view.window : 0.5;
+    const nextStart = clampNumber(Math.round(anchorIndex - anchorRatio * nextWindow), 0, Math.max(0, totalCount - nextWindow));
+    const nextOffset = Math.max(0, totalCount - (nextStart + nextWindow));
+    onViewChange({ window: nextWindow, offset: nextOffset });
+  };
+
+  const handleDown = (evt) => {
+    if (!onViewChange || !view || !totalCount) return;
+    dragRef.current = { active: true, lastX: evt.clientX };
+  };
+
+  const handleUp = () => {
+    dragRef.current.active = false;
+  };
+
+  const handleDrag = (evt) => {
+    if (!dragRef.current.active || !onViewChange || !view || !totalCount || !macd.length) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const step = rect.width / macd.length;
+    const dx = evt.clientX - dragRef.current.lastX;
+    if (Math.abs(dx) < step) return;
+    const deltaBars = Math.round(dx / step);
+    if (!deltaBars) return;
+    const nextStart = clampNumber(view.start - deltaBars, 0, Math.max(0, totalCount - view.window));
+    const nextOffset = Math.max(0, totalCount - (nextStart + view.window));
+    dragRef.current.lastX = evt.clientX;
+    onViewChange({ window: view.window, offset: nextOffset });
+  };
 
   return (
     <div style={{ display: "grid", gap: 6 }}>
@@ -791,6 +1106,13 @@ function MacdPanel({ macd = [], signal = [], histogram = [], width = 640, height
         ref={canvasRef}
         width={width}
         height={height}
+        onMouseMove={handleMove}
+        onMouseLeave={handleLeave}
+        onWheel={handleWheel}
+        onMouseDown={handleDown}
+        onMouseUp={handleUp}
+        onMouseLeaveCapture={handleUp}
+        onMouseMoveCapture={handleDrag}
         style={{ width: "100%", height: "100%", borderRadius: 12, border: "1px solid #1f2937" }}
       />
     </div>
@@ -800,7 +1122,7 @@ function MacdPanel({ macd = [], signal = [], histogram = [], width = 640, height
 export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [assetClass, setAssetClass] = useState("crypto");
   const [symbol, setSymbol] = useState(DEFAULTS.crypto);
-  const [interval, setInterval] = useState("1d");
+  const [interval, setInterval] = useState("1h");
   const [candles, setCandles] = useState([]);
   const [dataSource, setDataSource] = useState("loading");
   const [loading, setLoading] = useState(false);
@@ -809,6 +1131,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [showVwap, setShowVwap] = useState(true);
   const [showRsi, setShowRsi] = useState(true);
   const [showMacd, setShowMacd] = useState(true);
+  const [chartView, setChartView] = useState({ window: 120, offset: 0 });
+  const [chartHoverIndex, setChartHoverIndex] = useState(null);
   const [liveStatus, setLiveStatus] = useState("");
   const [alpacaFeed, setAlpacaFeed] = useState("iex");
   const [tradeApiUrl, setTradeApiUrl] = useState("http://localhost:8088");
@@ -1034,6 +1358,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     return { meetingIdPrefix: `rag:${selected}:` };
   }, [activeRagModel]);
 
+  const updateChartView = useCallback((next) => {
+    setChartView(prev => ({ ...prev, ...next }));
+  }, []);
+
   const knowledgeSourceInventory = useMemo(() => {
     const inventory = new Map();
     const normalizeKey = (value) => String(value || "").trim();
@@ -1151,6 +1479,17 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     setCandles([]);
     setDataSource("loading");
     setError("");
+  };
+
+  const applyRangeDays = (days) => {
+    if (!candles.length) return;
+    const bars = Math.max(20, Math.round((days * 86400000) / intervalMs));
+    updateChartView({ window: Math.min(candles.length, bars), offset: 0 });
+  };
+
+  const resetChartView = () => {
+    if (!candles.length) return;
+    updateChartView({ window: Math.min(candles.length, 120), offset: 0 });
   };
 
   const applyTickToCandles = (price, size, timeMs, intervalMs) => {
@@ -1464,6 +1803,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   }, [assetClass, symbolTouched]);
 
   useEffect(() => {
+    setChartView(prev => ({ ...prev, window: 120, offset: 0 }));
+    setChartHoverIndex(null);
+  }, [symbol, interval]);
+
+  useEffect(() => {
     let mounted = true;
     let pollId = null;
     async function loadCandles() {
@@ -1633,6 +1977,54 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const vwapSeries = useMemo(() => (showVwap ? computeVWAP(candles) : []), [candles, showVwap]);
   const rsiSeries = useMemo(() => (showRsi ? computeRSI(candles) : []), [candles, showRsi]);
   const macdSeries = useMemo(() => (showMacd ? computeMACD(candles) : { macd: [], signal: [], histogram: [] }), [candles, showMacd]);
+  const intervalMs = useMemo(() => intervalToMs(interval), [interval]);
+
+  const viewRange = useMemo(() => {
+    const total = candles.length;
+    if (!total) return { start: 0, end: 0, window: 0, offset: 0, total };
+    const minWindow = Math.min(20, total);
+    const windowSize = clampNumber(chartView.window || minWindow, minWindow, total);
+    const maxOffset = Math.max(0, total - windowSize);
+    const offset = clampNumber(chartView.offset || 0, 0, maxOffset);
+    const end = total - offset;
+    const start = Math.max(0, end - windowSize);
+    return { start, end, window: windowSize, offset, total };
+  }, [candles.length, chartView.window, chartView.offset]);
+
+  useEffect(() => {
+    setChartView(prev => {
+      const total = candles.length;
+      if (!total) return prev;
+      const minWindow = Math.min(20, total);
+      const windowSize = clampNumber(prev.window || minWindow, minWindow, total);
+      const maxOffset = Math.max(0, total - windowSize);
+      const offset = clampNumber(prev.offset || 0, 0, maxOffset);
+      if (windowSize === prev.window && offset === prev.offset) return prev;
+      return { ...prev, window: windowSize, offset };
+    });
+  }, [candles.length]);
+
+  const visibleCandles = useMemo(() => candles.slice(viewRange.start, viewRange.end), [candles, viewRange.start, viewRange.end]);
+  const visibleVwap = useMemo(() => vwapSeries.slice(viewRange.start, viewRange.end), [vwapSeries, viewRange.start, viewRange.end]);
+  const visibleRsi = useMemo(() => rsiSeries.slice(viewRange.start, viewRange.end), [rsiSeries, viewRange.start, viewRange.end]);
+  const visibleMacd = useMemo(() => ({
+    macd: macdSeries.macd.slice(viewRange.start, viewRange.end),
+    signal: macdSeries.signal.slice(viewRange.start, viewRange.end),
+    histogram: macdSeries.histogram.slice(viewRange.start, viewRange.end)
+  }), [macdSeries, viewRange.start, viewRange.end]);
+
+  const visibleSignals = useMemo(() => {
+    if (!signalEvents.length) return [];
+    return signalEvents
+      .filter(event => event.index >= viewRange.start && event.index < viewRange.end)
+      .map(event => ({ ...event, index: event.index - viewRange.start }));
+  }, [signalEvents, viewRange.start, viewRange.end]);
+
+  const hoverLocalIndex = useMemo(() => {
+    if (chartHoverIndex == null) return null;
+    if (chartHoverIndex < viewRange.start || chartHoverIndex >= viewRange.end) return null;
+    return chartHoverIndex - viewRange.start;
+  }, [chartHoverIndex, viewRange.start, viewRange.end]);
 
   const cryptoRecs = useMemo(
     () => recommendations.filter(item => item.assetClass === "crypto"),
@@ -3080,6 +3472,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} />
                 MACD
               </label>
+              <span style={{ color: "#94a3b8" }}>Scroll to zoom • Drag to pan</span>
               {assetClass === "stock" && (
                 <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   Alpaca feed
@@ -3094,28 +3487,83 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 </label>
               )}
             </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {[
+                { label: "1W", days: 7 },
+                { label: "1M", days: 30 },
+                { label: "3M", days: 90 },
+                { label: "6M", days: 180 },
+                { label: "1Y", days: 365 }
+              ].map(range => (
+                <button
+                  key={range.label}
+                  onClick={() => applyRangeDays(range.days)}
+                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                >
+                  {range.label}
+                </button>
+              ))}
+              <button
+                onClick={() => updateChartView({ window: Math.max(20, viewRange.total), offset: 0 })}
+                style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+              >
+                All
+              </button>
+              <button
+                onClick={resetChartView}
+                style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+              >
+                Reset
+              </button>
+            </div>
             <div style={{ height: 360 }}>
-              <CandlestickChart candles={candles} vwap={vwapSeries} signals={signalEvents} width={760} height={360} />
+              <CandlestickChart
+                candles={visibleCandles}
+                vwap={visibleVwap}
+                signals={visibleSignals}
+                width={760}
+                height={360}
+                intervalMs={intervalMs}
+                view={viewRange}
+                totalCount={viewRange.total}
+                onViewChange={updateChartView}
+                hoverIndex={hoverLocalIndex}
+                onHoverIndex={setChartHoverIndex}
+              />
             </div>
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
               {showRsi && (
                 <IndicatorPanel
                   title="RSI (14)"
-                  series={rsiSeries}
+                  series={visibleRsi}
                   min={0}
                   max={100}
                   thresholds={[30, 70]}
                   width={760}
                   height={120}
+                  times={visibleCandles.map(c => c.t)}
+                  intervalMs={intervalMs}
+                  view={viewRange}
+                  totalCount={viewRange.total}
+                  onViewChange={updateChartView}
+                  hoverIndex={hoverLocalIndex}
+                  onHoverIndex={setChartHoverIndex}
                 />
               )}
               {showMacd && (
                 <MacdPanel
-                  macd={macdSeries.macd}
-                  signal={macdSeries.signal}
-                  histogram={macdSeries.histogram}
+                  macd={visibleMacd.macd}
+                  signal={visibleMacd.signal}
+                  histogram={visibleMacd.histogram}
                   width={760}
                   height={140}
+                  times={visibleCandles.map(c => c.t)}
+                  intervalMs={intervalMs}
+                  view={viewRange}
+                  totalCount={viewRange.total}
+                  onViewChange={updateChartView}
+                  hoverIndex={hoverLocalIndex}
+                  onHoverIndex={setChartHoverIndex}
                 />
               )}
             </div>

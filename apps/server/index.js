@@ -195,6 +195,7 @@ startFirefliesSyncLoop();
 startDailyPicksLoop();
 startTradingKnowledgeSyncLoop();
 startTradingRssLoop();
+startTradingRecommendationMonitor();
 
 const rateMap = new Map();
 let voiceFullTestState = {
@@ -775,6 +776,275 @@ function buildTradingPreferenceBlock(training) {
     });
   }
   return lines.join("\n");
+}
+
+async function computeTradingRecommendations({
+  assetClass = "all",
+  topN = 12,
+  symbols,
+  horizonDays,
+  includeSignals = true,
+  userId = "local"
+} = {}) {
+  const resolvedHorizon = horizonDays || Number(process.env.TRADING_RECOMMENDATION_WINDOW_DAYS || 180);
+  const emailSettings = getTradingEmailSettings(userId);
+  const training = getTradingTrainingSettings(userId);
+
+  const stockList = Array.isArray(symbols) && symbols.length
+    ? symbols
+    : Array.isArray(emailSettings?.stocks) ? emailSettings.stocks : [];
+  const cryptoList = Array.isArray(emailSettings?.cryptos) ? emailSettings.cryptos : [];
+  let watchlist = [];
+  if (assetClass === "stock") watchlist = stockList;
+  else if (assetClass === "crypto") watchlist = cryptoList;
+  else watchlist = [...stockList, ...cryptoList];
+
+  let warnings = [];
+  if (!watchlist.length) {
+    const fallbackUniverse = getDefaultTradingUniverse();
+    const fallbackStocks = Array.isArray(fallbackUniverse?.stocks) ? fallbackUniverse.stocks : [];
+    const fallbackCryptos = Array.isArray(fallbackUniverse?.cryptos) ? fallbackUniverse.cryptos : [];
+    if (assetClass === "stock") watchlist = fallbackStocks;
+    else if (assetClass === "crypto") watchlist = fallbackCryptos;
+    else watchlist = [...fallbackStocks, ...fallbackCryptos];
+    if (watchlist.length) {
+      warnings.push("Watchlist was empty; using default universe. Add tickers to personalize.");
+    }
+  }
+  if (!watchlist.length) throw new Error("watchlist_empty");
+
+  let picks = [];
+  let source = "daily_picks";
+  if (process.env.OPENAI_API_KEY) {
+    const preferenceBlock = buildTradingPreferenceBlock(training);
+    let knowledgeContext = "";
+    try {
+      const knowledgeQuery = `Trading knowledge, risk considerations, and recent trade lessons for: ${watchlist.join(", ")}`;
+      const knowledge = await queryTradingKnowledge(knowledgeQuery, { topK: 6 });
+      knowledgeContext = knowledge?.context || "";
+    } catch {
+      knowledgeContext = "";
+    }
+    const systemPrompt = `
+You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
+Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
+If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
+Return ONLY a JSON array like:
+[
+  {"symbol":"BTC-USD","assetClass":"crypto","bias":"BUY","confidence":0.72,"rationale":"..."}
+]
+Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
+`.trim();
+
+    const userPrompt = `
+Asset focus: ${assetClass}
+Requested picks: ${topN}
+Watchlist: ${watchlist.join(", ")}
+${knowledgeContext ? `Trading knowledge context:\n${knowledgeContext}` : "Trading knowledge context: (none)"}
+${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
+`.trim();
+
+    try {
+      const response = await client.responses.create({
+        model: OPENAI_MODEL,
+        max_output_tokens: 700,
+        input: [
+          { role: "system", content: [{ type: "input_text", text: systemPrompt }] },
+          { role: "user", content: [{ type: "input_text", text: userPrompt }] }
+        ]
+      });
+      let rawText = extractResponseText(response);
+      if (!rawText.trim()) {
+        rawText = await fallbackChatCompletion({ systemPrompt, userText: userPrompt, maxOutputTokens: 700 });
+      }
+      if (rawText.trim()) {
+        const parsedJson = extractJsonArray(rawText);
+        const rawList = Array.isArray(parsedJson) ? parsedJson : Array.isArray(parsedJson?.picks) ? parsedJson.picks : null;
+        if (rawList) {
+          picks = rawList
+            .map(item => ({
+              symbol: String(item?.symbol || "").trim(),
+              assetClass: String(item?.assetClass || item?.asset_class || "").trim()
+                || (stockList.includes(item?.symbol) ? "stock" : "crypto"),
+              bias: String(item?.bias || "WATCH").toUpperCase(),
+              confidence: Number(item?.confidence || 0),
+              rationale: String(item?.rationale || item?.abstract || "").trim()
+            }))
+            .filter(item => item.symbol)
+            .slice(0, topN);
+          source = knowledgeContext ? "llm+rag" : "llm";
+        }
+      }
+    } catch {
+      // fall back to daily picks
+    }
+  }
+
+  if (!picks.length) {
+    const daily = await generateDailyPicks({
+      emailSettings: {
+        ...emailSettings,
+        stocks: stockList,
+        cryptos: cryptoList
+      }
+    });
+    picks = (daily || []).slice(0, topN).map(item => ({
+      symbol: item.symbol,
+      assetClass: item.assetClass || item.asset_class || "stock",
+      bias: item.bias || "WATCH",
+      confidence: item.score != null ? Math.min(0.9, Math.max(0.1, Math.abs(item.score) * 10)) : 0,
+      rationale: item.abstract || item.reason || ""
+    }));
+    source = "daily_picks";
+  }
+
+  if (includeSignals && picks.length) {
+    const signalResults = await Promise.all(picks.map(async pick => {
+      try {
+        const detail = await getScenarioDetail({
+          symbol: pick.symbol,
+          assetClass: pick.assetClass,
+          windowDays: resolvedHorizon
+        });
+        if (!detail || detail.error) return null;
+        return buildLongTermSignal(detail, { horizonDays: resolvedHorizon });
+      } catch {
+        return null;
+      }
+    }));
+    picks = picks.map((pick, idx) => ({
+      ...pick,
+      signal: signalResults[idx] || null
+    }));
+  }
+
+  const historyEnabled = String(process.env.TRADING_RECOMMENDATIONS_STORE_HISTORY || "1") !== "0";
+  if (historyEnabled && picks.length) {
+    const header = [
+      `Recommendation run (${new Date().toISOString()})`,
+      `Asset focus: ${assetClass}`,
+      `Horizon days: ${resolvedHorizon}`,
+      `Source: ${source}`
+    ];
+    const lines = picks.map((pick, idx) => {
+      const signal = pick.signal?.action ? `Signal: ${pick.signal.action} (${pick.signal.score})` : "";
+      return `${idx + 1}. ${pick.symbol} ${pick.bias} ${signal} ${pick.rationale || ""}`.trim();
+    });
+    const text = [...header, "", ...lines].join("\n");
+    ingestTradingDocument({
+      kind: "recommendations",
+      title: `Recommendation Run - ${new Date().toLocaleDateString()}`,
+      text,
+      tags: ["recommendations", "signals", "weekly"],
+      sourceGroup: "recommendations"
+    }).catch(() => {});
+  }
+
+  return { picks, source, horizonDays: resolvedHorizon, warnings };
+}
+
+const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
+let monitorInterval = null;
+let monitorRunning = false;
+
+function getMonitorState() {
+  const flags = getRuntimeFlags();
+  return flags[MONITOR_FLAG_KEY] || { lastRunAt: null, alerts: {} };
+}
+
+function setMonitorState(state) {
+  return setRuntimeFlag(MONITOR_FLAG_KEY, state);
+}
+
+function shouldSendMonitorAlert(alerts, symbol, action, cooldownHours) {
+  const entry = alerts?.[symbol];
+  if (!entry || !entry.lastSentAt) return true;
+  if (entry.action !== action) return true;
+  const last = Date.parse(entry.lastSentAt);
+  if (!Number.isFinite(last)) return true;
+  const cooldownMs = (cooldownHours || 12) * 60 * 60 * 1000;
+  return Date.now() - last > cooldownMs;
+}
+
+async function runTradingRecommendationMonitor({ force = false } = {}) {
+  if (monitorRunning) return { ok: false, skipped: true, reason: "already_running" };
+  const enabled = String(process.env.TRADING_MONITOR_ENABLED || "1") === "1";
+  if (!enabled && !force) return { ok: false, skipped: true, reason: "disabled" };
+  monitorRunning = true;
+  try {
+    const topN = Number(process.env.TRADING_MONITOR_TOP_N || 8);
+    const minScore = Number(process.env.TRADING_MONITOR_MIN_SIGNAL_SCORE || 1.2);
+    const cooldownHours = Number(process.env.TRADING_MONITOR_ALERT_COOLDOWN_HOURS || 12);
+    const horizonDays = Number(process.env.TRADING_RECOMMENDATION_WINDOW_DAYS || 180);
+
+    const result = await computeTradingRecommendations({
+      assetClass: "all",
+      topN,
+      horizonDays,
+      includeSignals: true,
+      userId: "local"
+    });
+
+    const alerts = [];
+    const state = getMonitorState();
+    const alertState = state.alerts || {};
+    const chatId = process.env.TELEGRAM_CHAT_ID || "";
+
+    for (const pick of result.picks || []) {
+      const signal = pick.signal;
+      if (!signal || typeof signal.score !== "number") continue;
+      if (Math.abs(signal.score) < minScore) continue;
+      const action = signal.action || "";
+      const isBuy = action.includes("ACCUMULATE") || action.includes("BUY");
+      const isSell = action.includes("REDUCE") || action.includes("AVOID");
+      if (!isBuy && !isSell) continue;
+
+      const alertAction = isBuy ? "BUY" : "SELL";
+      if (!shouldSendMonitorAlert(alertState, pick.symbol, alertAction, cooldownHours)) continue;
+
+      const reasons = Array.isArray(signal.reasons) ? signal.reasons.slice(0, 4) : [];
+      const message = [
+        "Aika Market Monitor",
+        `${alertAction} signal for ${pick.symbol}`,
+        `Signal: ${signal.action} (score ${signal.score})`,
+        pick.rationale ? `Rationale: ${pick.rationale}` : "",
+        reasons.length ? `Why: ${reasons.join(" ")}` : "",
+        "Review in Trading > Recommendations."
+      ].filter(Boolean).join("\n");
+
+      if (chatId) {
+        try {
+          await sendTelegramMessage(chatId, message);
+          alertState[pick.symbol] = { action: alertAction, lastSentAt: new Date().toISOString() };
+          alerts.push({ symbol: pick.symbol, action: alertAction, score: signal.score });
+        } catch (err) {
+          console.warn("monitor telegram failed", err?.message || err);
+        }
+      }
+    }
+
+    setMonitorState({
+      lastRunAt: new Date().toISOString(),
+      alerts: alertState,
+      lastAlerts: alerts
+    });
+    return { ok: true, alerts, total: alerts.length };
+  } catch (err) {
+    console.warn("monitor failed", err?.message || err);
+    return { ok: false, error: err?.message || "monitor_failed" };
+  } finally {
+    monitorRunning = false;
+  }
+}
+
+function startTradingRecommendationMonitor() {
+  if (monitorInterval) return;
+  const intervalMin = Number(process.env.TRADING_MONITOR_INTERVAL_MINUTES || 360);
+  if (!intervalMin || intervalMin <= 0) return;
+  runTradingRecommendationMonitor().catch(() => {});
+  monitorInterval = setInterval(() => {
+    runTradingRecommendationMonitor().catch(() => {});
+  }, intervalMin * 60_000);
 }
 
 async function analyzeTradeOutcome(outcome = {}) {
@@ -3509,167 +3779,15 @@ app.get("/api/trading/symbols/search", rateLimit, async (req, res) => {
 app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
   try {
     const parsed = tradingRecommendationsSchema.parse(req.body || {});
-    const assetClass = parsed.assetClass || "all";
-    const topN = parsed.topN || 12;
-    const horizonDays = parsed.horizonDays || Number(process.env.TRADING_RECOMMENDATION_WINDOW_DAYS || 180);
-    const includeSignals = parsed.includeSignals !== false;
-    const emailSettings = getTradingEmailSettings(getUserId(req));
-    const training = getTradingTrainingSettings(getUserId(req));
-
-    const stockList = Array.isArray(parsed.symbols) && parsed.symbols.length
-      ? parsed.symbols
-      : Array.isArray(emailSettings?.stocks) ? emailSettings.stocks : [];
-    const cryptoList = Array.isArray(emailSettings?.cryptos) ? emailSettings.cryptos : [];
-    let watchlist = [];
-    if (assetClass === "stock") watchlist = stockList;
-    else if (assetClass === "crypto") watchlist = cryptoList;
-    else watchlist = [...stockList, ...cryptoList];
-
-    let fallbackUniverse = null;
-    if (!watchlist.length) {
-      fallbackUniverse = getDefaultTradingUniverse();
-      const fallbackStocks = Array.isArray(fallbackUniverse?.stocks) ? fallbackUniverse.stocks : [];
-      const fallbackCryptos = Array.isArray(fallbackUniverse?.cryptos) ? fallbackUniverse.cryptos : [];
-      if (assetClass === "stock") watchlist = fallbackStocks;
-      else if (assetClass === "crypto") watchlist = fallbackCryptos;
-      else watchlist = [...fallbackStocks, ...fallbackCryptos];
-    }
-    if (!watchlist.length) {
-      return res.status(400).json({ error: "watchlist_empty" });
-    }
-
-    let picks = [];
-    let source = "daily_picks";
-    if (process.env.OPENAI_API_KEY) {
-      const preferenceBlock = buildTradingPreferenceBlock(training);
-      let knowledgeContext = "";
-      try {
-        const knowledgeQuery = `Trading knowledge, risk considerations, and recent trade lessons for: ${watchlist.join(", ")}`;
-        const knowledge = await queryTradingKnowledge(knowledgeQuery, { topK: 6 });
-        knowledgeContext = knowledge?.context || "";
-      } catch {
-        knowledgeContext = "";
-      }
-      const systemPrompt = `
-You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
-Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
-If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
-Return ONLY a JSON array like:
-[
-  {"symbol":"BTC-USD","assetClass":"crypto","bias":"BUY","confidence":0.72,"rationale":"..."}
-]
-Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
-`.trim();
-
-      const userPrompt = `
-Asset focus: ${assetClass}
-Requested picks: ${topN}
-Watchlist: ${watchlist.join(", ")}
-${knowledgeContext ? `Trading knowledge context:\n${knowledgeContext}` : "Trading knowledge context: (none)"}
-${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
-`.trim();
-
-      try {
-        const response = await client.responses.create({
-          model: OPENAI_MODEL,
-          max_output_tokens: 700,
-          input: [
-            { role: "system", content: [{ type: "input_text", text: systemPrompt }] },
-            { role: "user", content: [{ type: "input_text", text: userPrompt }] }
-          ]
-        });
-        let rawText = extractResponseText(response);
-        if (!rawText.trim()) {
-          rawText = await fallbackChatCompletion({ systemPrompt, userText: userPrompt, maxOutputTokens: 700 });
-        }
-        if (rawText.trim()) {
-          const parsedJson = extractJsonArray(rawText);
-          const rawList = Array.isArray(parsedJson) ? parsedJson : Array.isArray(parsedJson?.picks) ? parsedJson.picks : null;
-          if (rawList) {
-            picks = rawList
-              .map(item => ({
-                symbol: String(item?.symbol || "").trim(),
-                assetClass: String(item?.assetClass || item?.asset_class || "").trim()
-                  || (stockList.includes(item?.symbol) ? "stock" : "crypto"),
-                bias: String(item?.bias || "WATCH").toUpperCase(),
-                confidence: Number(item?.confidence || 0),
-                rationale: String(item?.rationale || item?.abstract || "").trim()
-              }))
-              .filter(item => item.symbol)
-              .slice(0, topN);
-            source = knowledgeContext ? "llm+rag" : "llm";
-          }
-        }
-      } catch {
-        // fall back to daily picks
-      }
-    }
-
-    if (!picks.length) {
-      const daily = await generateDailyPicks({
-        emailSettings: {
-          ...emailSettings,
-          stocks: stockList,
-          cryptos: cryptoList
-        }
-      });
-      picks = (daily || []).slice(0, topN).map(item => ({
-        symbol: item.symbol,
-        assetClass: item.assetClass || item.asset_class || "stock",
-        bias: item.bias || "WATCH",
-        confidence: item.score != null ? Math.min(0.9, Math.max(0.1, Math.abs(item.score) * 10)) : 0,
-        rationale: item.abstract || item.reason || ""
-      }));
-      source = "daily_picks";
-    }
-
-    if (includeSignals && picks.length) {
-      const signalResults = await Promise.all(picks.map(async pick => {
-        try {
-          const detail = await getScenarioDetail({
-            symbol: pick.symbol,
-            assetClass: pick.assetClass,
-            windowDays: horizonDays
-          });
-          if (!detail || detail.error) return null;
-          return buildLongTermSignal(detail, { horizonDays });
-        } catch {
-          return null;
-        }
-      }));
-      picks = picks.map((pick, idx) => ({
-        ...pick,
-        signal: signalResults[idx] || null
-      }));
-    }
-
-    const historyEnabled = String(process.env.TRADING_RECOMMENDATIONS_STORE_HISTORY || "1") !== "0";
-    if (historyEnabled && picks.length) {
-      const header = [
-        `Recommendation run (${new Date().toISOString()})`,
-        `Asset focus: ${assetClass}`,
-        `Horizon days: ${horizonDays}`,
-        `Source: ${source}`
-      ];
-      const lines = picks.map((pick, idx) => {
-        const signal = pick.signal?.action ? `Signal: ${pick.signal.action} (${pick.signal.score})` : "";
-        return `${idx + 1}. ${pick.symbol} ${pick.bias} ${signal} ${pick.rationale || ""}`.trim();
-      });
-      const text = [...header, "", ...lines].join("\n");
-      ingestTradingDocument({
-        kind: "recommendations",
-        title: `Recommendation Run - ${new Date().toLocaleDateString()}`,
-        text,
-        tags: ["recommendations", "signals", "weekly"],
-        sourceGroup: "recommendations"
-      }).catch(() => {});
-    }
-
-    const warnings = [];
-    if (fallbackUniverse) {
-      warnings.push("Watchlist was empty; using default universe. Add tickers to personalize.");
-    }
-    res.json({ picks, source, horizonDays, warnings });
+    const result = await computeTradingRecommendations({
+      assetClass: parsed.assetClass || "all",
+      topN: parsed.topN || 12,
+      symbols: parsed.symbols,
+      horizonDays: parsed.horizonDays,
+      includeSignals: parsed.includeSignals !== false,
+      userId: getUserId(req)
+    });
+    res.json(result);
   } catch (err) {
     if (err?.issues) {
       return res.status(400).json({ error: "invalid_request", detail: err.issues });
@@ -3696,6 +3814,29 @@ app.post("/api/trading/recommendations/detail", rateLimit, async (req, res) => {
     res.json(detail);
   } catch (err) {
     res.status(500).json({ error: err?.message || "recommendation_detail_failed" });
+  }
+});
+
+app.get("/api/trading/monitor/status", (_req, res) => {
+  try {
+    const state = getMonitorState();
+    res.json({
+      enabled: String(process.env.TRADING_MONITOR_ENABLED || "1") === "1",
+      intervalMinutes: Number(process.env.TRADING_MONITOR_INTERVAL_MINUTES || 360),
+      lastRunAt: state.lastRunAt || null,
+      lastAlerts: state.lastAlerts || []
+    });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "monitor_status_failed" });
+  }
+});
+
+app.post("/api/trading/monitor/run", rateLimit, async (_req, res) => {
+  try {
+    const result = await runTradingRecommendationMonitor({ force: true });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "monitor_run_failed" });
   }
 });
 
