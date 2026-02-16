@@ -9,7 +9,9 @@ import {
   markTradingRssCrawl,
   hasTradingRssItem,
   recordTradingRssItem,
-  listTradingRssItems
+  listTradingRssItems,
+  getRagMeta,
+  setRagMeta
 } from "../rag/vectorStore.js";
 import { ingestTradingDocument } from "./knowledgeRag.js";
 import { extractPdfText } from "./pdfUtils.js";
@@ -22,6 +24,14 @@ const RSS_OCR_DEFAULT = String(process.env.TRADING_RSS_OCR_DEFAULT || "1") !== "
 const RSS_OCR_MAX_PAGES = Number(process.env.TRADING_RSS_OCR_MAX_PAGES || 0);
 const RSS_OCR_SCALE = Number(process.env.TRADING_RSS_OCR_SCALE || 2.0);
 const RSS_MAX_ARTICLE_CHARS = Number(process.env.TRADING_RSS_MAX_ARTICLE_CHARS || 25000);
+
+const DEFAULT_RSS_SOURCES = [
+  { url: "https://feeds.marketwatch.com/marketwatch/topstories/", title: "MarketWatch Top Stories" },
+  { url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", title: "CNBC Top News" },
+  { url: "https://www.nasdaq.com/feed/rssoutbound?category=markets", title: "Nasdaq Markets" },
+  { url: "https://www.investing.com/rss/news_25.rss", title: "Investing.com Market News" },
+  { url: "https://www.sec.gov/news/pressreleases.rss", title: "SEC Press Releases" }
+];
 
 const FOREIGN_KEYWORDS = [
   "nifty", "sensex", "bse", "nse", "ftse", "dax", "nikkei", "hang seng", "asx",
@@ -196,8 +206,8 @@ async function getItemContent(item) {
   return "";
 }
 
-export async function crawlTradingRssSources({ entries, force = false, maxItemsPerFeed } = {}) {
-  const list = entries?.length ? entries : listTradingRssSources({ limit: 500, includeDisabled: false });
+export async function crawlTradingRssSources({ entries, force = false, maxItemsPerFeed, collectionId = "trading" } = {}) {
+  const list = entries?.length ? entries : listTradingRssSources({ limit: 500, includeDisabled: false, collectionId });
   const results = {
     ok: true,
     total: list.length,
@@ -277,12 +287,12 @@ export async function crawlTradingRssSources({ entries, force = false, maxItemsP
   return results;
 }
 
-export function listTradingRssSourcesUi({ limit = 100, includeDisabled = true, search = "" } = {}) {
-  return listTradingRssSources({ limit, includeDisabled, search });
+export function listTradingRssSourcesUi({ limit = 100, includeDisabled = true, search = "", collectionId = "trading" } = {}) {
+  return listTradingRssSources({ limit, includeDisabled, search, collectionId });
 }
 
-export function addTradingRssSource({ url, title = "", tags = [], enabled = true, includeForeign = false } = {}) {
-  return upsertTradingRssSource({ url, title, tags, enabled, includeForeign });
+export function addTradingRssSource({ url, title = "", tags = [], enabled = true, includeForeign = false, collectionId = "trading" } = {}) {
+  return upsertTradingRssSource({ url, title, tags, enabled, includeForeign, collectionId });
 }
 
 export function updateTradingRssSourceUi(id, { title, tags, enabled, includeForeign } = {}) {
@@ -314,7 +324,29 @@ function looksForeignUrl(url) {
   return FOREIGN_KEYWORDS.some(keyword => lower.includes(keyword));
 }
 
-export async function seedRssSourcesFromFeedspot(feedspotUrl) {
+export function ensureTradingRssSeeded() {
+  const seeded = getRagMeta("trading_rss_seeded");
+  if (seeded) return false;
+  const existing = listTradingRssSources({ limit: 1, includeDisabled: true, collectionId: "trading" });
+  if (existing.length) {
+    setRagMeta("trading_rss_seeded", nowIso());
+    return false;
+  }
+  DEFAULT_RSS_SOURCES.forEach(item => {
+    upsertTradingRssSource({
+      url: item.url,
+      title: item.title || item.url,
+      tags: ["default"],
+      enabled: true,
+      includeForeign: false,
+      collectionId: "trading"
+    });
+  });
+  setRagMeta("trading_rss_seeded", nowIso());
+  return true;
+}
+
+export async function seedRssSourcesFromFeedspot(feedspotUrl, { collectionId = "trading" } = {}) {
   const html = await fetchUrlText(feedspotUrl);
   const urls = extractFeedUrlsFromFeedspot(html);
   const added = [];
@@ -328,7 +360,8 @@ export async function seedRssSourcesFromFeedspot(feedspotUrl) {
       title: url,
       tags: ["feedspot"],
       enabled: !isForeign,
-      includeForeign: false
+      includeForeign: false,
+      collectionId
     });
     if (!source) return;
     if (isForeign) disabled.push(url);
@@ -340,6 +373,7 @@ export async function seedRssSourcesFromFeedspot(feedspotUrl) {
 let rssInterval = null;
 export function startTradingRssLoop() {
   if (rssInterval) return;
+  ensureTradingRssSeeded();
   if (RSS_ON_STARTUP) {
     crawlTradingRssSources().catch(() => {});
   }

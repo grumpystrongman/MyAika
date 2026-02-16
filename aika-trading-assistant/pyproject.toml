@@ -23,7 +23,9 @@ dependencies = [
   "redis>=5.0.0",
   "qdrant-client>=1.7.0",
   "python-dotenv>=1.0.1",
-  "orjson>=3.9.15"
+  "orjson>=3.9.15",
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.5"
 ]
 
 [project.optional-dependencies]

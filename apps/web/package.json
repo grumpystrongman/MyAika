@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@myaika/shared": "0.0.1",
+    "d3-force": "^3.0.0",
     "next": "^14.2.5",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",

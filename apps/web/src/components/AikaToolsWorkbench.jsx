@@ -1,10 +1,146 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 function parseTagList(value) {
   return String(value || "")
     .split(",")
     .map(t => t.trim())
     .filter(Boolean);
+}
+
+const TOOL_HELP = {
+  meetings: {
+    title: "Meeting Summaries",
+    why: "Turn raw transcripts into decisions, tasks, and summaries you can search later.",
+    how: "Paste a title + transcript, then click Summarize & Store. Output is saved into the RAG and optional docs."
+  },
+  notesCreate: {
+    title: "Create Notes",
+    why: "Capture durable knowledge, SOPs, and ideas that Aika can retrieve later.",
+    how: "Add a clear title, concise body, and tags for easier recall."
+  },
+  notesSearch: {
+    title: "Search Notes",
+    why: "Find previous notes quickly when you need context or a reminder.",
+    how: "Search by keyword and optional tags; results return ranked matches."
+  },
+  todosCreate: {
+    title: "Create Todos",
+    why: "Track action items with priority and due dates so nothing slips.",
+    how: "Fill the fields and click Create Todo. Use tags to group related items."
+  },
+  todosList: {
+    title: "List Todos",
+    why: "Review open or due tasks and stay current on commitments.",
+    how: "Filter by status, due window, or tag, then click List Todos."
+  },
+  calendar: {
+    title: "Calendar Holds",
+    why: "Reserve time on your calendar and avoid conflicts.",
+    how: "Provide title, start/end, attendees, and click Create Calendar Event."
+  },
+  emailDraft: {
+    title: "Email Drafts",
+    why: "Generate a clean draft without sending so you can review first.",
+    how: "Fill the fields and click Draft Email. You can edit before sending."
+  },
+  emailSend: {
+    title: "Send Email",
+    why: "Send a vetted draft after review and approval.",
+    how: "Enter the draft ID and recipients, then click Send Email."
+  },
+  spreadsheet: {
+    title: "Spreadsheet Updates",
+    why: "Apply structured updates to local or Google Sheets data.",
+    how: "Provide the file path or sheet ID and a JSON array of changes."
+  },
+  memoryWrite: {
+    title: "Store Memory",
+    why: "Persist preferences or facts across sessions for better personalization.",
+    how: "Pick the tier, add content + tags, and click Store Memory."
+  },
+  memorySearch: {
+    title: "Search Memory",
+    why: "Recall stored facts and preferences fast.",
+    how: "Search by keyword and tags; results are ranked by relevance."
+  },
+  integrations: {
+    title: "Integrations Status",
+    why: "Verify external services are connected and healthy.",
+    how: "Open the Integrations tab and refresh for current status."
+  },
+  messaging: {
+    title: "Messaging",
+    why: "Send alerts to Slack/Discord/Telegram for quick notifications.",
+    how: "Pick the channel, add a message, and click Send."
+  }
+};
+
+function InfoTip({ help }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function handleClick(event) {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  if (!help) return null;
+  return (
+    <span ref={containerRef} style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        style={{
+          border: "1px solid #cbd5f5",
+          background: "#f8fafc",
+          borderRadius: 999,
+          width: 18,
+          height: 18,
+          fontSize: 11,
+          color: "#0f172a",
+          cursor: "pointer",
+          lineHeight: "16px",
+          textAlign: "center"
+        }}
+      >
+        i
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute",
+          top: 24,
+          right: 0,
+          zIndex: 20,
+          width: 260,
+          background: "#0f172a",
+          color: "#e2e8f0",
+          padding: 10,
+          borderRadius: 10,
+          fontSize: 11,
+          boxShadow: "0 10px 30px rgba(15, 23, 42, 0.2)"
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{help.title}</div>
+          <div style={{ marginBottom: 6 }}><strong>Why:</strong> {help.why}</div>
+          <div><strong>How:</strong> {help.how}</div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+function SectionHeader({ title, helpKey }) {
+  return (
+    <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+      <span>{title}</span>
+      <InfoTip help={TOOL_HELP[helpKey]} />
+    </div>
+  );
 }
 
 export default function AikaToolsWorkbench({ serverUrl }) {
@@ -109,7 +245,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       </div>
       {active === "meetings" && (
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Summarize & Store</div>
+          <SectionHeader title="Summarize & Store" helpKey="meetings" />
           <label style={{ fontSize: 12 }}>
             Title
             <input value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
@@ -142,7 +278,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       {active === "notes" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Create Note</div>
+            <SectionHeader title="Create Note" helpKey="notesCreate" />
             <label style={{ fontSize: 12 }}>
               Title
               <input value={notesForm.title} onChange={(e) => setNotesForm({ ...notesForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
@@ -177,7 +313,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
           </div>
 
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Search Notes</div>
+            <SectionHeader title="Search Notes" helpKey="notesSearch" />
             <label style={{ fontSize: 12 }}>
               Query
               <input value={notesSearch.query} onChange={(e) => setNotesSearch({ ...notesSearch, query: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
@@ -220,7 +356,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       {active === "todos" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Create Todo</div>
+            <SectionHeader title="Create Todo" helpKey="todosCreate" />
             <label style={{ fontSize: 12 }}>
               Title
               <input value={todosForm.title} onChange={(e) => setTodosForm({ ...todosForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
@@ -263,7 +399,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
           </div>
 
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>List Todos</div>
+            <SectionHeader title="List Todos" helpKey="todosList" />
             <label style={{ fontSize: 12 }}>
               Status
               <select value={todoFilters.status} onChange={(e) => setTodoFilters({ ...todoFilters, status: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
@@ -307,7 +443,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "calendar" && (
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Propose Hold</div>
+          <SectionHeader title="Propose Hold" helpKey="calendar" />
           <label style={{ fontSize: 12 }}>
             Title
             <input value={calendarForm.title} onChange={(e) => setCalendarForm({ ...calendarForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
@@ -354,7 +490,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       {active === "email" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Draft Reply</div>
+            <SectionHeader title="Draft Reply" helpKey="emailDraft" />
             <label style={{ fontSize: 12 }}>
               From
               <input value={emailDraftForm.from} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, from: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
@@ -415,7 +551,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
           </div>
 
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Send Draft (Approval Required)</div>
+            <SectionHeader title="Send Draft (Approval Required)" helpKey="emailSend" />
             <label style={{ fontSize: 12 }}>
               Draft ID
               <input value={emailSendForm.draftId} onChange={(e) => setEmailSendForm({ ...emailSendForm, draftId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
@@ -457,7 +593,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "spreadsheet" && (
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Draft Spreadsheet Patch</div>
+          <SectionHeader title="Draft Spreadsheet Patch" helpKey="spreadsheet" />
           <label style={{ fontSize: 12 }}>
             Target Type
             <select value={sheetForm.type} onChange={(e) => setSheetForm({ ...sheetForm, type: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
@@ -499,7 +635,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       {active === "memory" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Write Memory</div>
+            <SectionHeader title="Write Memory" helpKey="memoryWrite" />
             <label style={{ fontSize: 12 }}>
               Tier
               <select value={memoryForm.tier} onChange={(e) => setMemoryForm({ ...memoryForm, tier: Number(e.target.value) })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
@@ -547,7 +683,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
           </div>
 
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Search Memory</div>
+            <SectionHeader title="Search Memory" helpKey="memorySearch" />
             <label style={{ fontSize: 12 }}>
               Tier
               <select value={memorySearchForm.tier} onChange={(e) => setMemorySearchForm({ ...memorySearchForm, tier: Number(e.target.value) })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
@@ -592,7 +728,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "integrations" && (
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Integration Checks</div>
+          <SectionHeader title="Integration Checks" helpKey="integrations" />
           <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
             Google status: {googleStatus?.connected ? "connected" : "not connected"}
             {integrationsStatus?.google_docs?.configured === false ? " (missing config)" : ""}
@@ -644,7 +780,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "messaging" && (
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Send Message (Approval Required)</div>
+          <SectionHeader title="Send Message (Approval Required)" helpKey="messaging" />
           <label style={{ fontSize: 12 }}>
             Tool
             <select value={messageForm.tool} onChange={(e) => setMessageForm({ ...messageForm, tool: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>

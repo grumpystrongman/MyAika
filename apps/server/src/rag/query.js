@@ -134,6 +134,8 @@ export async function answerRagQuestion(question, { topK = 8, filters = {} } = {
     const summaryRows = listMeetingSummaries({
       dateFrom: effectiveFilters.dateFrom,
       dateTo: effectiveFilters.dateTo,
+      meetingType: effectiveFilters.meetingType,
+      meetingIdPrefix: effectiveFilters.meetingIdPrefix,
       limit: Math.max(6, effectiveTopK)
     });
     if (summaryRows.length) {

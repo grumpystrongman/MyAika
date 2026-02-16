@@ -117,19 +117,22 @@ function ensureSchema() {
 
     CREATE TABLE IF NOT EXISTS trading_sources (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      url TEXT UNIQUE,
+      collection_id TEXT,
+      url TEXT,
       tags_json TEXT,
       enabled INTEGER,
       created_at TEXT,
       updated_at TEXT,
       last_crawled_at TEXT,
       last_status TEXT,
-      last_error TEXT
+      last_error TEXT,
+      UNIQUE(collection_id, url)
     );
 
     CREATE TABLE IF NOT EXISTS trading_rss_sources (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      url TEXT UNIQUE,
+      collection_id TEXT,
+      url TEXT,
       title TEXT,
       tags_json TEXT,
       enabled INTEGER,
@@ -138,7 +141,17 @@ function ensureSchema() {
       updated_at TEXT,
       last_crawled_at TEXT,
       last_status TEXT,
-      last_error TEXT
+      last_error TEXT,
+      UNIQUE(collection_id, url)
+    );
+
+    CREATE TABLE IF NOT EXISTS rag_collections (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      description TEXT,
+      kind TEXT,
+      created_at TEXT,
+      updated_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS trading_rss_items (
@@ -178,6 +191,8 @@ function ensureMigrations() {
   ensureColumn("meeting_summaries", "updated_at", "TEXT");
   ensureColumn("meeting_emails", "error", "TEXT");
   ensureColumn("meetings", "source_group", "TEXT");
+  ensureColumn("trading_sources", "collection_id", "TEXT");
+  ensureColumn("trading_rss_sources", "collection_id", "TEXT");
   ensureColumn("trading_rss_sources", "tags_json", "TEXT");
   ensureColumn("trading_rss_sources", "include_foreign", "INTEGER");
   ensureColumn("trading_rss_sources", "updated_at", "TEXT");
@@ -188,6 +203,98 @@ function ensureMigrations() {
   ensureColumn("trading_rss_items", "decision", "TEXT");
   ensureColumn("trading_rss_items", "reason", "TEXT");
   ensureColumn("trading_rss_items", "content_hash", "TEXT");
+  migrateTradingSourcesSchema();
+  migrateTradingRssSourcesSchema();
+}
+
+function hasUniqueIndex(table, columns = []) {
+  const indexes = db.prepare(`PRAGMA index_list(${table})`).all();
+  for (const idx of indexes) {
+    if (!idx.unique) continue;
+    const info = db.prepare(`PRAGMA index_info(${idx.name})`).all();
+    const cols = info.map(row => row.name);
+    if (cols.length !== columns.length) continue;
+    if (columns.every((col, i) => cols[i] === col)) return true;
+  }
+  return false;
+}
+
+function migrateTradingSourcesSchema() {
+  const cols = db.prepare("PRAGMA table_info(trading_sources)").all();
+  if (!cols.length) return;
+  const hasComposite = hasUniqueIndex("trading_sources", ["collection_id", "url"]);
+  const hasLegacy = hasUniqueIndex("trading_sources", ["url"]);
+  if (hasComposite || !hasLegacy) return;
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE trading_sources RENAME TO trading_sources_old");
+    db.exec(`
+      CREATE TABLE trading_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        collection_id TEXT,
+        url TEXT,
+        tags_json TEXT,
+        enabled INTEGER,
+        created_at TEXT,
+        updated_at TEXT,
+        last_crawled_at TEXT,
+        last_status TEXT,
+        last_error TEXT,
+        UNIQUE(collection_id, url)
+      );
+    `);
+    db.exec(`
+      INSERT INTO trading_sources (id, collection_id, url, tags_json, enabled, created_at, updated_at, last_crawled_at, last_status, last_error)
+      SELECT id, COALESCE(collection_id, 'trading'), url, tags_json, enabled, created_at, updated_at, last_crawled_at, last_status, last_error
+      FROM trading_sources_old;
+    `);
+    db.exec("DROP TABLE trading_sources_old");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_trading_sources_enabled ON trading_sources(enabled)");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+function migrateTradingRssSourcesSchema() {
+  const cols = db.prepare("PRAGMA table_info(trading_rss_sources)").all();
+  if (!cols.length) return;
+  const hasComposite = hasUniqueIndex("trading_rss_sources", ["collection_id", "url"]);
+  const hasLegacy = hasUniqueIndex("trading_rss_sources", ["url"]);
+  if (hasComposite || !hasLegacy) return;
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE trading_rss_sources RENAME TO trading_rss_sources_old");
+    db.exec(`
+      CREATE TABLE trading_rss_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        collection_id TEXT,
+        url TEXT,
+        title TEXT,
+        tags_json TEXT,
+        enabled INTEGER,
+        include_foreign INTEGER,
+        created_at TEXT,
+        updated_at TEXT,
+        last_crawled_at TEXT,
+        last_status TEXT,
+        last_error TEXT,
+        UNIQUE(collection_id, url)
+      );
+    `);
+    db.exec(`
+      INSERT INTO trading_rss_sources (id, collection_id, url, title, tags_json, enabled, include_foreign, created_at, updated_at, last_crawled_at, last_status, last_error)
+      SELECT id, COALESCE(collection_id, 'trading'), url, title, tags_json, enabled, include_foreign, created_at, updated_at, last_crawled_at, last_status, last_error
+      FROM trading_rss_sources_old;
+    `);
+    db.exec("DROP TABLE trading_rss_sources_old");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_trading_rss_sources_enabled ON trading_rss_sources(enabled)");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
 }
 
 function getMeta(key) {
@@ -317,6 +424,7 @@ function normalizeTradingSourceRow(row) {
   if (!row) return null;
   return {
     id: row.id,
+    collection_id: row.collection_id || "trading",
     url: row.url,
     tags: row.tags_json ? JSON.parse(row.tags_json) : [],
     enabled: Boolean(row.enabled),
@@ -328,10 +436,19 @@ function normalizeTradingSourceRow(row) {
   };
 }
 
-export function listTradingSources({ limit = 100, offset = 0, search = "", includeDisabled = true } = {}) {
+export function listTradingSources({ limit = 100, offset = 0, search = "", includeDisabled = true, collectionId = "trading" } = {}) {
   initRagStore();
   const where = [];
   const params = [];
+  if (collectionId) {
+    if (collectionId === "trading") {
+      where.push("(collection_id = ? OR collection_id IS NULL)");
+      params.push(collectionId);
+    } else {
+      where.push("collection_id = ?");
+      params.push(collectionId);
+    }
+  }
   if (!includeDisabled) {
     where.push("enabled = 1");
   }
@@ -355,30 +472,37 @@ export function getTradingSource(id) {
   return normalizeTradingSourceRow(row);
 }
 
-export function getTradingSourceByUrl(url) {
+export function getTradingSourceByUrl(url, { collectionId = "trading" } = {}) {
   initRagStore();
-  const row = db.prepare("SELECT * FROM trading_sources WHERE url = ?").get(url);
+  let row = null;
+  if (collectionId === "trading") {
+    row = db.prepare("SELECT * FROM trading_sources WHERE url = ? AND (collection_id = ? OR collection_id IS NULL)").get(url, collectionId);
+  } else {
+    row = db.prepare("SELECT * FROM trading_sources WHERE url = ? AND collection_id = ?").get(url, collectionId);
+  }
   return normalizeTradingSourceRow(row);
 }
 
-export function upsertTradingSource({ url, tags = [], enabled = true }) {
+export function upsertTradingSource({ url, tags = [], enabled = true, collectionId = "trading" }) {
   initRagStore();
   const now = nowIso();
   db.prepare(`
-    INSERT INTO trading_sources (url, tags_json, enabled, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(url) DO UPDATE SET
+    INSERT INTO trading_sources (collection_id, url, tags_json, enabled, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(collection_id, url) DO UPDATE SET
+      collection_id = excluded.collection_id,
       tags_json = excluded.tags_json,
       enabled = excluded.enabled,
       updated_at = excluded.updated_at
   `).run(
+    collectionId,
     url,
     JSON.stringify(tags || []),
     enabled ? 1 : 0,
     now,
     now
   );
-  return getTradingSourceByUrl(url);
+  return getTradingSourceByUrl(url, { collectionId });
 }
 
 export function updateTradingSource(id, { tags, enabled } = {}) {
@@ -415,6 +539,7 @@ function normalizeTradingRssRow(row) {
   if (!row) return null;
   return {
     id: row.id,
+    collection_id: row.collection_id || "trading",
     url: row.url,
     title: row.title || "",
     tags: row.tags_json ? JSON.parse(row.tags_json) : [],
@@ -428,10 +553,19 @@ function normalizeTradingRssRow(row) {
   };
 }
 
-export function listTradingRssSources({ limit = 100, offset = 0, search = "", includeDisabled = true } = {}) {
+export function listTradingRssSources({ limit = 100, offset = 0, search = "", includeDisabled = true, collectionId = "trading" } = {}) {
   initRagStore();
   const where = [];
   const params = [];
+  if (collectionId) {
+    if (collectionId === "trading") {
+      where.push("(collection_id = ? OR collection_id IS NULL)");
+      params.push(collectionId);
+    } else {
+      where.push("collection_id = ?");
+      params.push(collectionId);
+    }
+  }
   if (!includeDisabled) {
     where.push("enabled = 1");
   }
@@ -455,25 +589,32 @@ export function getTradingRssSource(id) {
   return normalizeTradingRssRow(row);
 }
 
-export function getTradingRssSourceByUrl(url) {
+export function getTradingRssSourceByUrl(url, { collectionId = "trading" } = {}) {
   initRagStore();
-  const row = db.prepare("SELECT * FROM trading_rss_sources WHERE url = ?").get(url);
+  let row = null;
+  if (collectionId === "trading") {
+    row = db.prepare("SELECT * FROM trading_rss_sources WHERE url = ? AND (collection_id = ? OR collection_id IS NULL)").get(url, collectionId);
+  } else {
+    row = db.prepare("SELECT * FROM trading_rss_sources WHERE url = ? AND collection_id = ?").get(url, collectionId);
+  }
   return normalizeTradingRssRow(row);
 }
 
-export function upsertTradingRssSource({ url, title = "", tags = [], enabled = true, includeForeign = false } = {}) {
+export function upsertTradingRssSource({ url, title = "", tags = [], enabled = true, includeForeign = false, collectionId = "trading" } = {}) {
   initRagStore();
   const now = nowIso();
   db.prepare(`
-    INSERT INTO trading_rss_sources (url, title, tags_json, enabled, include_foreign, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(url) DO UPDATE SET
+    INSERT INTO trading_rss_sources (collection_id, url, title, tags_json, enabled, include_foreign, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(collection_id, url) DO UPDATE SET
+      collection_id = excluded.collection_id,
       title = excluded.title,
       tags_json = excluded.tags_json,
       enabled = excluded.enabled,
       include_foreign = excluded.include_foreign,
       updated_at = excluded.updated_at
   `).run(
+    collectionId,
     url,
     title || "",
     JSON.stringify(tags || []),
@@ -482,7 +623,7 @@ export function upsertTradingRssSource({ url, title = "", tags = [], enabled = t
     now,
     now
   );
-  return getTradingRssSourceByUrl(url);
+  return getTradingRssSourceByUrl(url, { collectionId });
 }
 
 export function updateTradingRssSource(id, { title, tags, enabled, includeForeign } = {}) {
@@ -559,6 +700,57 @@ export function listTradingRssItems({ sourceId, limit = 50 } = {}) {
     LIMIT ?
   `).all(...params, Number(limit || 50));
   return rows;
+}
+
+export function listRagCollections({ limit = 100, offset = 0 } = {}) {
+  initRagStore();
+  const rows = db.prepare(`
+    SELECT * FROM rag_collections
+    ORDER BY created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(Number(limit || 100), Number(offset || 0));
+  return rows.map(row => ({
+    id: row.id,
+    title: row.title || "",
+    description: row.description || "",
+    kind: row.kind || "custom",
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  }));
+}
+
+export function getRagCollection(id) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM rag_collections WHERE id = ?").get(id);
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.title || "",
+    description: row.description || "",
+    kind: row.kind || "custom",
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+export function upsertRagCollection({ id, title = "", description = "", kind = "custom" } = {}) {
+  initRagStore();
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO rag_collections (id, title, description, kind, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      description = excluded.description,
+      kind = excluded.kind,
+      updated_at = excluded.updated_at
+  `).run(id, title, description, kind, now, now);
+  return getRagCollection(id);
+}
+
+export function deleteRagCollection(id) {
+  initRagStore();
+  db.prepare("DELETE FROM rag_collections WHERE id = ?").run(id);
 }
 
 export function upsertChunks(chunks) {
@@ -838,6 +1030,26 @@ export function getChunksByIds(chunkIds = [], filters = {}) {
     where.push("c.meeting_id LIKE ?");
     params.push(`${filters.meetingIdPrefix}%`);
   }
+  if (filters?.meetingType) {
+    const type = String(filters.meetingType || "").toLowerCase();
+    if (type === "memory") {
+      where.push("m.id LIKE 'memory:%'");
+    } else if (type === "feedback") {
+      where.push("m.id LIKE 'feedback:%'");
+    } else if (type === "recording" || type === "recordings") {
+      where.push("m.id LIKE 'recording:%'");
+    } else if (type === "trading") {
+      where.push("m.id LIKE 'trading:%'");
+    } else if (type === "fireflies") {
+      where.push("m.id NOT LIKE 'memory:%'");
+      where.push("m.id NOT LIKE 'feedback:%'");
+      where.push("m.id NOT LIKE 'recording:%'");
+      where.push("m.id NOT LIKE 'trading:%'");
+      where.push("m.id NOT LIKE 'rag:%'");
+    } else if (type === "custom") {
+      where.push("m.id LIKE 'rag:%'");
+    }
+  }
   if (filters?.dateFrom) {
     where.push("m.occurred_at >= ?");
     params.push(filters.dateFrom);
@@ -857,7 +1069,7 @@ export function getChunksByIds(chunkIds = [], filters = {}) {
   return db.prepare(sql).all(...params);
 }
 
-export function listMeetingSummaries({ dateFrom, dateTo, limit = 20 } = {}) {
+export function listMeetingSummaries({ dateFrom, dateTo, limit = 20, meetingType = "", meetingIdPrefix = "" } = {}) {
   initRagStore();
   const where = [];
   const params = [];
@@ -868,6 +1080,30 @@ export function listMeetingSummaries({ dateFrom, dateTo, limit = 20 } = {}) {
   if (dateTo) {
     where.push("m.occurred_at <= ?");
     params.push(dateTo);
+  }
+  if (meetingIdPrefix) {
+    where.push("m.id LIKE ?");
+    params.push(`${meetingIdPrefix}%`);
+  }
+  if (meetingType) {
+    const type = String(meetingType || "").toLowerCase();
+    if (type === "memory") {
+      where.push("m.id LIKE 'memory:%'");
+    } else if (type === "feedback") {
+      where.push("m.id LIKE 'feedback:%'");
+    } else if (type === "recording" || type === "recordings") {
+      where.push("m.id LIKE 'recording:%'");
+    } else if (type === "trading") {
+      where.push("m.id LIKE 'trading:%'");
+    } else if (type === "fireflies") {
+      where.push("m.id NOT LIKE 'memory:%'");
+      where.push("m.id NOT LIKE 'feedback:%'");
+      where.push("m.id NOT LIKE 'recording:%'");
+      where.push("m.id NOT LIKE 'trading:%'");
+      where.push("m.id NOT LIKE 'rag:%'");
+    } else if (type === "custom") {
+      where.push("m.id LIKE 'rag:%'");
+    }
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
@@ -882,7 +1118,7 @@ export function listMeetingSummaries({ dateFrom, dateTo, limit = 20 } = {}) {
   return db.prepare(sql).all(...params, Number(limit || 20));
 }
 
-export function listMeetings({ type = "all", limit = 20, offset = 0, search = "" } = {}) {
+export function listMeetings({ type = "all", limit = 20, offset = 0, search = "", participant = "", meetingIdPrefix = "" } = {}) {
   initRagStore();
   const where = [];
   const params = [];
@@ -906,6 +1142,14 @@ export function listMeetings({ type = "all", limit = 20, offset = 0, search = ""
   if (search) {
     where.push("(m.title LIKE ? OR m.raw_transcript LIKE ?)");
     params.push(`%${search}%`, `%${search}%`);
+  }
+  if (participant) {
+    where.push("m.participants_json LIKE ?");
+    params.push(`%${participant}%`);
+  }
+  if (meetingIdPrefix) {
+    where.push("m.id LIKE ?");
+    params.push(`${meetingIdPrefix}%`);
   }
 
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -921,7 +1165,7 @@ export function listMeetings({ type = "all", limit = 20, offset = 0, search = ""
   return db.prepare(sql).all(...params, Number(limit || 20), Number(offset || 0));
 }
 
-export function listMeetingsRaw({ type = "all", limit = 200, offset = 0, search = "" } = {}) {
+export function listMeetingsRaw({ type = "all", limit = 200, offset = 0, search = "", meetingIdPrefix = "" } = {}) {
   initRagStore();
   const where = [];
   const params = [];
@@ -946,16 +1190,160 @@ export function listMeetingsRaw({ type = "all", limit = 200, offset = 0, search 
     where.push("(m.title LIKE ? OR m.raw_transcript LIKE ?)");
     params.push(`%${search}%`, `%${search}%`);
   }
+  if (meetingIdPrefix) {
+    where.push("m.id LIKE ?");
+    params.push(`${meetingIdPrefix}%`);
+  }
 
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const sql = `
-    SELECT m.id, m.title, m.occurred_at, m.source_url, m.source_group, m.raw_transcript, m.created_at
+    SELECT m.id, m.title, m.occurred_at, m.source_url, m.source_group, m.raw_transcript, m.created_at, m.participants_json
     FROM meetings m
     ${whereSql}
     ORDER BY m.occurred_at DESC
     LIMIT ? OFFSET ?
   `;
   return db.prepare(sql).all(...params, Number(limit || 200), Number(offset || 0));
+}
+
+export function getSnippetsForMeetings(meetingIds = [], { term = "", limit = 6 } = {}) {
+  initRagStore();
+  if (!meetingIds.length) return [];
+  const placeholders = meetingIds.map(() => "?").join(",");
+  const where = [`c.meeting_id IN (${placeholders})`];
+  const params = [...meetingIds];
+  if (term) {
+    where.push("c.text LIKE ?");
+    params.push(`%${term}%`);
+  }
+  const sql = `
+    SELECT c.chunk_id, c.meeting_id, c.text,
+           m.title AS meeting_title, m.occurred_at
+    FROM chunks c
+    JOIN meetings m ON m.id = c.meeting_id
+    WHERE ${where.join(" AND ")}
+    ORDER BY LENGTH(c.text) DESC
+    LIMIT ?
+  `;
+  return db.prepare(sql).all(...params, Number(limit || 6));
+}
+
+const FIREFLIES_STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "has", "have", "if", "in", "is", "it",
+  "its", "of", "on", "or", "that", "the", "to", "was", "were", "will", "with", "you", "your", "our", "we", "they",
+  "meeting", "sync", "notes", "recap", "call", "demo",
+  "mp3", "aac", "am", "pm",
+  "jan", "january", "feb", "february", "mar", "march", "apr", "april",
+  "may", "jun", "june", "jul", "july", "aug", "august", "sep", "sept",
+  "september", "oct", "october", "nov", "november", "dec", "december"
+]);
+
+function extractTitleTopics(title = "", limit = 3) {
+  const tokens = String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => token.length > 2 && token.length <= 18 && !FIREFLIES_STOPWORDS.has(token))
+    .filter(token => !/^\\d+$/.test(token))
+    .filter(token => !/^[a-f0-9]{8,}$/.test(token));
+  const uniq = [];
+  for (const token of tokens) {
+    if (!uniq.includes(token)) uniq.push(token);
+    if (uniq.length >= limit) break;
+  }
+  return uniq;
+}
+
+export function getFirefliesGraph({ limit = 500 } = {}) {
+  const rows = listMeetingsRaw({ type: "fireflies", limit });
+  const nodeCounts = new Map();
+  const linkCounts = new Map();
+  const participantCounts = new Map();
+  const topicCounts = new Map();
+
+  for (const row of rows) {
+    let participants = [];
+    if (row?.participants_json) {
+      try {
+        const parsed = JSON.parse(row.participants_json);
+        if (Array.isArray(parsed)) participants = parsed.map(item => String(item || "").trim()).filter(Boolean);
+      } catch {
+        participants = [];
+      }
+    }
+    const topics = extractTitleTopics(row?.title || "");
+    const participantNodes = participants.slice(0, 8);
+    const topicNodes = topics.slice(0, 3).map(topic => `#${topic}`);
+    const nodes = Array.from(new Set([...participantNodes, ...topicNodes]));
+
+    nodes.forEach(node => {
+      nodeCounts.set(node, (nodeCounts.get(node) || 0) + 1);
+      if (node.startsWith("#")) {
+        topicCounts.set(node, (topicCounts.get(node) || 0) + 1);
+      } else {
+        participantCounts.set(node, (participantCounts.get(node) || 0) + 1);
+      }
+    });
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const [a, b] = [nodes[i], nodes[j]].sort();
+        const key = `${a}::${b}`;
+        linkCounts.set(key, (linkCounts.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  const nodes = Array.from(nodeCounts.entries())
+    .map(([id, count]) => ({ id, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 140);
+  const nodeSet = new Set(nodes.map(node => node.id));
+  const links = Array.from(linkCounts.entries())
+    .map(([key, weight]) => {
+      const [source, target] = key.split("::");
+      return { source, target, weight };
+    })
+    .filter(link => nodeSet.has(link.source) && nodeSet.has(link.target))
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 240);
+
+  return {
+    totalMeetings: rows.length,
+    nodes,
+    links,
+    topParticipants: Array.from(participantCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, count]) => ({ name, count })),
+    topTopics: Array.from(topicCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([tag, count]) => ({ tag, count }))
+  };
+}
+
+export function getFirefliesNodeDetails(nodeId, { limitMeetings = 8, limitSnippets = 6 } = {}) {
+  const rawId = String(nodeId || "").trim();
+  if (!rawId) return null;
+  const isTopic = rawId.startsWith("#");
+  const label = isTopic ? rawId.slice(1) : rawId;
+  const meetings = isTopic
+    ? listMeetings({ type: "fireflies", limit: limitMeetings, search: label })
+    : listMeetings({ type: "fireflies", limit: limitMeetings, participant: label });
+  const meetingIds = meetings.map(item => item.id).filter(Boolean);
+  const snippets = getSnippetsForMeetings(meetingIds, {
+    term: isTopic ? label : "",
+    limit: limitSnippets
+  });
+  return {
+    nodeId: rawId,
+    type: isTopic ? "topic" : "participant",
+    label,
+    meetings,
+    snippets
+  };
 }
 
 export function getRagCounts() {

@@ -49,7 +49,6 @@
     "install.software",
     "api.external_post",
     "messaging.slackPost",
-    "messaging.telegramSend",
     "messaging.discordSend",
     "messaging.whatsapp.send",
     "messaging.sms.send",

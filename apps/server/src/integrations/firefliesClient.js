@@ -7,14 +7,33 @@ function getApiKey() {
 async function firefliesRequest(query, variables = {}) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("fireflies_api_key_missing");
-  const response = await fetch(FIREFLIES_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({ query, variables })
-  });
+  const timeoutMs = Number(process.env.FIREFLIES_TIMEOUT_MS || 45000);
+  const controller = new AbortController();
+  const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  let response;
+  try {
+    response = await fetch(FIREFLIES_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal
+    });
+  } catch (err) {
+    if (timeout) clearTimeout(timeout);
+    if (err?.name === "AbortError") {
+      const timeoutErr = new Error("fireflies_request_timeout");
+      timeoutErr.code = "fireflies_timeout";
+      throw timeoutErr;
+    }
+    throw err;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
   const text = await response.text();
   if (!response.ok) {
     const err = new Error(text || "fireflies_request_failed");

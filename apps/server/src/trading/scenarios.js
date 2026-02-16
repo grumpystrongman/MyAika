@@ -327,6 +327,7 @@ function buildScenarioNarrative({
   ma10,
   ma20,
   ma50,
+  ma200,
   momentum5,
   momentum10,
   momentum20,
@@ -340,6 +341,7 @@ function buildScenarioNarrative({
   worstDayPct,
   trendSlopePct,
   trendLabel,
+  trendStrengthPct,
   regime,
   avgVolume,
   recentVolume,
@@ -347,38 +349,140 @@ function buildScenarioNarrative({
   volumeChangePct,
   support,
   resistance,
+  atr14,
+  atrPct,
+  volShort,
+  volLong,
+  volRegime,
+  winRate,
+  upDays,
+  downDays,
+  avgUp,
+  avgDown,
+  maAlignment,
+  breakoutLabel,
   warnings
 } = {}) {
   const lines = [];
   lines.push(`Scenario detail for ${symbol} (${assetClass}) over the last ${windowDays} days.`);
   lines.push(`Data coverage: ${points} daily bars from ${startDate || "unknown"} to ${endDate || "unknown"}.`);
+
   if (startPrice != null && endPrice != null && returnPct != null) {
     lines.push(`Price moved from ${startPrice} to ${endPrice}, a ${returnPct}% return over the window.`);
   }
+
+  const structureParts = [];
   if (rangeHigh != null && rangeLow != null && rangePct != null) {
-    lines.push(`The price range was ${rangeLow} to ${rangeHigh} (${rangePct}% span). The latest close sits about ${positionPct}% into that range.`);
+    structureParts.push(`Range: ${rangeLow} to ${rangeHigh} (${rangePct}% span).`);
   }
-  if (trendLabel) {
-    lines.push(`Trend signal: ${trendLabel} with a slope of about ${trendSlopePct}% per day. Short/long averages: 10d ${ma10 ?? "Not enough data"}, 20d ${ma20 ?? "Not enough data"}, 50d ${ma50 ?? "Not enough data"}.`);
-  }
-  if (momentum5 != null || momentum10 != null || momentum20 != null || rsi14 != null) {
-    lines.push(`Momentum check: 5d ${momentum5 ?? "Not enough data"}%, 10d ${momentum10 ?? "Not enough data"}%, 20d ${momentum20 ?? "Not enough data"}%. RSI(14) is ${rsi14 ?? "Not enough data"}.`);
-  }
-  if (dailyVol != null || annualVol != null || maxDrawdownPct != null) {
-    lines.push(`Risk view: daily volatility about ${dailyVol ?? "Not enough data"}%, annualized volatility about ${annualVol ?? "Not enough data"}%. Max drawdown in the window was ${maxDrawdownPct ?? "Not enough data"}%. Best day ${bestDayPct ?? "Not enough data"}%, worst day ${worstDayPct ?? "Not enough data"}%.`);
-  }
-  if (avgDailyReturn != null || annualReturn != null || sharpe != null) {
-    lines.push(`Return efficiency: average daily return ${avgDailyReturn ?? "Not enough data"}%, annualized return ${annualReturn ?? "Not enough data"}%, Sharpe (0% rf) ${sharpe ?? "Not enough data"}.`);
+  if (positionPct != null) {
+    structureParts.push(`Latest close sits about ${positionPct}% into that range.`);
   }
   if (support != null && resistance != null) {
-    lines.push(`Support/resistance snapshot: support near ${support}, resistance near ${resistance}.`);
+    structureParts.push(`Support near ${support}; resistance near ${resistance}.`);
   }
+  if (breakoutLabel) {
+    structureParts.push(breakoutLabel);
+  }
+  if (structureParts.length) {
+    lines.push(`Structure: ${structureParts.join(" ")}`);
+  }
+
+  const trendParts = [];
+  if (trendLabel) {
+    trendParts.push(`Trend signal: ${trendLabel}`);
+  }
+  if (trendSlopePct != null) {
+    trendParts.push(`Slope about ${trendSlopePct}% per day.`);
+  }
+  if (trendStrengthPct != null) {
+    trendParts.push(`Trend strength (R^2): ${trendStrengthPct}%.`);
+  }
+  if (maAlignment) {
+    trendParts.push(maAlignment);
+  }
+  if (ma10 != null || ma20 != null || ma50 != null || ma200 != null) {
+    trendParts.push(`MAs: 10d ${ma10 ?? "n/a"}, 20d ${ma20 ?? "n/a"}, 50d ${ma50 ?? "n/a"}, 200d ${ma200 ?? "n/a"}.`);
+  }
+  if (trendParts.length) {
+    lines.push(`Trend & structure: ${trendParts.join(" ")}`);
+  }
+
+  const momentumParts = [];
+  if (momentum5 != null || momentum10 != null || momentum20 != null) {
+    momentumParts.push(`Momentum: 5d ${momentum5 ?? "n/a"}%, 10d ${momentum10 ?? "n/a"}%, 20d ${momentum20 ?? "n/a"}%.`);
+  }
+  if (rsi14 != null) {
+    momentumParts.push(`RSI(14): ${rsi14}.`);
+  }
+  if (winRate != null) {
+    momentumParts.push(`Up days: ${upDays || 0}, down days: ${downDays || 0} (win rate ${winRate}%).`);
+  }
+  if (avgUp != null || avgDown != null) {
+    momentumParts.push(`Avg up day ${avgUp ?? "n/a"}%, avg down day ${avgDown ?? "n/a"}%.`);
+  }
+  if (momentumParts.length) {
+    lines.push(`Momentum & tape: ${momentumParts.join(" ")}`);
+  }
+
+  const riskParts = [];
+  if (dailyVol != null || annualVol != null) {
+    riskParts.push(`Daily vol ${dailyVol ?? "n/a"}%, annualized vol ${annualVol ?? "n/a"}%.`);
+  }
+  if (volShort != null || volLong != null) {
+    riskParts.push(`Recent vol (10d ${volShort ?? "n/a"}%, 30d ${volLong ?? "n/a"}%).`);
+  }
+  if (volRegime) {
+    riskParts.push(volRegime);
+  }
+  if (atr14 != null) {
+    riskParts.push(`ATR(14) ${atr14}${atrPct != null ? ` (~${atrPct}% of price)` : ""}.`);
+  }
+  if (maxDrawdownPct != null || bestDayPct != null || worstDayPct != null) {
+    riskParts.push(`Max drawdown ${maxDrawdownPct ?? "n/a"}%. Best day ${bestDayPct ?? "n/a"}%, worst day ${worstDayPct ?? "n/a"}%.`);
+  }
+  if (riskParts.length) {
+    lines.push(`Risk & volatility: ${riskParts.join(" ")}`);
+  }
+
+  if (avgDailyReturn != null || annualReturn != null || sharpe != null) {
+    lines.push(`Return efficiency: average daily return ${avgDailyReturn ?? "n/a"}%, annualized return ${annualReturn ?? "n/a"}%, Sharpe (0% rf) ${sharpe ?? "n/a"}.`);
+  }
+
   if (avgVolume != null || lastVolume != null) {
-    lines.push(`Volume/liq: average volume ${avgVolume ?? "Not enough data"}, recent average ${recentVolume ?? "Not enough data"}, latest ${lastVolume ?? "Not enough data"} (${volumeChangePct ?? "Not enough data"}% vs avg).`);
+    lines.push(`Liquidity: average volume ${avgVolume ?? "n/a"}, recent average ${recentVolume ?? "n/a"}, latest ${lastVolume ?? "n/a"} (${volumeChangePct ?? "n/a"}% vs avg).`);
   }
+
   if (regime) {
     lines.push(`Regime read: ${regime}.`);
   }
+
+  const tactical = [];
+  if (trendLabel && trendLabel.toLowerCase().includes("uptrend") && rsi14 != null && rsi14 > 70) {
+    tactical.push("Uptrend but RSI is elevated; consider pullback entries rather than chasing.");
+  }
+  if (trendLabel && trendLabel.toLowerCase().includes("downtrend") && rsi14 != null && rsi14 < 30) {
+    tactical.push("Downtrend with oversold RSI; watch for short-covering rallies before adding risk.");
+  }
+  if (positionPct != null && positionPct > 80) {
+    tactical.push("Price is near the top of the recent range; breakout confirmation matters.");
+  }
+  if (positionPct != null && positionPct < 20) {
+    tactical.push("Price is near the bottom of the recent range; breakdown risk is elevated.");
+  }
+  if (volRegime && volRegime.toLowerCase().includes("rising")) {
+    tactical.push("Volatility is rising; reduce size or widen stops.");
+  }
+  if (maAlignment && maAlignment.toLowerCase().includes("bullish")) {
+    tactical.push("MA stack is bullish; trend-follow setups are favored.");
+  }
+  if (maAlignment && maAlignment.toLowerCase().includes("bearish")) {
+    tactical.push("MA stack is bearish; rallies are likely to be sold.");
+  }
+  if (tactical.length) {
+    lines.push(`Tactical notes: ${tactical.join(" ")}`);
+  }
+
   if (warnings?.length) {
     lines.push(`Data warnings: ${warnings.join("; ")}.`);
   }
@@ -448,14 +552,46 @@ export async function getScenarioDetail({ symbol, assetClass = "stock", windowDa
   const ma10 = formatNumber(simpleMovingAverage(closes, 10), 2);
   const ma20 = formatNumber(simpleMovingAverage(closes, 20), 2);
   const ma50 = formatNumber(simpleMovingAverage(closes, 50), 2);
+  const ma200 = formatNumber(simpleMovingAverage(closes, 200), 2);
   const rsi14 = formatNumber(computeRSI(closes, 14), 2);
 
   const momentum5 = closes.length >= 6 ? formatNumber(((endPrice - closes[closes.length - 6]) / closes[closes.length - 6]) * 100, 2) : null;
   const momentum10 = closes.length >= 11 ? formatNumber(((endPrice - closes[closes.length - 11]) / closes[closes.length - 11]) * 100, 2) : null;
   const momentum20 = closes.length >= 21 ? formatNumber(((endPrice - closes[closes.length - 21]) / closes[closes.length - 21]) * 100, 2) : null;
+  const atrRaw = computeAtr(sorted, 14);
+  const atr14 = atrRaw != null ? formatNumber(atrRaw, 4) : null;
+  const atrPct = atrRaw != null && endPrice ? formatNumber((atrRaw / endPrice) * 100, 2) : null;
+  const winStats = computeWinStats(returns);
+  const winRate = winStats.winRate != null ? formatNumber(winStats.winRate * 100, 1) : null;
+  const avgUp = winStats.avgUp != null ? formatNumber(winStats.avgUp, 2) : null;
+  const avgDown = winStats.avgDown != null ? formatNumber(winStats.avgDown, 2) : null;
+  const volShort = returns.length >= 10 ? formatNumber((stddev(returns.slice(-10)) || 0) * 100, 3) : null;
+  const volLong = returns.length >= 30 ? formatNumber((stddev(returns.slice(-30)) || 0) * 100, 3) : null;
+  let volRegime = "";
+  if (volShort != null && volLong != null) {
+    if (volShort > volLong * 1.25) volRegime = "Volatility rising";
+    else if (volShort < volLong * 0.8) volRegime = "Volatility cooling";
+    else volRegime = "Volatility stable";
+  }
+  let maAlignment = "";
+  if (ma10 != null && ma20 != null && ma50 != null) {
+    if (ma10 > ma20 && ma20 > ma50) maAlignment = "Bullish MA stack (10 > 20 > 50).";
+    else if (ma10 < ma20 && ma20 < ma50) maAlignment = "Bearish MA stack (10 < 20 < 50).";
+    else maAlignment = "Mixed MA stack (short/long averages are not aligned).";
+  }
+  const recentHigh = highs.length >= 10 ? Math.max(...highs.slice(-10)) : null;
+  const recentLow = lows.length >= 10 ? Math.min(...lows.slice(-10)) : null;
+  let breakoutLabel = "";
+  if (recentHigh != null && endPrice >= recentHigh * 0.995) {
+    breakoutLabel = "Price is pressing the 10-day high (possible breakout).";
+  } else if (recentLow != null && endPrice <= recentLow * 1.005) {
+    breakoutLabel = "Price is pressing the 10-day low (possible breakdown).";
+  }
 
   const logPrices = closes.map(v => Math.log(v || 1));
   const slope = computeSlope(logPrices);
+  const trendStrength = computeTrendStrength(logPrices);
+  const trendStrengthPct = trendStrength != null ? formatNumber(trendStrength * 100, 1) : null;
   const trendSlopePct = slope != null ? formatNumber((Math.exp(slope) - 1) * 100, 3) : null;
   let trendLabel = "";
   if (trendSlopePct != null) {
@@ -486,6 +622,7 @@ export async function getScenarioDetail({ symbol, assetClass = "stock", windowDa
   if (points < Math.min(window, 30)) warnings.push("limited history in window");
   if (closes.length < 14) warnings.push("RSI needs more than 14 bars");
   if (closes.length < 50) warnings.push("50-day average unavailable");
+  if (closes.length < 200) warnings.push("200-day average unavailable");
   if (!returns.length) warnings.push("returns unavailable");
 
   const narrative = buildScenarioNarrative({
@@ -506,6 +643,7 @@ export async function getScenarioDetail({ symbol, assetClass = "stock", windowDa
     ma10,
     ma20,
     ma50,
+    ma200,
     momentum5,
     momentum10,
     momentum20,
@@ -519,6 +657,7 @@ export async function getScenarioDetail({ symbol, assetClass = "stock", windowDa
     worstDayPct,
     trendSlopePct,
     trendLabel,
+    trendStrengthPct,
     regime,
     avgVolume,
     recentVolume,
@@ -526,6 +665,18 @@ export async function getScenarioDetail({ symbol, assetClass = "stock", windowDa
     volumeChangePct,
     support,
     resistance,
+    atr14,
+    atrPct,
+    volShort,
+    volLong,
+    volRegime,
+    winRate,
+    upDays: winStats.upDays,
+    downDays: winStats.downDays,
+    avgUp,
+    avgDown,
+    maAlignment,
+    breakoutLabel,
     warnings
   });
 
@@ -548,9 +699,20 @@ export async function getScenarioDetail({ symbol, assetClass = "stock", windowDa
     ma10,
     ma20,
     ma50,
+    ma200,
     momentum5,
     momentum10,
     momentum20,
+    atr14,
+    atrPct,
+    winRate,
+    upDays: winStats.upDays,
+    downDays: winStats.downDays,
+    avgUp,
+    avgDown,
+    volShort,
+    volLong,
+    volRegime,
     avgDailyReturn,
     dailyVol,
     annualVol,
@@ -561,6 +723,9 @@ export async function getScenarioDetail({ symbol, assetClass = "stock", windowDa
     worstDayPct,
     trendSlopePct,
     trendLabel,
+    trendStrengthPct,
+    maAlignment,
+    breakoutLabel,
     regime,
     avgVolume,
     recentVolume,

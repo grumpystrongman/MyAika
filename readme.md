@@ -7,6 +7,17 @@ MyAika is a companion app with:
 
 This repo uses GPT-SoVITS for voice and locks voice output to GPT-SoVITS only (no fallback voices).
 
+## Project map (what & why)
+- `apps/server`: API + orchestration for chat, memory, RAG (Fireflies + Trading), safety/approvals, integrations, and background jobs.
+- `apps/web`: The primary UI (Chat, Recordings, Trading, Tools, Safety, Action Runner, Teach Mode).
+- `packages/shared`: Shared types/schemas so server + web agree on payloads.
+- `config/`: Safety policy config (`config/policy.json`) with deny-by-default rules.
+- `data/`: Local storage (SQLite DBs, vector indices, action-run artifacts, skills/macros, audit logs).
+- `docs/`: Product docs, QA checklists, UI walkthrough notes.
+- `scripts/`: Local dev utilities, smoke tests, and scheduled task helpers.
+
+Why this layout: keep the "mind" and "body" separate for reliability, allow local-only storage, and make safety/approvals a first-class system.
+
 ## Quick start (local dev)
 1) Install deps: `npm install`
 2) Server env:
@@ -31,6 +42,15 @@ Default UI behavior:
 - Settings and advanced voice controls are behind the "Settings" button.
 - Integrations are available under the "Integrations" tab.
 - Skills are available under the "Skills" tab.
+- Tools tab includes info icons explaining why/when to use each tool.
+
+## Key UI panels (what & why)
+- Chat: primary conversation, memory recall, and quick actions.
+- Recordings: meeting capture, summaries, tasks, and transcript Q&A.
+- Trading: market data, recommendations, and the Trading Knowledge RAG.
+- Tools: direct access to structured tools with guided usage tips.
+- Safety: policy config, approvals queue, audit log, kill switch.
+- Action Runner / Teach Mode: automate browser flows, save reusable macros.
 
 ## Meeting Copilot (Recordings)
 Meeting Copilot adds a one-click recorder, background transcription/summaries, and a recordings library.
@@ -51,6 +71,25 @@ Configure daily trading picks in `apps/server/.env`:
 Notes:
 - Uses Gmail integration; must have `gmail.send` scope connected.
 - Emails are subject to the Safety approval layer unless you remove `email.send` from approval rules.
+
+## Trading Knowledge RAG (Local)
+Trading knowledge is stored locally and is queryable from the Trading panel.
+
+What it does:
+- Builds a local knowledge library from sources, uploaded files, and RSS feeds.
+- Shows a Knowledge Map (tags and relationships) plus Sources & Age to assess freshness.
+- Supports tag filtering and a Q&A panel that uses RAG first, then LLM for depth.
+
+How to use:
+- Trading panel -> Knowledge tab.
+- Import a URL or PDF, or upload a local file.
+- Manage RSS sources and run a sync to ingest new items.
+
+Key env:
+- `TRADING_RSS_SYNC_ON_STARTUP=1` to crawl RSS on server start.
+- `TRADING_RSS_SYNC_INTERVAL_MINUTES=1440` to control cadence.
+- `TRADING_RAG_OCR_ENABLED=1` for OCR fallback on scanned PDFs.
+- `TRADING_RAG_PDF_MAX_BYTES=20000000` to cap PDF size.
 
 Backend endpoints:
 - `POST /api/recordings/start` `{ title?, redactionEnabled?, retentionDays? }`

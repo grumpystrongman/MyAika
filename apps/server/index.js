@@ -108,6 +108,7 @@ import {
   queryTradingKnowledge,
   recordTradeAnalysis,
   startTradingKnowledgeSyncLoop,
+  ensureTradingSourcesSeeded,
   ensureTradingKnowledgeSeeded,
   listTradingKnowledge,
   getTradingKnowledgeStats,
@@ -121,6 +122,7 @@ import {
 import {
   crawlTradingRssSources,
   startTradingRssLoop,
+  ensureTradingRssSeeded,
   listTradingRssSourcesUi,
   addTradingRssSource,
   updateTradingRssSourceUi,
@@ -3788,6 +3790,9 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
       const search = String(req.query.search || "");
       const includeDisabled = String(req.query.includeDisabled || "1") !== "0";
       const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      if (!collectionId || collectionId === "trading") {
+        ensureTradingSourcesSeeded();
+      }
       const items = listTradingSourcesUi({ limit, search, includeDisabled, collectionId });
       res.json({ items });
     } catch (err) {
@@ -3963,6 +3968,9 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
       const search = String(req.query.search || "");
       const includeDisabled = String(req.query.includeDisabled || "1") !== "0";
       const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      if (!collectionId || collectionId === "trading") {
+        ensureTradingRssSeeded();
+      }
       const items = listTradingRssSourcesUi({ limit, search, includeDisabled, collectionId });
       res.json({ items });
     } catch (err) {

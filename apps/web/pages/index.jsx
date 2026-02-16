@@ -571,11 +571,17 @@ export default function Home() {
 
     setChatError("");
     let r;
+    let ragModel = "";
+    try {
+      ragModel = localStorage.getItem("aika_active_rag_model") || "";
+    } catch {
+      ragModel = "";
+    }
     try {
       r = await fetch(`${SERVER_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userText: text, maxOutputTokens: fastReplies ? 200 : 320 })
+        body: JSON.stringify({ userText: text, maxOutputTokens: fastReplies ? 200 : 320, ragModel })
       });
     } catch (err) {
       setChatError("chat_unreachable");
@@ -597,6 +603,13 @@ export default function Home() {
       setProductResearch(data.productResearch);
       setProductResearchOpen(true);
       setProductResearchNotice("");
+    }
+    if (data?.ragModel) {
+      try {
+        localStorage.setItem("aika_active_rag_model", data.ragModel);
+      } catch {
+        // ignore
+      }
     }
     const reply = data.text || "";
     if (!reply) {
@@ -1985,7 +1998,7 @@ export default function Home() {
     let mounted = true;
     async function loadAuth() {
       try {
-        const resp = await fetch(`${SERVER_URL}/api/auth/me`);
+        const resp = await fetch(`${SERVER_URL}/api/auth/me`, { credentials: "include" });
         const data = await resp.json();
         if (!mounted) return;
         if (data?.authenticated) {
@@ -2083,6 +2096,7 @@ export default function Home() {
     { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts.", method: "oauth", connectUrl: "/api/auth/google/connect" },
     { key: "slack", label: "Slack", detail: "Team chat updates.", method: "oauth", connectUrl: "/api/integrations/slack/connect", connectLabel: "Connect OAuth" },
     { key: "discord", label: "Discord", detail: "Community updates (OAuth identity).", method: "oauth", connectUrl: "/api/integrations/discord/connect", connectLabel: "Connect OAuth" },
+    { key: "coinbase", label: "Coinbase", detail: "Trading data + account connection.", method: "oauth", connectUrl: "/api/integrations/coinbase/connect", connectLabel: "Connect Coinbase" },
     { key: "telegram", label: "Telegram", detail: "Message you directly (bot token).", method: "token" },
     { key: "fireflies", label: "Fireflies.ai", detail: "Meeting transcription and summaries (API key).", method: "token" },
     { key: "plex", label: "Plex", detail: "Check server status and library health.", method: "token" },
@@ -2116,6 +2130,8 @@ export default function Home() {
           await fetch(`${SERVER_URL}/api/integrations/slack/disconnect`, { method: "POST" });
         } else if (provider === "discord") {
           await fetch(`${SERVER_URL}/api/integrations/discord/disconnect`, { method: "POST" });
+        } else if (provider === "coinbase") {
+          await fetch(`${SERVER_URL}/api/integrations/coinbase/disconnect`, { method: "POST" });
         } else {
           await fetch(`${SERVER_URL}/api/integrations/disconnect`, {
             method: "POST",

@@ -11,6 +11,7 @@ import { actionRun } from "./tools/actionRunner.js";
 import { assessActionPlan, extractDomainsFromPlan } from "../src/actionRunner/runner.js";
 import { skillVaultRun } from "./tools/skillVault.js";
 import { assessSkillPermissions } from "../src/skillVault/registry.js";
+import { systemModify } from "./tools/system.js";
 import {
   plexIdentity,
   firefliesTranscripts,
@@ -253,6 +254,18 @@ registry.register(
     outboundTargets: () => ["https://discord.com"]
   },
   discordSend
+);
+
+registry.register(
+  {
+    name: "system.modify",
+    description: "Run allowlisted system operations (restart, startup task).",
+    paramsSchema: { operation: "string" },
+    requiresApproval: true,
+    riskLevel: "high",
+    humanSummary: params => `System modify: ${params?.operation || "operation"}`
+  },
+  systemModify
 );
 
 registry.register(

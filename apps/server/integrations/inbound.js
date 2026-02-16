@@ -1,4 +1,5 @@
 ﻿import { createPairingRequest, isSenderAllowed, recordPairingUse } from "../storage/pairings.js";
+import { tryHandleRemoteCommand } from "./remoteCommands.js";
 
 async function callLocalChat(userText) {
   const port = process.env.PORT || 8790;
@@ -33,6 +34,13 @@ export async function handleInboundMessage({ channel, senderId, senderName, text
   }
 
   recordPairingUse(channel, senderId);
+  const commandResult = await tryHandleRemoteCommand({ channel, senderId, senderName, text });
+  if (commandResult?.handled) {
+    if (commandResult.response && typeof reply === "function") {
+      await reply(commandResult.response);
+    }
+    return { status: "ok", response: commandResult.response || "", command: true };
+  }
   const response = await callLocalChat(text);
   if (response?.text && typeof reply === "function") {
     await reply(response.text);

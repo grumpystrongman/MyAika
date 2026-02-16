@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { forceSimulation, forceManyBody, forceCenter, forceLink, forceCollide } from "d3-force";
 
 const DEFAULTS = {
   crypto: "BTC-USD",
@@ -37,6 +38,28 @@ const GLOSSARY = [
 function formatNumber(value, digits = 2) {
   if (value == null || Number.isNaN(value)) return "--";
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+}
+
+function formatScenarioValue(value, suffix = "") {
+  if (value == null || Number.isNaN(value)) return "Not enough data";
+  return `${value}${suffix}`;
+}
+
+function formatSourceLabel(value, maxLen = 26) {
+  const raw = String(value || "");
+  if (!raw) return "";
+  try {
+    if (raw.startsWith("http")) {
+      const url = new URL(raw);
+      const host = url.hostname.replace(/^www\./, "");
+      const pathPart = url.pathname.split("/").filter(Boolean)[0] || "";
+      const combined = pathPart ? `${host}/${pathPart}` : host;
+      return combined.length > maxLen ? `${combined.slice(0, maxLen)}...` : combined;
+    }
+  } catch {
+    // ignore
+  }
+  return raw.length > maxLen ? `${raw.slice(0, maxLen)}...` : raw;
 }
 
 function intervalToMs(interval) {
@@ -164,6 +187,282 @@ function detectPattern(candle, prev) {
     if (bearish && candle.o >= prev.c && candle.c <= prev.o && body > prevBody) return "Bearish Engulfing";
   }
   return "Trend Candle";
+}
+
+function KnowledgeGraph({ graph, width = 560, height = 360, selectedId = "", onSelect }) {
+  const canvasRef = useRef(null);
+  const simRef = useRef(null);
+  const nodesRef = useRef([]);
+  const linksRef = useRef([]);
+  const transformRef = useRef({ x: 0, y: 0, k: 1 });
+  const dragRef = useRef({ mode: "", node: null, lastX: 0, lastY: 0 });
+  const [hovered, setHovered] = useState(null);
+
+  const formatLabel = (node) => {
+    const rawId = String(node?.id || "");
+    const rawLabel = String(node?.label || "");
+    const inferredType = node?.type
+      || (rawId.startsWith("tag:") || rawId.startsWith("#") ? "tag" : rawId.startsWith("source:") ? "source" : "");
+    if (!rawId && !rawLabel) return { display: "", full: "", type: inferredType || "" };
+    if (inferredType === "tag") {
+      const tag = (rawLabel || rawId).replace(/^tag:/i, "").replace(/^#/i, "").trim();
+      const label = `#${tag}`;
+      const short = label.length > 22 ? `${label.slice(0, 22)}...` : label;
+      return { display: short, full: label, type: "tag" };
+    }
+    if (inferredType === "source") {
+      const rawValue = node?.value || rawLabel || rawId;
+      const value = String(rawValue || "").replace(/^source:/i, "").trim();
+      const display = formatSourceLabel(value, 28);
+      return { display, full: value, type: "source" };
+    }
+    const value = rawLabel || rawId;
+    const short = value.length > 22 ? `${value.slice(0, 22)}...` : value;
+    return { display: short, full: value, type: inferredType || "node" };
+  };
+
+  const drawGraph = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const { x, y, k } = transformRef.current;
+    const nodes = nodesRef.current;
+    const links = linksRef.current;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(k, k);
+
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.4)";
+    links.forEach(link => {
+      ctx.lineWidth = Math.max(0.4, Math.min(2, (link.weight || 1) * 0.4)) / k;
+      ctx.beginPath();
+      ctx.moveTo(link.source.x, link.source.y);
+      ctx.lineTo(link.target.x, link.target.y);
+      ctx.stroke();
+    });
+
+    nodes.forEach(node => {
+      const isSelected = selectedId && node.id === selectedId;
+      const isHovered = hovered && node.id === hovered.id;
+      const radius = node.radius || 6;
+      const label = formatLabel(node);
+      ctx.beginPath();
+      const baseColor = label.type === "source" ? "#22c55e" : label.type === "tag" ? "#0ea5e9" : "#0ea5e9";
+      const hoverColor = label.type === "source" ? "#34d399" : "#38bdf8";
+      ctx.fillStyle = isSelected ? "#f97316" : isHovered ? hoverColor : baseColor;
+      ctx.globalAlpha = isSelected ? 0.95 : 0.85;
+      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      if (isHovered || isSelected) {
+        ctx.lineWidth = 2 / k;
+        ctx.strokeStyle = isSelected ? "#fb923c" : "#7dd3fc";
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      const fontSize = Math.max(9, 11 / k);
+      ctx.font = `${fontSize}px 'IBM Plex Mono', monospace`;
+      ctx.textAlign = "center";
+      if (label.display) {
+        const metrics = ctx.measureText(label.display);
+        const textWidth = metrics.width;
+        const padX = 4 / k;
+        const padY = 2 / k;
+        const labelX = node.x;
+        const labelY = node.y - radius - 6 / k;
+        const boxW = textWidth + padX * 2;
+        const boxH = fontSize + padY * 2;
+        const boxX = labelX - boxW / 2;
+        const boxY = labelY - boxH;
+        node._labelBox = { x: boxX, y: boxY, w: boxW, h: boxH };
+        ctx.fillStyle = "rgba(15,23,42,0.7)";
+        ctx.fillRect(boxX, boxY, boxW, boxH);
+        ctx.fillStyle = "#e2e8f0";
+        ctx.fillText(label.display, labelX, labelY - padY / 2);
+      } else {
+        node._labelBox = null;
+      }
+    });
+
+    ctx.restore();
+  }, [hovered, selectedId, width, height]);
+
+  useEffect(() => {
+    const nodes = (graph?.nodes || []).map(node => ({
+      ...node,
+      radius: 6 + Math.min(14, Math.sqrt(node.count || 1) * 2)
+    }));
+    const nodeById = new Map(nodes.map(node => [node.id, node]));
+    const links = (graph?.links || [])
+      .map(link => ({
+        source: nodeById.get(link.source),
+        target: nodeById.get(link.target),
+        weight: link.weight || 1
+      }))
+      .filter(link => link.source && link.target);
+
+    nodesRef.current = nodes;
+    linksRef.current = links;
+    transformRef.current = { x: width * 0.1, y: height * 0.1, k: 1 };
+
+    if (simRef.current) {
+      simRef.current.stop();
+    }
+    if (!nodes.length) {
+      drawGraph();
+      return () => {};
+    }
+    const sim = forceSimulation(nodes)
+      .force("link", forceLink(links).id(node => node.id).distance(link => 60 - Math.min(link.weight * 3, 30)).strength(link => Math.min(0.6, 0.1 + link.weight / 10)))
+      .force("charge", forceManyBody().strength(-160))
+      .force("center", forceCenter(width / 2, height / 2))
+      .force("collide", forceCollide().radius(node => (node.radius || 6) + 10))
+      .on("tick", drawGraph);
+
+    simRef.current = sim;
+    drawGraph();
+    return () => {
+      sim.stop();
+    };
+  }, [graph, width, height, drawGraph]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    function getPointer(evt) {
+      const rect = canvas.getBoundingClientRect();
+      return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+    }
+
+    function toWorld(point) {
+      const { x, y, k } = transformRef.current;
+      return { x: (point.x - x) / k, y: (point.y - y) / k };
+    }
+
+    function findNode(point) {
+      const nodes = nodesRef.current;
+      for (const node of nodes) {
+        const dx = point.x - node.x;
+        const dy = point.y - node.y;
+        const r = (node.radius || 6) + 8;
+        if (dx * dx + dy * dy <= r * r) {
+          return node;
+        }
+        const box = node._labelBox;
+        if (box && point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h) {
+          return node;
+        }
+      }
+      return null;
+    }
+
+    function handleDown(evt) {
+      const pt = getPointer(evt);
+      const world = toWorld(pt);
+      const node = findNode(world);
+      dragRef.current.lastX = pt.x;
+      dragRef.current.lastY = pt.y;
+      if (node) {
+        dragRef.current.mode = "node";
+        dragRef.current.node = node;
+        node.fx = node.x;
+        node.fy = node.y;
+        if (simRef.current) simRef.current.alphaTarget(0.3).restart();
+      } else {
+        dragRef.current.mode = "pan";
+      }
+    }
+
+    function handleMove(evt) {
+      const pt = getPointer(evt);
+      const mode = dragRef.current.mode;
+      if (mode === "node" && dragRef.current.node) {
+        const world = toWorld(pt);
+        dragRef.current.node.fx = world.x;
+        dragRef.current.node.fy = world.y;
+        drawGraph();
+        return;
+      }
+      if (mode === "pan") {
+        const dx = pt.x - dragRef.current.lastX;
+        const dy = pt.y - dragRef.current.lastY;
+        transformRef.current.x += dx;
+        transformRef.current.y += dy;
+        dragRef.current.lastX = pt.x;
+        dragRef.current.lastY = pt.y;
+        drawGraph();
+        return;
+      }
+      const world = toWorld(pt);
+      const node = findNode(world);
+      setHovered(node);
+      canvas.style.cursor = node ? "pointer" : "grab";
+    }
+
+    function handleUp(evt) {
+      if (dragRef.current.mode === "node" && dragRef.current.node) {
+        dragRef.current.node.fx = null;
+        dragRef.current.node.fy = null;
+        if (simRef.current) simRef.current.alphaTarget(0);
+      }
+      dragRef.current.mode = "";
+      dragRef.current.node = null;
+    }
+
+    function handleClick(evt) {
+      const pt = getPointer(evt);
+      const world = toWorld(pt);
+      const node = findNode(world);
+      if (node && onSelect) {
+        onSelect(node);
+      }
+    }
+
+    function handleWheel(evt) {
+      evt.preventDefault();
+      const delta = evt.deltaY > 0 ? 0.9 : 1.1;
+      const { x, y, k } = transformRef.current;
+      const pt = getPointer(evt);
+      const world = { x: (pt.x - x) / k, y: (pt.y - y) / k };
+      const nextK = Math.min(2.8, Math.max(0.4, k * delta));
+      transformRef.current.k = nextK;
+      transformRef.current.x = pt.x - world.x * nextK;
+      transformRef.current.y = pt.y - world.y * nextK;
+      drawGraph();
+    }
+
+    canvas.addEventListener("mousedown", handleDown);
+    canvas.addEventListener("mousemove", handleMove);
+    canvas.addEventListener("mouseup", handleUp);
+    canvas.addEventListener("mouseleave", handleUp);
+    canvas.addEventListener("click", handleClick);
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener("mousedown", handleDown);
+      canvas.removeEventListener("mousemove", handleMove);
+      canvas.removeEventListener("mouseup", handleUp);
+      canvas.removeEventListener("mouseleave", handleUp);
+      canvas.removeEventListener("click", handleClick);
+      canvas.removeEventListener("wheel", handleWheel);
+    };
+  }, [drawGraph, onSelect]);
+
+  useEffect(() => {
+    drawGraph();
+  }, [selectedId, hovered, drawGraph]);
+
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <canvas ref={canvasRef} width={width} height={height} style={{ width: "100%", borderRadius: 12, background: "#0f172a" }} />
+      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+        {hovered
+          ? `Hover: ${formatLabel(hovered).full || hovered.id} (${hovered.count || 0})`
+          : "Drag to move, scroll to zoom, click a node for details."}
+      </div>
+    </div>
+  );
 }
 
 function CandlestickChart({ candles, vwap = [], width = 640, height = 360 }) {
@@ -479,6 +778,15 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [recommendationsError, setRecommendationsError] = useState("");
   const [recommendationsSource, setRecommendationsSource] = useState("llm");
+  const [recommendationDetail, setRecommendationDetail] = useState(null);
+  const [recommendationDetailStatus, setRecommendationDetailStatus] = useState("");
+  const [watchlistQuery, setWatchlistQuery] = useState("");
+  const [watchlistResults, setWatchlistResults] = useState([]);
+  const [watchlistAssetClass, setWatchlistAssetClass] = useState("stock");
+  const [watchlistStatus, setWatchlistStatus] = useState("");
+  const [watchlistSaving, setWatchlistSaving] = useState(false);
+  const [trackedStocks, setTrackedStocks] = useState([]);
+  const [trackedCryptos, setTrackedCryptos] = useState([]);
   const [outcome, setOutcome] = useState({ pnl: "", pnlPct: "", notes: "" });
   const [lessonQuery, setLessonQuery] = useState("");
   const [lessons, setLessons] = useState([]);
@@ -506,6 +814,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [knowledgeStats, setKnowledgeStats] = useState(null);
   const [knowledgeStatsStatus, setKnowledgeStatsStatus] = useState("");
   const [knowledgeSelectedTag, setKnowledgeSelectedTag] = useState("");
+  const [knowledgeSelectedSource, setKnowledgeSelectedSource] = useState("");
+  const [knowledgeSelectedNode, setKnowledgeSelectedNode] = useState("");
+  const [knowledgeNodeDetail, setKnowledgeNodeDetail] = useState(null);
+  const [knowledgeNodeStatus, setKnowledgeNodeStatus] = useState("");
+  const [knowledgePrefsLoaded, setKnowledgePrefsLoaded] = useState(false);
+  const [ragModels, setRagModels] = useState([]);
+  const [ragModelStatus, setRagModelStatus] = useState("");
+  const [activeRagModel, setActiveRagModel] = useState("trading");
+  const [newRagTopic, setNewRagTopic] = useState("");
+  const [newRagStatus, setNewRagStatus] = useState("");
   const [rssSources, setRssSources] = useState([]);
   const [rssStatus, setRssStatus] = useState("");
   const [rssSeedUrl, setRssSeedUrl] = useState("https://rss.feedspot.com/stock_market_news_rss_feeds/");
@@ -525,6 +843,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [scenarioResults, setScenarioResults] = useState([]);
   const [scenarioStatus, setScenarioStatus] = useState("");
   const [scenarioHistory, setScenarioHistory] = useState([]);
+  const [scenarioDetail, setScenarioDetail] = useState(null);
+  const [scenarioDetailStatus, setScenarioDetailStatus] = useState("");
   const [coreSymbols, setCoreSymbols] = useState("AAPL");
   const [coreStrategy, setCoreStrategy] = useState("volatility_momentum");
   const [coreTimeframe, setCoreTimeframe] = useState("1h");
@@ -638,19 +958,134 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     );
   }, [optionsChain, optionsFilter]);
 
-  const topicNodes = useMemo(() => {
-    const nodes = knowledgeStats?.graph?.nodes || [];
-    if (!nodes.length) return [];
-    const radius = 120;
-    const center = { x: 160, y: 130 };
-    return nodes.map((node, idx) => {
-      const angle = (Math.PI * 2 * idx) / nodes.length;
-      const x = center.x + radius * Math.cos(angle);
-      const y = center.y + radius * Math.sin(angle);
-      const size = 6 + Math.min(10, node.count || 0);
-      return { ...node, x, y, size };
+  const ragModelById = useMemo(() => {
+    const map = new Map();
+    ragModels.forEach(model => {
+      if (model?.id) map.set(model.id, model);
     });
-  }, [knowledgeStats]);
+    return map;
+  }, [ragModels]);
+
+  const activeRagMeta = useMemo(() => {
+    return ragModelById.get(activeRagModel) || { id: activeRagModel || "trading", title: activeRagModel || "trading" };
+  }, [ragModelById, activeRagModel]);
+
+  const buildRagFilters = useCallback((modelId) => {
+    const selected = String(modelId || activeRagModel || "trading").toLowerCase();
+    if (selected === "fireflies") return { meetingType: "fireflies" };
+    if (selected === "all") return {};
+    if (selected === "trading") return { meetingIdPrefix: "trading:" };
+    return { meetingIdPrefix: `rag:${selected}:` };
+  }, [activeRagModel]);
+
+  const knowledgeSourceInventory = useMemo(() => {
+    const inventory = new Map();
+    const normalizeKey = (value) => String(value || "").trim();
+    const computeAgeDays = (stamp) => {
+      if (!stamp) return null;
+      const ts = Date.parse(stamp);
+      if (!Number.isFinite(ts)) return null;
+      return Math.round((Date.now() - ts) / 86400000);
+    };
+    const upsert = (key, patch) => {
+      const normalized = normalizeKey(key);
+      if (!normalized) return;
+      const existing = inventory.get(normalized) || { key: normalized };
+      inventory.set(normalized, { ...existing, ...patch });
+    };
+
+    (knowledgeStats?.sources || []).forEach(source => {
+      const key = normalizeKey(source.source_url || source.key || source.title);
+      upsert(key, {
+        key,
+        title: source.title || source.key || source.source_url || key,
+        source_url: source.source_url || "",
+        count: source.count || 0,
+        last_seen: source.last_seen || source.lastSeen || "",
+        age_days: Number.isFinite(source.age_days) ? source.age_days : null,
+        kind: source.kind || "indexed"
+      });
+    });
+
+    if (activeRagModel !== "fireflies") {
+      (sourceList || []).forEach(source => {
+        const key = normalizeKey(source.url);
+        upsert(key, {
+          key,
+          title: source.url,
+          source_url: source.url,
+          enabled: source.enabled,
+          last_crawled_at: source.last_crawled_at || "",
+          last_status: source.last_status || "",
+          kind: "web"
+        });
+      });
+      (rssSources || []).forEach(source => {
+        const key = normalizeKey(source.url);
+        upsert(key, {
+          key,
+          title: source.title || source.url,
+          source_url: source.url,
+          enabled: source.enabled,
+          last_crawled_at: source.last_crawled_at || "",
+          last_status: source.last_status || "",
+          kind: "rss"
+        });
+      });
+    }
+
+    const results = Array.from(inventory.values()).map(item => {
+      const lastSeen = item.last_seen || item.last_crawled_at || item.updated_at || "";
+      const ageDays = Number.isFinite(item.age_days) ? item.age_days : computeAgeDays(lastSeen);
+      return { ...item, last_seen: lastSeen, age_days: ageDays };
+    });
+    results.sort((a, b) => {
+      const countDiff = (b.count || 0) - (a.count || 0);
+      if (countDiff) return countDiff;
+      return String(b.last_seen || "").localeCompare(String(a.last_seen || ""));
+    });
+    return results;
+  }, [knowledgeStats, sourceList, rssSources, activeRagModel]);
+
+  const knowledgeGraph = useMemo(() => {
+    if (activeRagModel === "fireflies") {
+      return knowledgeStats?.graph || { nodes: [], links: [] };
+    }
+    if (knowledgeStats?.graph?.nodes?.length) {
+      return knowledgeStats.graph;
+    }
+    if (!knowledgeSourceInventory.length) return { nodes: [], links: [] };
+    const nodes = knowledgeSourceInventory.map(source => ({
+      id: `source:${source.key}`,
+      label: source.title || formatSourceLabel(source.source_url || source.key, 28),
+      value: source.source_url || source.key,
+      type: "source",
+      count: source.count || 1,
+      source_url: source.source_url || ""
+    }));
+    return { nodes, links: [] };
+  }, [knowledgeStats, knowledgeSourceInventory, activeRagModel]);
+
+  const knowledgeLibrary = useMemo(() => {
+    if (knowledgeItems.length) {
+      return { mode: "docs", items: knowledgeItems };
+    }
+    if (knowledgeSelectedTag || knowledgeSelectedSource) {
+      return { mode: "docs", items: [] };
+    }
+    if (!knowledgeSourceInventory.length) {
+      return { mode: "docs", items: [] };
+    }
+    const items = knowledgeSourceInventory.map(source => ({
+      id: `source:${source.key}`,
+      title: source.title || formatSourceLabel(source.source_url || source.key, 32),
+      source_url: source.source_url || "",
+      occurred_at: source.last_seen || source.last_crawled_at || "",
+      isSource: true
+    }));
+    return { mode: "sources", items };
+  }, [knowledgeItems, knowledgeSourceInventory, knowledgeSelectedTag, knowledgeSelectedSource]);
+
 
   const switchAssetClass = (next) => {
     if (next === assetClass) return;
@@ -726,6 +1161,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     return () => { mounted = false; };
   }, [serverUrl]);
 
+  useEffect(() => {
+    const stocks = Array.isArray(tradingProfile?.email?.stocks) ? tradingProfile.email.stocks : [];
+    const cryptos = Array.isArray(tradingProfile?.email?.cryptos) ? tradingProfile.email.cryptos : [];
+    setTrackedStocks(stocks);
+    setTrackedCryptos(cryptos);
+  }, [tradingProfile]);
+
   async function loadRecommendations() {
     if (!serverUrl) return;
     setRecommendationsLoading(true);
@@ -756,17 +1198,199 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   }
 
+  const saveWatchlists = async (nextStocks, nextCryptos) => {
+    if (!serverUrl) return;
+    setWatchlistSaving(true);
+    setWatchlistStatus("Saving watchlists...");
+    try {
+      const payload = {
+        email: {
+          ...(tradingProfile?.email || {}),
+          stocks: nextStocks,
+          cryptos: nextCryptos
+        },
+        training: tradingProfile?.training || {}
+      };
+      const resp = await fetch(`${serverUrl}/api/trading/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "watchlist_save_failed");
+      setTradingProfile(data.settings || tradingProfile);
+      setWatchlistStatus("Watchlists saved.");
+      loadRecommendations();
+    } catch (err) {
+      setWatchlistStatus(err?.message || "watchlist_save_failed");
+    } finally {
+      setWatchlistSaving(false);
+      setTimeout(() => setWatchlistStatus(""), 2000);
+    }
+  };
+
+  const addToWatchlist = async (item) => {
+    if (!item?.symbol) return;
+    const symbolValue = item.symbol.toUpperCase();
+    if (item.assetClass === "crypto") {
+      const next = Array.from(new Set([...(trackedCryptos || []), symbolValue]));
+      setTrackedCryptos(next);
+      await saveWatchlists(trackedStocks, next);
+      return;
+    }
+    const next = Array.from(new Set([...(trackedStocks || []), symbolValue]));
+    setTrackedStocks(next);
+    await saveWatchlists(next, trackedCryptos);
+  };
+
+  const removeFromWatchlist = async (symbolValue, targetClass) => {
+    if (!symbolValue) return;
+    if (targetClass === "crypto") {
+      const next = (trackedCryptos || []).filter(item => item !== symbolValue);
+      setTrackedCryptos(next);
+      await saveWatchlists(trackedStocks, next);
+      return;
+    }
+    const next = (trackedStocks || []).filter(item => item !== symbolValue);
+    setTrackedStocks(next);
+    await saveWatchlists(next, trackedCryptos);
+  };
+
+  useEffect(() => {
+    if (!serverUrl) return;
+    const query = watchlistQuery.trim();
+    if (!query) {
+      setWatchlistResults([]);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      try {
+        const resp = await fetch(`${serverUrl}/api/trading/symbols/search?q=${encodeURIComponent(query)}&assetClass=${encodeURIComponent(watchlistAssetClass)}&limit=12`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "symbol_search_failed");
+        setWatchlistResults(Array.isArray(data.results) ? data.results : []);
+      } catch {
+        setWatchlistResults([]);
+      }
+    }, 320);
+    return () => clearTimeout(handle);
+  }, [watchlistQuery, watchlistAssetClass, serverUrl]);
+
+  const loadRagModels = async () => {
+    if (!serverUrl) return;
+    setRagModelStatus("Loading RAG models...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/rag/models`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rag_models_failed");
+      const models = Array.isArray(data.models) ? data.models : [];
+      setRagModels(models);
+      const idSet = new Set(models.map(m => m.id));
+      setActiveRagModel(prev => (prev && idSet.has(prev) ? prev : "trading"));
+      setRagModelStatus("");
+    } catch (err) {
+      setRagModelStatus(err?.message || "rag_models_failed");
+    }
+  };
+
+  const createRagModel = async () => {
+    if (!serverUrl) return;
+    const topic = newRagTopic.trim();
+    if (!topic) return;
+    setNewRagStatus("Creating model...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/rag/models`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rag_create_failed");
+      const modelId = data?.model?.id || "";
+      setNewRagTopic("");
+      setNewRagStatus("Model created.");
+      await loadRagModels();
+      if (modelId) {
+        setActiveRagModel(modelId);
+        try {
+          localStorage.setItem("aika_active_rag_model", modelId);
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      setNewRagStatus(err?.message || "rag_create_failed");
+    } finally {
+      setTimeout(() => setNewRagStatus(""), 2000);
+    }
+  };
+
   useEffect(() => {
     loadRecommendations();
   }, [serverUrl]);
 
   useEffect(() => {
+    if (!serverUrl) return;
+    try {
+      const raw = localStorage.getItem("trading_knowledge_ui");
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved?.selectedNode) setKnowledgeSelectedNode(saved.selectedNode);
+        if (saved?.selectedTag) setKnowledgeSelectedTag(saved.selectedTag);
+        if (saved?.selectedSource) setKnowledgeSelectedSource(saved.selectedSource);
+      }
+    } catch {
+      // ignore storage errors
+    } finally {
+      setKnowledgePrefsLoaded(true);
+    }
+  }, [serverUrl]);
+
+  useEffect(() => {
+    if (!serverUrl) return;
+    try {
+      const stored = localStorage.getItem("aika_active_rag_model");
+      if (stored) setActiveRagModel(stored);
+    } catch {
+      // ignore
+    }
+    loadRagModels();
+  }, [serverUrl]);
+
+  useEffect(() => {
+    try {
+      if (activeRagModel) localStorage.setItem("aika_active_rag_model", activeRagModel);
+    } catch {
+      // ignore
+    }
+  }, [activeRagModel]);
+
+  useEffect(() => {
+    if (!serverUrl || !knowledgePrefsLoaded) return;
+    setKnowledgeSelectedTag("");
+    setKnowledgeSelectedSource("");
+    setKnowledgeSelectedNode("");
+    setKnowledgeNodeDetail(null);
     loadKnowledgeItems();
     loadSources();
     loadKnowledgeStats();
     loadRssSources();
     loadScenarioHistory();
-  }, [serverUrl]);
+  }, [serverUrl, knowledgePrefsLoaded, activeRagModel]);
+
+  useEffect(() => {
+    if (!knowledgePrefsLoaded) return;
+    try {
+      const payload = {
+        selectedNode: knowledgeSelectedNode,
+        selectedTag: knowledgeSelectedTag,
+        selectedSource: knowledgeSelectedSource
+      };
+      localStorage.setItem("trading_knowledge_ui", JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }, [knowledgeSelectedNode, knowledgeSelectedTag, knowledgeSelectedSource, knowledgePrefsLoaded]);
 
   useEffect(() => {
     if (tradingTab !== "paper") return;
@@ -1058,7 +1682,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       const resp = await fetch(`${serverUrl}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userText: prompt })
+        body: JSON.stringify({ userText: prompt, ragModel: activeRagModel || "trading" })
       });
       const data = await resp.json();
       setAssistantMessages(prev => [...prev, { role: "assistant", content: data?.text || "No response." }]);
@@ -1125,12 +1749,24 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
-  const loadKnowledgeItems = async (tagOverride) => {
+  const loadKnowledgeItems = async (filters = {}) => {
     if (!serverUrl) return;
     try {
-      const tag = typeof tagOverride === "string" ? tagOverride : knowledgeSelectedTag;
-      const query = new URLSearchParams({ limit: "20" });
+      if (activeRagModel === "fireflies") {
+        const type = "fireflies";
+        const query = new URLSearchParams({ limit: "20", type });
+        const resp = await fetch(`${serverUrl}/api/rag/meetings?${query.toString()}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "knowledge_list_failed");
+        setKnowledgeItems(Array.isArray(data.meetings) ? data.meetings : []);
+        setKnowledgeStatus("");
+        return;
+      }
+      const tag = typeof filters?.tag === "string" ? filters.tag : knowledgeSelectedTag;
+      const source = typeof filters?.source === "string" ? filters.source : knowledgeSelectedSource;
+      const query = new URLSearchParams({ limit: "20", collection: activeRagModel || "trading" });
       if (tag) query.set("tag", tag);
+      if (source) query.set("source", source);
       const resp = await fetch(`${serverUrl}/api/trading/knowledge/list?${query.toString()}`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "knowledge_list_failed");
@@ -1141,24 +1777,144 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }
   };
 
+
   const loadKnowledgeStats = async () => {
     if (!serverUrl) return;
     setKnowledgeStatsStatus("Loading knowledge stats...");
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/knowledge/stats?limit=500`);
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || "knowledge_stats_failed");
-      setKnowledgeStats(data);
+      if (activeRagModel === "fireflies") {
+        const resp = await fetch(`${serverUrl}/api/fireflies/graph?limit=500`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "knowledge_stats_failed");
+        const participantSources = Array.isArray(data.topParticipants)
+          ? data.topParticipants.map(item => ({
+              key: item.name,
+              title: item.name,
+              count: item.count,
+              source_url: "",
+              age_days: null
+            }))
+          : [];
+        setKnowledgeStats({
+          totalDocuments: data.totalMeetings || 0,
+          totalTags: Array.isArray(data.topTopics) ? data.topTopics.length : 0,
+          sources: participantSources,
+          tags: Array.isArray(data.topTopics) ? data.topTopics : [],
+          topSources: participantSources,
+          graph: {
+            nodes: data.nodes || [],
+            links: data.links || []
+          }
+        });
+      } else {
+        const resp = await fetch(`${serverUrl}/api/trading/knowledge/stats?limit=500&collection=${encodeURIComponent(activeRagModel || "trading")}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "knowledge_stats_failed");
+        setKnowledgeStats(data);
+      }
       setKnowledgeStatsStatus("");
     } catch (err) {
       setKnowledgeStatsStatus(err?.message || "knowledge_stats_failed");
     }
   };
 
+  const parseKnowledgeNode = (node) => {
+    if (!node) return null;
+    const rawId = String(node.id || "");
+    const inferredType = node.type
+      || (rawId.startsWith("tag:") || rawId.startsWith("#") ? "tag" : rawId.startsWith("source:") ? "source" : "");
+    let value = node.value || node.label || rawId;
+    if (inferredType === "tag") {
+      value = String(value || "").replace(/^tag:/i, "").replace(/^#/i, "").trim().toLowerCase();
+    } else if (inferredType === "source") {
+      value = String(value || "").replace(/^source:/i, "").trim();
+    }
+    return { id: rawId, type: inferredType, value, label: node.label || value };
+  };
+
+  const loadKnowledgeNodeDetails = async (nodeId) => {
+    if (!serverUrl || !nodeId) return;
+    setKnowledgeNodeStatus("Loading node details...");
+    try {
+      if (activeRagModel === "fireflies") {
+        const resp = await fetch(`${serverUrl}/api/fireflies/node?node=${encodeURIComponent(nodeId)}&limitMeetings=8&limitSnippets=6`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "knowledge_node_failed");
+        setKnowledgeNodeDetail({
+          type: data.type || "node",
+          label: data.label || data.nodeId || "",
+          count: Array.isArray(data.meetings) ? data.meetings.length : 0,
+          docs: Array.isArray(data.meetings) ? data.meetings.map(item => ({
+            id: item.id,
+            title: item.title,
+            occurred_at: item.occurred_at,
+            source_url: item.source_url || ""
+          })) : [],
+          snippets: Array.isArray(data.snippets) ? data.snippets.map(item => ({
+            chunk_id: item.chunk_id,
+            meeting_title: item.meeting_title,
+            occurred_at: item.occurred_at,
+            text: item.text
+          })) : []
+        });
+      } else {
+        const resp = await fetch(`${serverUrl}/api/trading/knowledge/node?node=${encodeURIComponent(nodeId)}&limitDocs=8&limitSnippets=6&collection=${encodeURIComponent(activeRagModel || "trading")}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "knowledge_node_failed");
+        setKnowledgeNodeDetail(data);
+      }
+      setKnowledgeNodeStatus("");
+    } catch (err) {
+      setKnowledgeNodeDetail(null);
+      setKnowledgeNodeStatus(err?.message || "knowledge_node_failed");
+    }
+  };
+
+  const clearKnowledgeFilter = async () => {
+    setKnowledgeSelectedTag("");
+    setKnowledgeSelectedSource("");
+    setKnowledgeSelectedNode("");
+    setKnowledgeNodeDetail(null);
+    setKnowledgeNodeStatus("");
+    await loadKnowledgeItems({ tag: "", source: "" });
+  };
+
+  const handleKnowledgeNodeSelect = async (node) => {
+    if (!node?.id) return;
+    const parsed = parseKnowledgeNode(node);
+    setKnowledgeSelectedNode(node.id);
+    if (parsed?.type) {
+      setKnowledgeNodeDetail({
+        type: parsed.type,
+        label: parsed.label,
+        count: 0,
+        docs: [],
+        snippets: []
+      });
+    } else {
+      setKnowledgeNodeDetail(null);
+    }
+    if (parsed?.type === "tag") {
+      setKnowledgeSelectedTag(parsed.value);
+      setKnowledgeSelectedSource("");
+      await loadKnowledgeItems({ tag: parsed.value, source: "" });
+    } else if (parsed?.type === "source") {
+      setKnowledgeSelectedSource(parsed.value);
+      setKnowledgeSelectedTag("");
+      await loadKnowledgeItems({ tag: "", source: parsed.value });
+    }
+    await loadKnowledgeNodeDetails(node.id);
+  };
+
   const loadSources = async () => {
     if (!serverUrl) return;
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources?includeDisabled=1`);
+      if (activeRagModel === "fireflies") {
+        setSourceList([]);
+        setSourceStatus("");
+        return;
+      }
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources?includeDisabled=1&collection=${encodeURIComponent(activeRagModel || "trading")}`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "source_list_failed");
       setSourceList(data?.items || []);
@@ -1171,7 +1927,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const loadRssSources = async () => {
     if (!serverUrl) return;
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/rss/sources?includeDisabled=1`);
+      if (activeRagModel === "fireflies") {
+        setRssSources([]);
+        return;
+      }
+      const resp = await fetch(`${serverUrl}/api/trading/rss/sources?includeDisabled=1&collection=${encodeURIComponent(activeRagModel || "trading")}`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "rss_sources_failed");
       setRssSources(data?.items || []);
@@ -1188,7 +1948,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       const resp = await fetch(`${serverUrl}/api/trading/rss/seed`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: rssSeedUrl })
+        body: JSON.stringify({ url: rssSeedUrl, collection: activeRagModel || "trading" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "rss_seed_failed");
@@ -1205,7 +1965,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     try {
       const resp = await fetch(`${serverUrl}/api/trading/rss/crawl`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection: activeRagModel || "trading" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "rss_crawl_failed");
@@ -1224,7 +1985,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       const resp = await fetch(`${serverUrl}/api/trading/rss/sources/${source.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !source.enabled })
+        body: JSON.stringify({ enabled: !source.enabled, collection: activeRagModel || "trading" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "rss_update_failed");
@@ -1240,7 +2001,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     try {
       const resp = await fetch(`${serverUrl}/api/trading/rss/sources/${source.id}/crawl`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection: activeRagModel || "trading" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "rss_crawl_failed");
@@ -1256,7 +2018,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     if (!confirmed) return;
     setRssStatus("Removing RSS source...");
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/rss/sources/${source.id}`, {
+      const resp = await fetch(`${serverUrl}/api/trading/rss/sources/${source.id}?collection=${encodeURIComponent(activeRagModel || "trading")}`, {
         method: "DELETE"
       });
       const data = await resp.json();
@@ -1274,7 +2036,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     try {
       const resp = await fetch(`${serverUrl}/api/trading/knowledge/crawl`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection: activeRagModel || "trading" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "knowledge_sync_failed");
@@ -1289,6 +2052,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   const addSource = async () => {
     if (!serverUrl) return;
+    if (activeRagModel === "fireflies") {
+      setSourceStatus("Fireflies knowledge is read-only.");
+      return;
+    }
     const url = newSourceUrl.trim();
     if (!url) {
       setSourceStatus("Source URL is required.");
@@ -1301,7 +2068,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url,
-          tags: newSourceTags.split(/[;,]/).map(t => t.trim()).filter(Boolean)
+          tags: newSourceTags.split(/[;,]/).map(t => t.trim()).filter(Boolean),
+          collection: activeRagModel || "trading"
         })
       });
       const data = await resp.json();
@@ -1321,7 +2089,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources/${source.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !source.enabled })
+        body: JSON.stringify({ enabled: !source.enabled, collection: activeRagModel || "trading" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "source_update_failed");
@@ -1337,7 +2105,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     try {
       const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources/${source.id}/crawl`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection: activeRagModel || "trading" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "source_crawl_failed");
@@ -1352,7 +2121,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     if (!confirmed) return;
     setSourceStatus(deleteKnowledgeOnRemove ? "Removing source and deleting knowledge..." : "Removing source...");
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources/${source.id}?deleteKnowledge=${deleteKnowledgeOnRemove ? "1" : "0"}`, {
+      const resp = await fetch(`${serverUrl}/api/trading/knowledge/sources/${source.id}?deleteKnowledge=${deleteKnowledgeOnRemove ? "1" : "0"}&collection=${encodeURIComponent(activeRagModel || "trading")}`, {
         method: "DELETE"
       });
       const data = await resp.json();
@@ -1368,6 +2137,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   const saveHowTo = async () => {
     if (!serverUrl) return;
+    if (activeRagModel === "fireflies") {
+      setKnowledgeStatus("Fireflies knowledge is read-only.");
+      return;
+    }
     const title = knowledgeTitle.trim();
     const text = knowledgeText.trim();
     if (!title || !text) {
@@ -1382,7 +2155,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         body: JSON.stringify({
           title,
           text,
-          tags: knowledgeTags.split(/[;,]/).map(t => t.trim()).filter(Boolean)
+          tags: knowledgeTags.split(/[;,]/).map(t => t.trim()).filter(Boolean),
+          collection: activeRagModel || "trading"
         })
       });
       const data = await resp.json();
@@ -1404,15 +2178,30 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     if (!question) return;
     setKnowledgeStatus("Thinking...");
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/knowledge/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question })
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || "knowledge_query_failed");
-      setKnowledgeAnswer(data.answer || "");
-      setKnowledgeCitations(data.citations || []);
+      if (activeRagModel === "fireflies") {
+        const resp = await fetch(`${serverUrl}/api/rag/ask`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question,
+            filters: { meetingType: "fireflies" }
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "knowledge_query_failed");
+        setKnowledgeAnswer(data.answer || "");
+        setKnowledgeCitations(data.citations || []);
+      } else {
+        const resp = await fetch(`${serverUrl}/api/trading/knowledge/ask`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question, collection: activeRagModel || "trading" })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || "knowledge_query_failed");
+        setKnowledgeAnswer(data.answer || "");
+        setKnowledgeCitations(data.citations || []);
+      }
       setKnowledgeStatus("");
     } catch (err) {
       setKnowledgeStatus(err?.message || "knowledge_query_failed");
@@ -1421,6 +2210,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   const ingestKnowledgeUrl = async () => {
     if (!serverUrl) return;
+    if (activeRagModel === "fireflies") {
+      setKnowledgeUrlStatus("Fireflies knowledge is read-only.");
+      return;
+    }
     const url = knowledgeUrl.trim();
     if (!url) {
       setKnowledgeUrlStatus("URL is required.");
@@ -1435,7 +2228,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           url,
           title: knowledgeUrlTitle.trim() || undefined,
           tags: knowledgeUrlTags.split(/[;,]/).map(t => t.trim()).filter(Boolean),
-          useOcr: knowledgeUrlOcr
+          useOcr: knowledgeUrlOcr,
+          collection: activeRagModel || "trading"
         })
       });
       const data = await resp.json();
@@ -1453,6 +2247,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   const uploadKnowledgeFile = async () => {
     if (!serverUrl) return;
+    if (activeRagModel === "fireflies") {
+      setKnowledgeFileStatus("Fireflies knowledge is read-only.");
+      return;
+    }
     if (!knowledgeFile) {
       setKnowledgeFileStatus("File is required.");
       return;
@@ -1464,6 +2262,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       if (knowledgeFileTitle.trim()) form.append("title", knowledgeFileTitle.trim());
       if (knowledgeFileTags.trim()) form.append("tags", knowledgeFileTags.trim());
       form.append("useOcr", knowledgeFileOcr ? "true" : "false");
+      form.append("collection", activeRagModel || "trading");
       const resp = await fetch(`${serverUrl}/api/trading/knowledge/upload`, {
         method: "POST",
         body: form
@@ -1490,16 +2289,41 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     setQaCitations([]);
     setQaSource("");
     try {
-      const resp = await fetch(`${serverUrl}/api/trading/knowledge/ask-deep`, {
+      const resp = await fetch(`${serverUrl}/api/rag/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, allowFallback: qaAllowFallback })
+        body: JSON.stringify({
+          question,
+          topK: 8,
+          filters: buildRagFilters(activeRagModel)
+        })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "qa_failed");
-      setQaAnswer(data?.answer || "");
-      setQaCitations(data?.citations || []);
-      setQaSource(data?.source || "");
+      let answer = data?.answer || "";
+      let citations = data?.citations || [];
+      let source = activeRagMeta?.title || activeRagModel || "rag";
+      const needsFallback = qaAllowFallback && (!answer || /^i\\s+don'?t\\s+know/i.test(answer));
+      if (needsFallback) {
+        try {
+          const fallbackResp = await fetch(`${serverUrl}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userText: question, maxOutputTokens: 400, ragModel: activeRagModel || "trading" })
+          });
+          const fallbackData = await fallbackResp.json();
+          if (fallbackResp.ok && fallbackData?.text) {
+            answer = fallbackData.text;
+            citations = fallbackData.citations || citations;
+            source = fallbackData.source || "chat";
+          }
+        } catch {
+          // keep rag answer
+        }
+      }
+      setQaAnswer(answer);
+      setQaCitations(citations);
+      setQaSource(source);
       setQaStatus("");
     } catch (err) {
       setQaStatus(err?.message || "qa_failed");
@@ -1528,6 +2352,30 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       if (historyResp.ok) setScenarioHistory(historyData.items || []);
     } catch (err) {
       setScenarioStatus(err?.message || "scenario_run_failed");
+    }
+  };
+
+  const openScenarioDetail = async (result) => {
+    if (!serverUrl || !result?.symbol) return;
+    setScenarioDetailStatus("Loading detailed analysis...");
+    setScenarioDetail({
+      symbol: result.symbol,
+      assetClass: result.assetClass || scenarioAssetClass,
+      windowDays: result.windowDays || scenarioWindow
+    });
+    try {
+      const query = new URLSearchParams({
+        symbol: result.symbol,
+        assetClass: result.assetClass || scenarioAssetClass || "stock",
+        windowDays: String(result.windowDays || scenarioWindow || 30)
+      });
+      const resp = await fetch(`${serverUrl}/api/trading/scenarios/detail?${query.toString()}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "scenario_detail_failed");
+      setScenarioDetail(data);
+      setScenarioDetailStatus("");
+    } catch (err) {
+      setScenarioDetailStatus(err?.message || "scenario_detail_failed");
     }
   };
 
@@ -1821,15 +2669,38 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     }));
   };
 
-  const handleRecommendationAnalyze = (item) => {
-    if (!item?.symbol) return;
+  const handleRecommendationAnalyze = async (item) => {
+    if (!item?.symbol || !serverUrl) return;
     const targetClass = item.assetClass === "crypto" ? "crypto" : "stock";
     if (targetClass !== assetClass) {
       switchAssetClass(targetClass);
     }
     setSymbol(item.symbol);
     setSymbolTouched(true);
-    sendAssistant(`Analyze ${item.symbol} and explain why it is a ${item.bias} candidate.`);
+    setRecommendationDetailStatus("Loading analysis...");
+    setRecommendationDetail({
+      symbol: item.symbol,
+      assetClass: targetClass,
+      bias: item.bias
+    });
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/recommendations/detail`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: item.symbol,
+          assetClass: targetClass,
+          bias: item.bias,
+          collectionId: activeRagModel && activeRagModel !== "fireflies" ? activeRagModel : undefined
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "recommendation_detail_failed");
+      setRecommendationDetail(data);
+      setRecommendationDetailStatus("");
+    } catch (err) {
+      setRecommendationDetailStatus(err?.message || "recommendation_detail_failed");
+    }
   };
 
   const containerStyle = {
@@ -2184,6 +3055,89 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontWeight: 600 }}>Watchlists</div>
+              {watchlistSaving && <span style={{ fontSize: 10, color: "#94a3b8" }}>Saving...</span>}
+            </div>
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
+              Search tickers and add to your tracked stocks or crypto lists (used for scenarios and recommendations).
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+              <select
+                value={watchlistAssetClass}
+                onChange={(e) => setWatchlistAssetClass(e.target.value)}
+                style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #cbd5f5", fontSize: 12 }}
+              >
+                <option value="stock">Stocks</option>
+                <option value="crypto">Crypto</option>
+              </select>
+              <input
+                value={watchlistQuery}
+                onChange={(e) => setWatchlistQuery(e.target.value)}
+                placeholder="Search ticker or name"
+                style={{ flex: 1, minWidth: 180, padding: "6px 8px", borderRadius: 8, border: "1px solid #cbd5f5", fontSize: 12 }}
+              />
+            </div>
+            {watchlistResults.length > 0 && (
+              <div style={{ display: "grid", gap: 6, maxHeight: 160, overflow: "auto", marginBottom: 8 }}>
+                {watchlistResults.map((item, idx) => (
+                  <div key={`${item.symbol}-${idx}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 10, padding: 6 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 12 }}>{item.symbol}</div>
+                      <div style={{ fontSize: 10, color: "#64748b" }}>{item.name || item.exchange || item.assetClass}</div>
+                    </div>
+                    <button
+                      onClick={() => addToWatchlist(item)}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 11 }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Tracked Stocks</div>
+                {(trackedStocks || []).length === 0 ? (
+                  <div style={{ color: "#94a3b8" }}>No stocks tracked yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {trackedStocks.map(symbolValue => (
+                      <button
+                        key={`stock-${symbolValue}`}
+                        onClick={() => removeFromWatchlist(symbolValue, "stock")}
+                        style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+                      >
+                        {symbolValue} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Tracked Crypto</div>
+                {(trackedCryptos || []).length === 0 ? (
+                  <div style={{ color: "#94a3b8" }}>No crypto tracked yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {trackedCryptos.map(symbolValue => (
+                      <button
+                        key={`crypto-${symbolValue}`}
+                        onClick={() => removeFromWatchlist(symbolValue, "crypto")}
+                        style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+                      >
+                        {symbolValue} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            {watchlistStatus && <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>{watchlistStatus}</div>}
+          </div>
+
           <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <div style={{ fontWeight: 600 }}>Recommendations</div>
@@ -2672,7 +3626,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <div style={{ display: "grid", gap: 6, maxHeight: 240, overflow: "auto" }}>
                   {backtestResult.walk_forward.slice(0, 6).map((item, idx) => (
                     <div key={`${item.test_start}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, fontSize: 11 }}>
-                      <div><strong>Test:</strong> {item.test_start} -> {item.test_end}</div>
+                      <div><strong>Test:</strong> {item.test_start} to {item.test_end}</div>
                       <div>Sharpe: {formatNumber(item.metrics?.sharpe || 0, 2)} | MaxDD: {formatNumber(item.metrics?.max_drawdown || 0, 2)}</div>
                     </div>
                   ))}
@@ -3110,7 +4064,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Ask Trading Knowledge</div>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
-                Uses the RAG knowledge base first, then expands with the LLM if needed.
+                Using: {activeRagMeta?.title || activeRagModel || "Trading Knowledge"}. RAG is used first, then the LLM expands if needed.
               </div>
               <textarea
                 value={qaQuestion}
@@ -3192,10 +4146,66 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       )}
 
       {tradingTab === "knowledge" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 16 }}>
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontWeight: 600 }}>Knowledge Model</div>
+                <button onClick={loadRagModels} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+                  Refresh
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+                Select the RAG model that powers the Knowledge Map, sources, and Q&A across the trading page.
+              </div>
+              <select
+                value={activeRagModel}
+                onChange={(e) => setActiveRagModel(e.target.value)}
+                style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid #cbd5f5", marginBottom: 8 }}
+              >
+                {ragModels.map(model => (
+                  <option key={model.id} value={model.id}>
+                    {model.title || model.id}
+                  </option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: "#475569", marginBottom: 6 }}>
+                {activeRagMeta?.description || "Personalized knowledge workspace."}
+              </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: "#64748b" }}>
+                  <span>Docs: {knowledgeStats?.totalDocuments || 0}</span>
+                <span>Sources: {knowledgeSourceInventory.length}</span>
+                  <span>Tags: {knowledgeStats?.totalTags || 0}</span>
+                </div>
+              {ragModelStatus && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>{ragModelStatus}</div>}
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 12 }}>Create New RAG Model</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    value={newRagTopic}
+                    onChange={(e) => setNewRagTopic(e.target.value)}
+                    placeholder="Topic (e.g., energy markets, biotech)"
+                    style={{ flex: 1, minWidth: 180, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  />
+                  <button
+                    onClick={createRagModel}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  >
+                    Create
+                  </button>
+                </div>
+                {newRagStatus && <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>{newRagStatus}</div>}
+              </div>
+            </div>
+
+            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Create How-To</div>
+              {activeRagModel === "fireflies" && (
+                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8 }}>
+                  Fireflies knowledge is read-only. Switch to Trading Knowledge or a custom model to add content.
+                </div>
+              )}
               <div style={{ display: "grid", gap: 8 }}>
                 <input
                   value={knowledgeTitle}
@@ -3298,8 +4308,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Online Sources</div>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
-                Sources are crawled in the background and refreshed on schedule.
+                Sources are crawled in the background, saved locally, and refreshed on schedule.
               </div>
+              {activeRagModel === "fireflies" ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                  Fireflies sources are read-only. Switch to Trading Knowledge or a custom model to manage web sources.
+                </div>
+              ) : (
+                <>
               <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
                 <input
                   value={newSourceUrl}
@@ -3376,6 +4392,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   </div>
                 ))}
               </div>
+                </>
+              )}
             </div>
 
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
@@ -3383,6 +4401,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
                 Feeds are reviewed by AI before ingestion. Foreign-market feeds are disabled by default.
               </div>
+              {activeRagModel === "fireflies" ? (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                  RSS feeds are not available for Fireflies. Switch to Trading Knowledge or a custom model to manage RSS ingestion.
+                </div>
+              ) : (
+                <>
               <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
                 <input
                   value={rssSeedUrl}
@@ -3440,6 +4464,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   </div>
                 ))}
               </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -3497,27 +4523,39 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     {knowledgeStats.latest && <span>Latest: {knowledgeStats.latest}</span>}
                   </div>
                   <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 8, background: "#f8fafc" }}>
-                    {topicNodes.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "#94a3b8" }}>Not enough tag data for a map yet.</div>
+                    {!knowledgeGraph?.nodes?.length ? (
+                      <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                        No knowledge graph nodes yet. Add or crawl sources to see the map populate.
+                      </div>
                     ) : (
-                      <svg width="320" height="260">
-                        <circle cx="160" cy="130" r="28" fill="#0ea5e9" opacity="0.15" />
-                        <text x="160" y="134" textAnchor="middle" fontSize="11" fill="#0f172a">Trading RAG</text>
-                        {topicNodes.map(node => (
-                          <g key={node.id} onClick={() => { setKnowledgeSelectedTag(node.id); loadKnowledgeItems(node.id); }} style={{ cursor: "pointer" }}>
-                            <line x1="160" y1="130" x2={node.x} y2={node.y} stroke="#cbd5f5" strokeWidth="1" />
-                            <circle cx={node.x} cy={node.y} r={node.size} fill={knowledgeSelectedTag === node.id ? "#f97316" : "#38bdf8"} opacity="0.85" />
-                            <text x={node.x} y={node.y - node.size - 4} textAnchor="middle" fontSize="9" fill="#334155">
-                              {node.id}
-                            </text>
-                          </g>
-                        ))}
-                      </svg>
+                      <KnowledgeGraph
+                        graph={knowledgeGraph}
+                        selectedId={knowledgeSelectedNode || (knowledgeSelectedTag ? `tag:${knowledgeSelectedTag}` : knowledgeSelectedSource ? `source:${knowledgeSelectedSource}` : "")}
+                        onSelect={handleKnowledgeNodeSelect}
+                      />
                     )}
                   </div>
-                  {knowledgeSelectedTag && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                    Nodes represent tags and sources; size reflects how often they appear. Click a node for details.
+                  </div>
+                  {(knowledgeSelectedTag || knowledgeSelectedSource) && (
                     <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
-                      Selected tag: <strong>{knowledgeSelectedTag}</strong>
+                      Selected {knowledgeSelectedTag ? "tag" : "source"}:{" "}
+                      <strong>{knowledgeSelectedTag ? `#${knowledgeSelectedTag}` : formatSourceLabel(knowledgeSelectedSource)}</strong>
+                    </div>
+                  )}
+                  {(knowledgeStats?.tags?.length || knowledgeStats?.topSources?.length) && (
+                    <div style={{ display: "grid", gap: 6, marginTop: 10, fontSize: 11, color: "#64748b" }}>
+                      {knowledgeStats?.tags?.length ? (
+                        <div>
+                          Top tags: {knowledgeStats.tags.slice(0, 6).map(item => `#${item.tag} (${item.count})`).join(", ")}
+                        </div>
+                      ) : null}
+                      {knowledgeStats?.topSources?.length ? (
+                        <div>
+                          Top sources: {knowledgeStats.topSources.slice(0, 4).map(item => `${formatSourceLabel(item.title || item.source_url || item.key, 20)} (${item.count})`).join(", ")}
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </>
@@ -3526,18 +4564,24 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Sources & Age</div>
-              {!knowledgeStats || (knowledgeStats.sources || []).length === 0 ? (
+              {knowledgeSourceInventory.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#94a3b8" }}>No sources indexed yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 8, maxHeight: 220, overflow: "auto" }}>
-                  {(knowledgeStats.sources || []).map((source, idx) => (
+                  {knowledgeSourceInventory.map((source, idx) => (
                     <div key={`${source.key}-${idx}`} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>{source.title}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{source.title || formatSourceLabel(source.source_url || source.key, 30)}</div>
                       {source.source_url && (
                         <div style={{ fontSize: 10, color: "#64748b" }}>{source.source_url}</div>
                       )}
                       <div style={{ fontSize: 10, color: "#94a3b8" }}>
-                        Docs: {source.count} {Number.isFinite(source.age_days) ? `| ${source.age_days}d since last update` : ""}
+                        {source.kind ? `${source.kind.toUpperCase()} | ` : ""}
+                        Docs: {source.count || 0}
+                        {Number.isFinite(source.age_days)
+                          ? ` | ${source.age_days}d since last update`
+                          : source.last_crawled_at
+                            ? ` | last crawl ${source.last_crawled_at}`
+                            : ""}
                       </div>
                     </div>
                   ))}
@@ -3548,21 +4592,30 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Knowledge Library</div>
-                {knowledgeSelectedTag && (
-                  <button
-                    onClick={() => { setKnowledgeSelectedTag(""); loadKnowledgeItems(""); }}
-                    style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
-                  >
-                    Clear Tag Filter
-                  </button>
+                {(knowledgeSelectedTag || knowledgeSelectedSource) && (
+                    <button
+                      onClick={clearKnowledgeFilter}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                    >
+                      Clear Filter
+                    </button>
                 )}
               </div>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
-                {knowledgeSelectedTag ? `Filtered by tag: ${knowledgeSelectedTag}` : "Recent indexed trading notes and sources."}
+                {knowledgeSelectedTag
+                  ? `Filtered by tag: #${knowledgeSelectedTag}`
+                  : knowledgeSelectedSource
+                    ? `Filtered by source: ${formatSourceLabel(knowledgeSelectedSource)}`
+                    : "Recent indexed trading notes and sources."}
               </div>
+              {knowledgeLibrary.mode === "sources" && (
+                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+                  Showing configured sources that have not been indexed yet.
+                </div>
+              )}
               <div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto" }}>
-                {knowledgeItems.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No knowledge indexed yet.</div>}
-                {knowledgeItems.map(item => (
+                {knowledgeLibrary.items.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No knowledge indexed yet.</div>}
+                {knowledgeLibrary.items.map(item => (
                   <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
                     <div style={{ fontWeight: 600 }}>{item.title}</div>
                     {item.source_url && (
@@ -3571,12 +4624,140 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     {item.occurred_at && (
                       <div style={{ fontSize: 10, color: "#94a3b8" }}>{item.occurred_at}</div>
                     )}
+                    {item.isSource && (
+                      <div style={{ fontSize: 10, color: "#94a3b8" }}>Source registered (awaiting crawl/index).</div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           </div>
         </div>
+
+        {knowledgeNodeDetail && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 60,
+            padding: 16
+          }}>
+            <div style={{
+              width: "min(760px, 92vw)",
+              maxHeight: "80vh",
+              overflow: "auto",
+              background: "#ffffff",
+              borderRadius: 14,
+              padding: 16,
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 24px 60px rgba(15,23,42,0.25)"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>
+                  {knowledgeNodeDetail.type === "tag" ? "Tag:" : "Source:"} {knowledgeNodeDetail.type === "tag" ? `#${knowledgeNodeDetail.label}` : formatSourceLabel(knowledgeNodeDetail.label || knowledgeNodeDetail.source_url || "")}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {(knowledgeSelectedTag || knowledgeSelectedSource) && (
+                    <button
+                      onClick={clearKnowledgeFilter}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                    >
+                      Clear Filter
+                    </button>
+                  )}
+                  <button onClick={() => setKnowledgeNodeDetail(null)} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+                    Close
+                  </button>
+                </div>
+              </div>
+              {knowledgeNodeDetail.type === "source" && knowledgeNodeDetail.source_url && (
+                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>{knowledgeNodeDetail.source_url}</div>
+              )}
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Appears in {knowledgeNodeDetail.count || 0} knowledge item(s).
+                {knowledgeNodeDetail.last_seen ? ` Latest: ${knowledgeNodeDetail.last_seen}` : ""}
+              </div>
+              {knowledgeNodeStatus && (
+                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>{knowledgeNodeStatus}</div>
+              )}
+              {knowledgeNodeDetail.summary && (
+                <div style={{ fontSize: 12, color: "#334155", marginBottom: 10 }}>
+                  {knowledgeNodeDetail.summary}
+                </div>
+              )}
+              {knowledgeNodeDetail.type === "tag" && knowledgeNodeDetail.sources?.length ? (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Top sources</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {knowledgeNodeDetail.sources.map(source => (
+                      <span key={source.key} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                        {formatSourceLabel(source.title || source.key, 24)} ({source.count})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {knowledgeNodeDetail.type === "tag" && knowledgeNodeDetail.related_tags?.length ? (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Related tags</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {knowledgeNodeDetail.related_tags.map(tag => (
+                      <span key={tag.tag} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f1f5f9" }}>
+                        #{tag.tag} ({tag.count})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {knowledgeNodeDetail.type === "source" && knowledgeNodeDetail.tags?.length ? (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Top tags</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {knowledgeNodeDetail.tags.map(tag => (
+                      <span key={tag.tag} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f1f5f9" }}>
+                        #{tag.tag} ({tag.count})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {knowledgeNodeDetail.snippets?.length ? (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Top snippets</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {knowledgeNodeDetail.snippets.map(snippet => (
+                      <div key={snippet.chunk_id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: "#475569", fontWeight: 600 }}>
+                          {snippet.meeting_title || "Knowledge"} {snippet.occurred_at ? `- ${snippet.occurred_at}` : ""}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#94a3b8" }}>{snippet.chunk_id}</div>
+                        <div style={{ marginTop: 6, fontSize: 12 }}>{snippet.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div style={{ display: "grid", gap: 8 }}>
+                {(knowledgeNodeDetail.docs || []).slice(0, 8).map(item => (
+                  <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontWeight: 600 }}>{item.title || "Knowledge"}</div>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>{item.occurred_at || "Unknown date"}</div>
+                    {item.source_url && (
+                      <div style={{ fontSize: 11, color: "#64748b" }}>{item.source_url}</div>
+                    )}
+                  </div>
+                ))}
+                {(knowledgeNodeDetail.docs || []).length === 0 && (
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>No knowledge items match this node yet.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       )}
 
       {tradingTab === "scenarios" && (
@@ -3611,7 +4792,19 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             <div style={{ display: "grid", gap: 6 }}>
               {scenarioResults.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Run a scenario to see results.</div>}
               {scenarioResults.map(result => (
-                <div key={`${result.symbol}-${result.windowDays}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                <button
+                  key={`${result.symbol}-${result.windowDays}`}
+                  type="button"
+                  onClick={() => openScenarioDetail(result)}
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: 8,
+                    textAlign: "left",
+                    background: "#fff",
+                    cursor: "pointer"
+                  }}
+                >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ fontWeight: 600 }}>{result.symbol}</div>
                     <span style={{ fontSize: 11, color: result.returnPct >= 0 ? "#16a34a" : "#dc2626" }}>
@@ -3625,7 +4818,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                       Start {formatNumber(result.start)} to End {formatNumber(result.end)} | {result.points} points
                     </div>
                   )}
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -3642,6 +4835,261 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {recommendationDetail && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15,23,42,0.45)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 70,
+          padding: 16
+        }}>
+          <div style={{
+            width: "min(980px, 94vw)",
+            maxHeight: "85vh",
+            overflow: "auto",
+            background: "#ffffff",
+            borderRadius: 16,
+            padding: 18,
+            border: "1px solid #e2e8f0",
+            boxShadow: "0 24px 60px rgba(15,23,42,0.25)"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>
+                  {recommendationDetail.symbol || "Recommendation"} {recommendationDetail.assetClass ? `(${recommendationDetail.assetClass})` : ""}
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>
+                  Bias: {recommendationDetail.bias || "WATCH"} {recommendationDetail.provider ? `· Provider: ${recommendationDetail.provider}` : ""} {recommendationDetail.generatedAt ? `· ${recommendationDetail.generatedAt}` : ""}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    const targetClass = recommendationDetail.assetClass === "crypto" ? "crypto" : "stock";
+                    switchAssetClass(targetClass);
+                    if (recommendationDetail.symbol) {
+                      setSymbol(recommendationDetail.symbol);
+                      setSymbolTouched(true);
+                    }
+                    setTradingTab("terminal");
+                  }}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 12 }}
+                >
+                  Use in Terminal
+                </button>
+                <button
+                  onClick={() => { setRecommendationDetail(null); setRecommendationDetailStatus(""); }}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12 }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            {recommendationDetailStatus && (
+              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>{recommendationDetailStatus}</div>
+            )}
+            {recommendationDetail.error ? (
+              <div style={{ fontSize: 12, color: "#b91c1c" }}>
+                Unable to build analysis: {recommendationDetail.error}. Try again after refreshing data sources.
+              </div>
+            ) : (
+              <>
+                {recommendationDetail.metrics && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 12 }}>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Last Close</div>
+                      <div style={{ fontWeight: 600 }}>{recommendationDetail.metrics.lastClose ?? "n/a"}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>ATR (14)</div>
+                      <div style={{ fontWeight: 600 }}>{recommendationDetail.metrics.atr ?? "n/a"}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Max Drawdown</div>
+                      <div style={{ fontWeight: 600 }}>{recommendationDetail.metrics.maxDrawdownPct ?? "n/a"}%</div>
+                    </div>
+                  </div>
+                )}
+                {recommendationDetail.narrative && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>Scenario Narrative</div>
+                    <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap" }}>{recommendationDetail.narrative}</div>
+                  </div>
+                )}
+                {(recommendationDetail.sections || []).map((section, idx) => (
+                  <div key={`${section.title}-${idx}`} style={{ marginBottom: 12, border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#f8fafc" }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>{section.title}</div>
+                    {section.body && (
+                      <div style={{ fontSize: 12, color: "#334155" }}>{section.body}</div>
+                    )}
+                    {section.bullets?.length ? (
+                      <div style={{ display: "grid", gap: 6, fontSize: 12, color: "#475569", marginTop: 6 }}>
+                        {section.bullets.map((bullet, bIdx) => (
+                          <div key={`${section.title}-bullet-${bIdx}`}>• {bullet}</div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+                {recommendationDetail.citations?.length ? (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>Knowledge Citations</div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {recommendationDetail.citations.slice(0, 8).map((cite, idx) => (
+                        <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "#64748b", background: "#f1f5f9", padding: 8, borderRadius: 8 }}>
+                          <div style={{ fontWeight: 600 }}>{cite.meeting_title || "Knowledge"}</div>
+                          <div>{cite.chunk_id}</div>
+                          <div>{cite.snippet}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {scenarioDetail && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15,23,42,0.45)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 70,
+          padding: 16
+        }}>
+          <div style={{
+            width: "min(920px, 94vw)",
+            maxHeight: "82vh",
+            overflow: "auto",
+            background: "#ffffff",
+            borderRadius: 16,
+            padding: 18,
+            border: "1px solid #e2e8f0",
+            boxShadow: "0 24px 60px rgba(15,23,42,0.25)"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>
+                  {scenarioDetail.symbol || "Scenario Detail"} {scenarioDetail.assetClass ? `(${scenarioDetail.assetClass})` : ""}
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>
+                  Window: {scenarioDetail.windowDays || scenarioWindow} days · Provider: {scenarioDetail.provider || "unknown"} · Bars: {scenarioDetail.points || "n/a"}
+                </div>
+              </div>
+              <button onClick={() => { setScenarioDetail(null); setScenarioDetailStatus(""); }} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12 }}>
+                Close
+              </button>
+            </div>
+            {scenarioDetailStatus && (
+              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>{scenarioDetailStatus}</div>
+            )}
+            {scenarioDetail.error ? (
+              <div style={{ fontSize: 12, color: "#b91c1c" }}>
+                Unable to build analysis: {scenarioDetail.error}. Try running scenarios again or verify data access.
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Verbose Analysis</div>
+                  <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap" }}>
+                    {scenarioDetail.narrative || "No analysis generated yet."}
+                  </div>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Key Metrics</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Return</div>
+                      <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.returnPct, "%")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                        Start {formatScenarioValue(scenarioDetail.startPrice, "")} · End {formatScenarioValue(scenarioDetail.endPrice, "")}
+                      </div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Range</div>
+                      <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.rangePct, "%")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                        {formatScenarioValue(scenarioDetail.rangeLow, "")} to {formatScenarioValue(scenarioDetail.rangeHigh, "")}
+                      </div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Trend</div>
+                      <div style={{ fontWeight: 600 }}>{scenarioDetail.trendLabel || "Not enough data"}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Slope {formatScenarioValue(scenarioDetail.trendSlopePct, "%/day")}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Volatility</div>
+                      <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.annualVol, "%")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Daily {formatScenarioValue(scenarioDetail.dailyVol, "%")}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Drawdown</div>
+                      <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.maxDrawdownPct, "%")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Best {formatScenarioValue(scenarioDetail.bestDayPct, "%")} · Worst {formatScenarioValue(scenarioDetail.worstDayPct, "%")}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Momentum</div>
+                      <div style={{ fontWeight: 600 }}>RSI {formatScenarioValue(scenarioDetail.rsi14, "")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                        5d {formatScenarioValue(scenarioDetail.momentum5, "%")} · 10d {formatScenarioValue(scenarioDetail.momentum10, "%")} · 20d {formatScenarioValue(scenarioDetail.momentum20, "%")}
+                      </div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Moving Averages</div>
+                      <div style={{ fontWeight: 600 }}>10d {formatScenarioValue(scenarioDetail.ma10, "")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>20d {formatScenarioValue(scenarioDetail.ma20, "")} · 50d {formatScenarioValue(scenarioDetail.ma50, "")}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Long-Term Trend</div>
+                      <div style={{ fontWeight: 600 }}>200d {formatScenarioValue(scenarioDetail.ma200, "")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Trend strength {formatScenarioValue(scenarioDetail.trendStrengthPct, "%")}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Win / Loss Tape</div>
+                      <div style={{ fontWeight: 600 }}>Win rate {formatScenarioValue(scenarioDetail.winRate, "%")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                        Avg up {formatScenarioValue(scenarioDetail.avgUp, "%")} · Avg down {formatScenarioValue(scenarioDetail.avgDown, "%")}
+                      </div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>ATR & Vol Regime</div>
+                      <div style={{ fontWeight: 600 }}>ATR {formatScenarioValue(scenarioDetail.atr14, "")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                        {scenarioDetail.volRegime || "Vol regime n/a"} · 10d {formatScenarioValue(scenarioDetail.volShort, "%")} · 30d {formatScenarioValue(scenarioDetail.volLong, "%")}
+                      </div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Liquidity</div>
+                      <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.avgVolume, "")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Recent {formatScenarioValue(scenarioDetail.recentVolume, "")} · Last {formatScenarioValue(scenarioDetail.lastVolume, "")}</div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Support/Resistance</div>
+                      <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.support, "")}</div>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Resistance {formatScenarioValue(scenarioDetail.resistance, "")}</div>
+                    </div>
+                  </div>
+                </div>
+                {scenarioDetail.warnings?.length ? (
+                  <div style={{ fontSize: 12, color: "#b45309", background: "#fff7ed", border: "1px solid #fed7aa", padding: 10, borderRadius: 10 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Data Warnings</div>
+                    <div>{scenarioDetail.warnings.join("; ")}</div>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
       )}

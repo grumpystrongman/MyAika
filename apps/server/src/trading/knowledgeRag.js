@@ -43,12 +43,68 @@ const OCR_MAX_PAGES = Number(process.env.TRADING_RAG_OCR_MAX_PAGES || 0);
 const OCR_SCALE = Number(process.env.TRADING_RAG_OCR_SCALE || 2.0);
 const TRADING_PREFIX = "trading";
 
+const DEFAULT_TRADING_SOURCES = [
+  { url: "https://www.investopedia.com", tags: ["education", "basics"] },
+  { url: "https://www.sec.gov/news/pressreleases", tags: ["sec", "regulation"] },
+  { url: "https://www.federalreserve.gov/newsevents/pressreleases.htm", tags: ["macro", "fed"] },
+  { url: "https://www.cboe.com/market_statistics/", tags: ["options", "volatility"] },
+  { url: "https://www.nasdaq.com/market-activity", tags: ["market", "nasdaq"] }
+];
+
+const DEFAULT_TRADING_SEED_DOCS = [
+  {
+    title: "Trading Risk Checklist",
+    tags: ["risk", "process", "howto"],
+    text: [
+      "Pre-trade checklist:",
+      "1) Define thesis and invalidation level.",
+      "2) Size position so a stop loss is a small, known % of portfolio.",
+      "3) Confirm liquidity and spread.",
+      "4) Note upcoming catalysts (earnings, macro data, Fed).",
+      "5) Plan take-profit or trailing stop rules.",
+      "6) Record the trade with a short summary and expectations."
+    ].join("\n")
+  },
+  {
+    title: "Trend vs. Range Playbook",
+    tags: ["trend", "range", "strategy"],
+    text: [
+      "Trend playbook:",
+      "- Use higher highs/higher lows and rising moving averages.",
+      "- Prefer entries on pullbacks to MA20/MA50.",
+      "- Trail stops below swing lows.",
+      "",
+      "Range playbook:",
+      "- Define support/resistance and trade the edges.",
+      "- Use tighter stops; take profits quickly.",
+      "- Avoid breakouts without volume confirmation."
+    ].join("\n")
+  },
+  {
+    title: "Options Basics (Wheel / Covered Call / Vertical)",
+    tags: ["options", "wheel", "covered_call", "vertical_spread"],
+    text: [
+      "Wheel strategy: sell cash-secured puts, take assignment, then sell covered calls.",
+      "Covered calls: collect premium, cap upside; best in range-bound markets.",
+      "Vertical spreads: defined risk; choose strikes around expected move.",
+      "Always compare premium vs. max loss and avoid illiquid chains."
+    ].join("\n")
+  }
+];
+
 function nowIso() {
   return new Date().toISOString();
 }
 
 function hashSeed(input) {
   return crypto.createHash("sha1").update(String(input || "")).digest("hex").slice(0, 16);
+}
+
+function resolveCollectionPrefix(collectionId) {
+  const raw = String(collectionId || "").trim();
+  if (!raw || raw === TRADING_PREFIX) return TRADING_PREFIX;
+  const safe = raw.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe ? `rag:${safe}` : TRADING_PREFIX;
 }
 
 function normalizeText(text) {
@@ -107,16 +163,48 @@ function normalizeTags(tags) {
     });
 }
 
+function buildSourceKey(row = {}) {
+  return row?.source_url || row?.source_group || row?.title || "manual";
+}
+
+function parseNodeId(rawId = "") {
+  const raw = String(rawId || "").trim();
+  if (!raw) return null;
+  if (raw.startsWith("tag:")) {
+    return { type: "tag", value: raw.slice(4).trim().toLowerCase(), raw };
+  }
+  if (raw.startsWith("#")) {
+    return { type: "tag", value: raw.slice(1).trim().toLowerCase(), raw };
+  }
+  if (raw.startsWith("source:")) {
+    return { type: "source", value: raw.slice(7).trim(), raw };
+  }
+  return { type: "source", value: raw, raw };
+}
+
 function bootstrapTradingSourcesFromEnv() {
-  const existing = listTradingSources({ limit: 1, includeDisabled: true });
-  if (existing.length) return 0;
-  const entries = parseSourceEntries(process.env.TRADING_RAG_SOURCES);
+  const envEntries = parseSourceEntries(process.env.TRADING_RAG_SOURCES);
+  let entries = envEntries;
+  if (!entries.length) {
+    const existing = listTradingSources({ limit: 1, includeDisabled: true });
+    if (!existing.length) {
+      entries = DEFAULT_TRADING_SOURCES;
+    }
+  }
   let inserted = 0;
   entries.forEach(entry => {
     const url = normalizeUrl(entry.url);
     if (!url) return;
-    upsertTradingSource({ url, tags: normalizeTags(entry.tags), enabled: true });
-    inserted += 1;
+    const existing = getTradingSourceByUrl(url);
+    if (!existing) {
+      upsertTradingSource({ url, tags: normalizeTags(entry.tags), enabled: true });
+      inserted += 1;
+      return;
+    }
+    const mergedTags = normalizeTags([...(existing.tags || []), ...(entry.tags || [])]);
+    if (mergedTags.length !== (existing.tags || []).length) {
+      updateTradingSource(existing.id, { tags: mergedTags });
+    }
   });
   return inserted;
 }
@@ -302,18 +390,23 @@ async function processCrawlQueue() {
       if (source.id) {
         markTradingSourceCrawl({ id: source.id, status: "running", error: "" });
       }
+      const collectionId = job.options?.collectionId || source.collection_id || TRADING_PREFIX;
+      const groupKey = collectionId && collectionId !== TRADING_PREFIX
+        ? `${collectionId}::${source.url}`
+        : source.url;
       const result = await crawlTradingSources({
         entries: [{
           id: source.id,
           url: source.url,
           tags: source.tags || [],
-          sourceGroup: source.url
+          sourceGroup: groupKey
         }],
         maxDepth: job.options?.maxDepth,
         maxPages: job.options?.maxPages,
         maxPagesPerDomain: job.options?.maxPagesPerDomain,
         delayMs: job.options?.delayMs,
-        force: job.options?.force
+        force: job.options?.force,
+        collectionId
       });
       const status = result?.errors?.length
         ? (result?.ingested ? "partial" : "error")
@@ -350,9 +443,10 @@ function limitText(text, maxChars = MAX_DOC_CHARS) {
   return `${text.slice(0, maxChars)}...`;
 }
 
-function buildTradingId(kind, seed) {
+function buildTradingId(kind, seed, prefix = TRADING_PREFIX) {
   const hash = hashSeed(`${kind}:${seed}`);
-  return `${TRADING_PREFIX}:${kind}:${hash}`;
+  const resolved = resolveCollectionPrefix(prefix);
+  return `${resolved}:${kind}:${hash}`;
 }
 
 function buildHeader({ title, sourceUrl, tags }) {
@@ -371,14 +465,15 @@ export async function ingestTradingDocument({
   tags = [],
   sourceGroup,
   occurredAt,
-  force = false
+  force = false,
+  collectionId
 }) {
   const normalizedText = normalizeText(text);
   if (!normalizedText) {
     return { ok: false, error: "empty_text" };
   }
   const idSeed = sourceUrl || `${title}:${normalizedText.slice(0, 120)}`;
-  const meetingId = buildTradingId(kind, idSeed);
+  const meetingId = buildTradingId(kind, idSeed, collectionId);
   const existing = getMeeting(meetingId);
   if (existing && !force && existing.raw_transcript === normalizedText) {
     return { ok: true, skipped: true, meetingId, chunks: 0 };
@@ -509,8 +604,10 @@ export async function crawlTradingSources({
   maxPages = DEFAULT_CRAWL_MAX_PAGES,
   maxPagesPerDomain = DEFAULT_CRAWL_MAX_PAGES_PER_DOMAIN,
   delayMs = DEFAULT_CRAWL_DELAY_MS,
-  force = false
+  force = false,
+  collectionId
 } = {}) {
+  const prefix = resolveCollectionPrefix(collectionId);
   const seedEntries = entries?.length ? entries : parseSourceEntries(process.env.TRADING_RAG_SOURCES);
   const queue = seedEntries.map(item => ({
     url: normalizeUrl(item.url),
@@ -592,7 +689,8 @@ export async function crawlTradingSources({
         text,
         tags: ["source", ...current.tags],
         sourceGroup: current.sourceGroup,
-        force
+        force,
+        collectionId
       });
       if (ingest?.skipped) results.skipped += 1;
       else if (ingest?.ok) results.ingested += 1;
@@ -621,7 +719,8 @@ export async function crawlTradingSources({
     }
   }
 
-  setRagMeta("trading_sources_last_crawl", nowIso());
+  const metaKey = prefix === TRADING_PREFIX ? "trading_sources_last_crawl" : `${prefix}_sources_last_crawl`;
+  setRagMeta(metaKey, nowIso());
   if (seedEntries?.length) {
     const status = results.errors.length
       ? (results.ingested ? "partial" : "error")
@@ -636,12 +735,13 @@ export async function crawlTradingSources({
   return { ...results, visited: visited.size };
 }
 
-export async function ingestTradingHowTo({ title, text, tags = [] } = {}) {
+export async function ingestTradingHowTo({ title, text, tags = [], collectionId } = {}) {
   return ingestTradingDocument({
     kind: "howto",
     title: title || "Trading How-To",
     text,
-    tags: ["howto", ...tags]
+    tags: ["howto", ...tags],
+    collectionId
   });
 }
 
@@ -652,7 +752,8 @@ export async function ingestTradingUrl({
   useOcr = OCR_DEFAULT,
   ocrMaxPages = OCR_MAX_PAGES,
   ocrScale = OCR_SCALE,
-  force = false
+  force = false,
+  collectionId
 } = {}) {
   const sourceUrl = normalizeUrl(url);
   if (!sourceUrl) {
@@ -679,7 +780,8 @@ export async function ingestTradingUrl({
       text,
       tags: ["pdf", "url", ...tags].filter(Boolean),
       sourceGroup: sourceUrl,
-      force
+      force,
+      collectionId
     });
   }
 
@@ -693,7 +795,8 @@ export async function ingestTradingUrl({
     text,
     tags: ["source", ...tags],
     sourceGroup: sourceUrl,
-    force
+    force,
+    collectionId
   });
 }
 
@@ -705,7 +808,8 @@ export async function ingestTradingFile({
   useOcr = OCR_DEFAULT,
   ocrMaxPages = OCR_MAX_PAGES,
   ocrScale = OCR_SCALE,
-  force = false
+  force = false,
+  collectionId
 } = {}) {
   if (!filePath || !fs.existsSync(filePath)) {
     return { ok: false, error: "file_not_found" };
@@ -736,7 +840,8 @@ export async function ingestTradingFile({
     text,
     tags: [isPdf ? "pdf" : "file", "upload", ...tags].filter(Boolean),
     sourceGroup: "local-file",
-    force
+    force,
+    collectionId
   });
 }
 
@@ -763,7 +868,7 @@ export async function recordTradeAnalysis({ outcome, analysis, source } = {}) {
   });
 }
 
-export async function queryTradingKnowledge(question, { topK = 6 } = {}) {
+export async function queryTradingKnowledge(question, { topK = 6, collectionId } = {}) {
   const query = String(question || "").trim();
   if (!query) {
     return { answer: "Question required.", citations: [], debug: { retrievedCount: 0 } };
@@ -771,7 +876,8 @@ export async function queryTradingKnowledge(question, { topK = 6 } = {}) {
   const embedding = await getEmbedding(query);
   const matches = await searchChunkIds(embedding, Math.max(topK * 3, topK));
   const orderedIds = matches.map(m => m.chunk_id).filter(Boolean);
-  const rows = getChunksByIds(orderedIds, { meetingIdPrefix: `${TRADING_PREFIX}:` });
+  const prefix = resolveCollectionPrefix(collectionId);
+  const rows = getChunksByIds(orderedIds, { meetingIdPrefix: `${prefix}:` });
   const byId = new Map(rows.map(row => [row.chunk_id, row]));
   const ordered = matches
     .map(match => ({ ...byId.get(match.chunk_id), distance: match.distance }))
@@ -796,13 +902,23 @@ export async function queryTradingKnowledge(question, { topK = 6 } = {}) {
   };
 }
 
-export async function listTradingKnowledge({ limit = 25, offset = 0, search = "", tag = "" } = {}) {
+export async function listTradingKnowledge({ limit = 25, offset = 0, search = "", tag = "", source = "", collectionId } = {}) {
+  const prefix = resolveCollectionPrefix(collectionId);
+  if (prefix === TRADING_PREFIX) {
+    await ensureTradingKnowledgeSeeded();
+  }
   const tagValue = String(tag || "").trim().toLowerCase();
-  if (tagValue) {
-    const rawRows = listMeetingsRaw({ type: "trading", limit: Math.max(limit * 4, limit), offset: 0 });
+  const sourceValue = String(source || "").trim();
+  if (tagValue || sourceValue) {
+    const rawRows = listMeetingsRaw({ meetingIdPrefix: `${prefix}:`, limit: Math.max(limit * 4, limit), offset: 0, search });
     const filtered = rawRows.filter(row => {
-      const tags = extractTagsFromRaw(row.raw_transcript || "");
-      if (!tags.includes(tagValue)) return false;
+      if (tagValue) {
+        const tags = extractTagsFromRaw(row.raw_transcript || "");
+        if (!tags.includes(tagValue)) return false;
+      }
+      if (sourceValue) {
+        if (buildSourceKey(row) !== sourceValue) return false;
+      }
       if (!search) return true;
       const needle = String(search).toLowerCase();
       return String(row.title || "").toLowerCase().includes(needle)
@@ -816,18 +932,19 @@ export async function listTradingKnowledge({ limit = 25, offset = 0, search = ""
       summary: null
     }));
   }
-  const rows = listMeetings({ type: "trading", limit, offset, search });
+  const rows = listMeetingsRaw({ meetingIdPrefix: `${prefix}:`, limit, offset, search });
   return rows.map(row => ({
     id: row.id,
     title: row.title,
     occurred_at: row.occurred_at,
     source_url: row.source_url || "",
-    summary: row.summary_json ? JSON.parse(row.summary_json) : null
+    summary: null
   }));
 }
 
-export function getTradingKnowledgeStats({ limit = 500 } = {}) {
-  const rows = listMeetingsRaw({ type: "trading", limit, offset: 0 });
+export function getTradingKnowledgeStats({ limit = 500, collectionId } = {}) {
+  const prefix = resolveCollectionPrefix(collectionId);
+  const rows = listMeetingsRaw({ meetingIdPrefix: `${prefix}:`, limit, offset: 0 });
   const tagCounts = new Map();
   const sourceMap = new Map();
   let earliest = null;
@@ -844,7 +961,7 @@ export function getTradingKnowledgeStats({ limit = 500 } = {}) {
     tags.forEach(tag => {
       tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
     });
-    const sourceKey = row.source_url || row.source_group || row.title || "manual";
+    const sourceKey = buildSourceKey(row);
     const existing = sourceMap.get(sourceKey);
     if (!existing) {
       sourceMap.set(sourceKey, {
@@ -873,19 +990,39 @@ export function getTradingKnowledgeStats({ limit = 500 } = {}) {
     .slice(0, 24);
 
   const topTagSet = new Set(tagsSorted.map(t => t.tag));
-  const linkMap = new Map();
+  const sourcesByCount = Array.from(sourceMap.values())
+    .map(source => ({ ...source }))
+    .sort((a, b) => b.count - a.count);
+  const topSources = sourcesByCount.slice(0, 14);
+  const topSourceSet = new Set(topSources.map(source => source.key));
+
+  const tagLinkMap = new Map();
+  const tagSourceLinkMap = new Map();
   rows.forEach(row => {
     const tags = extractTagsFromRaw(row.raw_transcript || "").filter(tag => topTagSet.has(tag));
     for (let i = 0; i < tags.length; i += 1) {
       for (let j = i + 1; j < tags.length; j += 1) {
         const key = [tags[i], tags[j]].sort().join("::");
-        linkMap.set(key, (linkMap.get(key) || 0) + 1);
+        tagLinkMap.set(key, (tagLinkMap.get(key) || 0) + 1);
       }
     }
+    if (!tags.length) return;
+    const sourceKey = buildSourceKey(row);
+    if (!topSourceSet.has(sourceKey)) return;
+    tags.forEach(tag => {
+      const key = `${tag}::${sourceKey}`;
+      tagSourceLinkMap.set(key, (tagSourceLinkMap.get(key) || 0) + 1);
+    });
   });
-  const links = Array.from(linkMap.entries()).map(([key, weight]) => {
-    const [source, target] = key.split("::");
-    return { source, target, weight };
+
+  const tagLinks = Array.from(tagLinkMap.entries()).map(([key, weight]) => {
+    const [sourceTag, targetTag] = key.split("::");
+    return { source: `tag:${sourceTag}`, target: `tag:${targetTag}`, weight };
+  });
+
+  const tagSourceLinks = Array.from(tagSourceLinkMap.entries()).map(([key, weight]) => {
+    const [tag, sourceKey] = key.split("::");
+    return { source: `tag:${tag}`, target: `source:${sourceKey}`, weight };
   });
 
   const sources = Array.from(sourceMap.values()).map(source => {
@@ -894,6 +1031,19 @@ export function getTradingKnowledgeStats({ limit = 500 } = {}) {
     return { ...source, age_days: ageDays };
   }).sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
 
+  const nodes = [
+    ...tagsSorted.map(item => ({ id: `tag:${item.tag}`, label: item.tag, value: item.tag, type: "tag", count: item.count })),
+    ...topSources.map(source => ({
+      id: `source:${source.key}`,
+      label: source.title || source.key,
+      value: source.key,
+      type: "source",
+      count: source.count,
+      source_url: source.source_url || "",
+      source_group: source.source_group || ""
+    }))
+  ];
+
   return {
     totalDocuments: rows.length,
     totalTags: tagCounts.size,
@@ -901,23 +1051,167 @@ export function getTradingKnowledgeStats({ limit = 500 } = {}) {
     latest: latest ? new Date(latest).toISOString() : "",
     sources,
     tags: tagsSorted,
+    topSources: topSources.map(source => ({
+      key: source.key,
+      title: source.title,
+      source_url: source.source_url || "",
+      count: source.count
+    })),
     graph: {
-      nodes: tagsSorted.map(item => ({ id: item.tag, count: item.count })),
-      links
+      nodes,
+      links: [...tagLinks, ...tagSourceLinks]
     }
   };
 }
 
-export function listTradingSourcesUi({ limit = 100, offset = 0, search = "", includeDisabled = true } = {}) {
-  ensureTradingSourcesSeeded();
-  return listTradingSources({ limit, offset, search, includeDisabled });
+export async function getTradingKnowledgeNodeDetails(nodeId, { limitDocs = 8, limitSnippets = 6, collectionId } = {}) {
+  const parsed = parseNodeId(nodeId);
+  if (!parsed) return null;
+  const prefix = resolveCollectionPrefix(collectionId);
+  const rows = listMeetingsRaw({ meetingIdPrefix: `${prefix}:`, limit: 1200, offset: 0 });
+
+  const computeTimeRange = (items) => {
+    let firstSeen = "";
+    let lastSeen = "";
+    items.forEach(row => {
+      const occurred = row.occurred_at || row.created_at || "";
+      if (!occurred) return;
+      if (!firstSeen || occurred < firstSeen) firstSeen = occurred;
+      if (!lastSeen || occurred > lastSeen) lastSeen = occurred;
+    });
+    return { firstSeen, lastSeen };
+  };
+
+  if (parsed.type === "tag") {
+    const tagValue = parsed.value;
+    if (!tagValue) return null;
+    const filtered = rows.filter(row => extractTagsFromRaw(row.raw_transcript || "").includes(tagValue));
+    const docs = filtered.slice(0, limitDocs).map(row => ({
+      id: row.id,
+      title: row.title,
+      occurred_at: row.occurred_at,
+      source_url: row.source_url || ""
+    }));
+    const sourceCounts = new Map();
+    const relatedTagCounts = new Map();
+    filtered.forEach(row => {
+      const sourceKey = buildSourceKey(row);
+      const entry = sourceCounts.get(sourceKey) || {
+        key: sourceKey,
+        title: row.title || sourceKey,
+        source_url: row.source_url || "",
+        count: 0
+      };
+      entry.count += 1;
+      sourceCounts.set(sourceKey, entry);
+      extractTagsFromRaw(row.raw_transcript || "").forEach(tag => {
+        if (tag === tagValue) return;
+        relatedTagCounts.set(tag, (relatedTagCounts.get(tag) || 0) + 1);
+      });
+    });
+    const sources = Array.from(sourceCounts.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+    const relatedTags = Array.from(relatedTagCounts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+    let snippets = [];
+    try {
+      const query = await queryTradingKnowledge(`Tag: ${tagValue}`, { topK: limitSnippets, collectionId });
+      snippets = Array.isArray(query?.citations) ? query.citations.map(item => ({
+        chunk_id: item.chunk_id,
+        meeting_title: item.meeting_title,
+        occurred_at: item.occurred_at,
+        text: item.snippet
+      })) : [];
+    } catch {
+      snippets = [];
+    }
+    const timeRange = computeTimeRange(filtered);
+    return {
+      nodeId: parsed.raw,
+      type: "tag",
+      label: tagValue,
+      count: filtered.length,
+      first_seen: timeRange.firstSeen,
+      last_seen: timeRange.lastSeen,
+      sources,
+      related_tags: relatedTags,
+      docs,
+      snippets
+    };
+  }
+
+  if (parsed.type === "source") {
+    const sourceKey = parsed.value;
+    if (!sourceKey) return null;
+    const filtered = rows.filter(row => buildSourceKey(row) === sourceKey);
+    const docs = filtered.slice(0, limitDocs).map(row => ({
+      id: row.id,
+      title: row.title,
+      occurred_at: row.occurred_at,
+      source_url: row.source_url || ""
+    }));
+    const tagCounts = new Map();
+    filtered.forEach(row => {
+      extractTagsFromRaw(row.raw_transcript || "").forEach(tag => {
+        tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+      });
+    });
+    const tags = Array.from(tagCounts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+    let snippets = [];
+    try {
+      const query = await queryTradingKnowledge(`Source: ${sourceKey}`, { topK: limitSnippets, collectionId });
+      snippets = Array.isArray(query?.citations) ? query.citations.map(item => ({
+        chunk_id: item.chunk_id,
+        meeting_title: item.meeting_title,
+        occurred_at: item.occurred_at,
+        text: item.snippet
+      })) : [];
+    } catch {
+      snippets = [];
+    }
+    const sample = filtered.find(row => row.source_url || row.source_group);
+    const timeRange = computeTimeRange(filtered);
+    return {
+      nodeId: parsed.raw,
+      type: "source",
+      label: sourceKey,
+      count: filtered.length,
+      first_seen: timeRange.firstSeen,
+      last_seen: timeRange.lastSeen,
+      source_url: sample?.source_url || (sourceKey.startsWith("http") ? sourceKey : ""),
+      source_group: sample?.source_group || "",
+      tags,
+      docs,
+      snippets
+    };
+  }
+
+  return null;
 }
 
-export function addTradingSource({ url, tags = [], enabled = true } = {}) {
+export function listTradingSourcesUi({ limit = 100, offset = 0, search = "", includeDisabled = true, collectionId } = {}) {
+  if (!collectionId || collectionId === TRADING_PREFIX) {
+    ensureTradingSourcesSeeded();
+  }
+  return listTradingSources({ limit, offset, search, includeDisabled, collectionId: collectionId || TRADING_PREFIX });
+}
+
+export function addTradingSource({ url, tags = [], enabled = true, collectionId } = {}) {
   const normalized = normalizeUrl(url);
   if (!normalized) throw new Error("invalid_url");
-  const source = upsertTradingSource({ url: normalized, tags: normalizeTags(tags), enabled: enabled !== false });
-  enqueueSourceCrawl({ ...source, tags: source.tags || [] });
+  const source = upsertTradingSource({
+    url: normalized,
+    tags: normalizeTags(tags),
+    enabled: enabled !== false,
+    collectionId: collectionId || TRADING_PREFIX
+  });
+  enqueueSourceCrawl({ ...source, tags: source.tags || [] }, { collectionId: collectionId || TRADING_PREFIX });
   return source;
 }
 
@@ -928,12 +1222,15 @@ export function updateTradingSourceUi(id, { tags, enabled } = {}) {
   return updateTradingSource(id, next);
 }
 
-export function removeTradingSource(id, { deleteKnowledge = false } = {}) {
+export function removeTradingSource(id, { deleteKnowledge = false, collectionId } = {}) {
   const source = getTradingSource(id);
   if (!source) return { ok: false, error: "not_found" };
   let deletedCount = 0;
   if (deleteKnowledge) {
-    deletedCount = deleteMeetingsBySourceGroup(source.url);
+    const groupKey = collectionId && collectionId !== TRADING_PREFIX
+      ? `${collectionId}::${source.url}`
+      : source.url;
+    deletedCount = deleteMeetingsBySourceGroup(groupKey);
   }
   deleteTradingSource(id);
   return { ok: true, deletedCount };
@@ -950,10 +1247,32 @@ export function ensureTradingSourcesSeeded() {
   return bootstrapTradingSourcesFromEnv();
 }
 
+export async function ensureTradingKnowledgeSeeded() {
+  const seeded = getRagMeta("trading_seeded");
+  if (seeded) return false;
+  const existing = listMeetingsRaw({ type: "trading", limit: 1, offset: 0 });
+  if (existing.length) {
+    setRagMeta("trading_seeded", nowIso());
+    return false;
+  }
+  for (const doc of DEFAULT_TRADING_SEED_DOCS) {
+    await ingestTradingDocument({
+      kind: "seed",
+      title: doc.title,
+      text: doc.text,
+      tags: doc.tags || [],
+      sourceGroup: "seed"
+    });
+  }
+  setRagMeta("trading_seeded", nowIso());
+  return true;
+}
+
 export async function startTradingKnowledgeSyncLoop() {
+  ensureTradingSourcesSeeded();
+  ensureTradingKnowledgeSeeded().catch(() => {});
   const intervalMin = DEFAULT_CRAWL_INTERVAL_MINUTES;
   if (!intervalMin || intervalMin <= 0) return;
-  ensureTradingSourcesSeeded();
 
   const run = async () => {
     const sources = listTradingSources({ limit: 500, includeDisabled: false });

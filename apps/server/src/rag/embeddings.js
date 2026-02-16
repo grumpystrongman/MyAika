@@ -1,4 +1,5 @@
-﻿import OpenAI from "openai";
+import OpenAI from "openai";
+import crypto from "node:crypto";
 
 let localPipelinePromise = null;
 let localModelId = null;
@@ -7,6 +8,42 @@ let cachedDim = null;
 
 function normalizeText(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function resolveFallbackDim(provider) {
+  const override = Number(process.env.RAG_EMBEDDING_DIM || 0);
+  if (Number.isFinite(override) && override > 0) return override;
+  if (provider === "openai") {
+    const model = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
+    if (model.includes("3-large")) return 3072;
+    if (model.includes("3-small")) return 1536;
+    if (model.includes("ada-002")) return 1536;
+    return 1536;
+  }
+  return 384;
+}
+
+function fallbackEmbedding(text, dim) {
+  const cleaned = normalizeText(text);
+  const size = Number.isFinite(dim) && dim > 0 ? dim : 384;
+  const vec = new Float32Array(size);
+  if (!cleaned) return vec;
+  const hash = crypto.createHash("sha256").update(cleaned).digest();
+  for (let i = 0; i < size; i += 1) {
+    const byte = hash[i % hash.length];
+    vec[i] = (byte / 127.5) - 1;
+  }
+  let norm = 0;
+  for (let i = 0; i < size; i += 1) {
+    norm += vec[i] * vec[i];
+  }
+  norm = Math.sqrt(norm);
+  if (norm > 0) {
+    for (let i = 0; i < size; i += 1) {
+      vec[i] /= norm;
+    }
+  }
+  return vec;
 }
 
 async function getLocalPipeline() {
@@ -42,9 +79,19 @@ async function embedOpenAI(text) {
 export async function getEmbedding(text) {
   const provider = (process.env.RAG_EMBEDDINGS_PROVIDER || "local").toLowerCase();
   if (provider === "openai") {
-    return embedOpenAI(text);
+    try {
+      return await embedOpenAI(text);
+    } catch (err) {
+      console.warn("OpenAI embeddings failed, using fallback:", err?.message || err);
+      return fallbackEmbedding(text, resolveFallbackDim(provider));
+    }
   }
-  return embedLocal(text);
+  try {
+    return await embedLocal(text);
+  } catch (err) {
+    console.warn("Local embeddings failed, using fallback:", err?.message || err);
+    return fallbackEmbedding(text, resolveFallbackDim(provider));
+  }
 }
 
 export async function getEmbeddingDimension(sampleText = "dimension probe") {

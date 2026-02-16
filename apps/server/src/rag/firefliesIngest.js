@@ -27,6 +27,198 @@ let syncRunning = false;
 let rateLimitUntil = 0;
 let syncTimer = null;
 let lastSyncAt = 0;
+let syncStartedAt = 0;
+let lastSyncResult = null;
+
+const DEFAULT_SYNC_STALE_MS = 30 * 60 * 1000;
+
+function getSyncStaleMs() {
+  const raw = Number(process.env.FIREFLIES_SYNC_STALE_MS || DEFAULT_SYNC_STALE_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_SYNC_STALE_MS;
+  return raw;
+}
+
+export function getFirefliesSyncStatus() {
+  return {
+    running: syncRunning,
+    startedAt: syncStartedAt ? new Date(syncStartedAt).toISOString() : "",
+    lastSyncAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : "",
+    rateLimitUntil: rateLimitUntil ? new Date(rateLimitUntil).toISOString() : "",
+    lastResult: lastSyncResult
+  };
+}
+
+async function runFirefliesSync({ limit = 0, force = false, sendEmail } = {}) {
+  const maxItems = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
+  const throttleMs = Number(process.env.FIREFLIES_SYNC_THROTTLE_MS || 0);
+  const pageSize = Math.min(50, maxItems);
+  let cursor = 0;
+  const transcripts = [];
+  while (cursor !== null && transcripts.length < maxItems) {
+    const pageLimit = Math.min(pageSize, maxItems - transcripts.length);
+    const page = await listTranscripts({ cursor, limit: pageLimit });
+    if (page?.transcripts?.length) {
+      transcripts.push(...page.transcripts);
+    }
+    if (!page?.nextCursor || !page?.transcripts?.length || page.transcripts.length < pageLimit) break;
+    cursor = page.nextCursor;
+  }
+
+  let syncedMeetings = 0;
+  let syncedChunks = 0;
+  let skippedMeetings = 0;
+  let emailedMeetings = 0;
+  let notifiedMeetings = 0;
+
+  const autoEmail = typeof sendEmail === "boolean"
+    ? sendEmail
+    : String(process.env.FIREFLIES_AUTO_EMAIL || "0").toLowerCase() === "1";
+  const notifyChannels = parseNotifyChannels(process.env.FIREFLIES_NOTIFY_CHANNELS || "");
+
+  for (const entry of transcripts) {
+    try {
+      const transcriptId = entry?.id;
+      if (!transcriptId) continue;
+
+      const existingCount = countChunksForMeeting(transcriptId);
+      const existingMeeting = existingCount ? getMeeting(transcriptId) : null;
+      const existingEmail = autoEmail ? getMeetingEmail(transcriptId) : null;
+      const needsEmail = autoEmail && (!existingEmail || existingEmail.status !== "sent");
+      const needsNotify = notifyChannels.length > 0;
+      const needsIndex = !existingCount || force;
+      const needsDetail = needsIndex || !existingMeeting?.raw_transcript || !existingMeeting?.title || !existingMeeting?.occurred_at;
+      const needsSummary = needsEmail || needsNotify;
+
+      if (existingCount && !force && !needsEmail) {
+        skippedMeetings += 1;
+        continue;
+      }
+
+      if (force && existingCount) {
+        deleteMeetingChunks(transcriptId);
+      }
+
+      const detail = needsDetail ? await getTranscript(transcriptId) : null;
+      if (needsDetail && !detail) {
+        skippedMeetings += 1;
+        continue;
+      }
+
+      const occurredAt = existingMeeting?.occurred_at || normalizeDate(detail) || "";
+      let participants = [];
+      if (existingMeeting?.participants_json) {
+        try {
+          participants = JSON.parse(existingMeeting.participants_json) || [];
+        } catch {
+          participants = [];
+        }
+      } else if (detail) {
+        participants = extractParticipants(detail);
+      }
+      const transcriptText =
+        existingMeeting?.raw_transcript ||
+        buildTranscriptText(detail?.sentences || [], detail?.transcript || detail?.text || "");
+      const title = existingMeeting?.title || detail?.title || entry.title || "Fireflies Meeting";
+      const sourceUrl = existingMeeting?.source_url || detail?.transcript_url || entry.transcript_url || "";
+
+      if (detail || needsIndex || needsEmail) {
+        upsertMeeting({
+          id: transcriptId,
+          title,
+          occurred_at: occurredAt,
+          participants_json: JSON.stringify(participants),
+          source_url: sourceUrl,
+          raw_transcript: transcriptText,
+          created_at: new Date().toISOString()
+        });
+      }
+
+      if (needsIndex) {
+        const chunks = chunkTranscript({ meetingId: transcriptId, sentences: detail?.sentences || [], rawText: transcriptText });
+        if (!chunks.length) {
+          skippedMeetings += 1;
+          continue;
+        }
+        upsertChunks(chunks);
+        const embeddings = [];
+        for (const chunk of chunks) {
+          const embedding = await getEmbedding(chunk.text);
+          embeddings.push(embedding);
+        }
+        await upsertVectors(chunks, embeddings);
+
+        syncedMeetings += 1;
+        syncedChunks += chunks.length;
+      }
+
+      let summary = null;
+      if (needsSummary) {
+        summary = await ensureSummary({
+          meetingId: transcriptId,
+          transcriptText,
+          title,
+          force
+        });
+      }
+
+      if (needsEmail && summary) {
+        const emailResult = await maybeSendEmail({
+          meetingId: transcriptId,
+          title,
+          occurredAt,
+          summary,
+          transcriptText,
+          sourceUrl
+        });
+        if (emailResult?.sent) emailedMeetings += 1;
+      }
+
+      if (needsNotify && summary) {
+        const notifyResult = await sendMeetingNotifications({
+          meetingId: transcriptId,
+          title,
+          occurredAt,
+          summary,
+          sourceUrl,
+          channels: notifyChannels,
+          force
+        });
+        if (notifyResult?.sent) notifiedMeetings += 1;
+      }
+    } catch (err) {
+      if (err?.code === "fireflies_rate_limited") {
+        if (err.retryAt) rateLimitUntil = err.retryAt;
+        throw err;
+      }
+      console.warn("Fireflies ingest failed:", err?.message || err);
+      skippedMeetings += 1;
+    } finally {
+      if (throttleMs && throttleMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, throttleMs));
+      }
+    }
+  }
+
+  await persistHnsw();
+  lastSyncAt = Date.now();
+  lastSyncResult = {
+    syncedMeetings,
+    syncedChunks,
+    skippedMeetings,
+    emailedMeetings,
+    notifiedMeetings,
+    finishedAt: new Date(lastSyncAt).toISOString()
+  };
+
+  return {
+    ok: true,
+    syncedMeetings,
+    syncedChunks,
+    skippedMeetings,
+    emailedMeetings,
+    notifiedMeetings
+  };
+}
 
 function parseRecipients(value) {
   return String(value || "")
@@ -166,6 +358,11 @@ async function maybeSendEmail({ meetingId, title, occurredAt, summary, transcrip
 }
 
 export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}) {
+  const now = Date.now();
+  if (syncRunning && syncStartedAt && now - syncStartedAt > getSyncStaleMs()) {
+    syncRunning = false;
+    syncStartedAt = 0;
+  }
   if (rateLimitUntil && Date.now() < rateLimitUntil) {
     return {
       ok: false,
@@ -174,171 +371,13 @@ export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}
     };
   }
   if (syncRunning) {
-    return { ok: false, error: "sync_in_progress" };
+    return { ok: false, error: "sync_in_progress", startedAt: syncStartedAt ? new Date(syncStartedAt).toISOString() : "" };
   }
   syncRunning = true;
+  syncStartedAt = Date.now();
   initRagStore();
   try {
-    const maxItems = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
-    const throttleMs = Number(process.env.FIREFLIES_SYNC_THROTTLE_MS || 0);
-    const pageSize = Math.min(50, maxItems);
-    let cursor = 0;
-    const transcripts = [];
-    while (cursor !== null && transcripts.length < maxItems) {
-      const pageLimit = Math.min(pageSize, maxItems - transcripts.length);
-      const page = await listTranscripts({ cursor, limit: pageLimit });
-      if (page?.transcripts?.length) {
-        transcripts.push(...page.transcripts);
-      }
-      if (!page?.nextCursor || !page?.transcripts?.length || page.transcripts.length < pageLimit) break;
-      cursor = page.nextCursor;
-    }
-
-    let syncedMeetings = 0;
-    let syncedChunks = 0;
-    let skippedMeetings = 0;
-    let emailedMeetings = 0;
-    let notifiedMeetings = 0;
-
-    const autoEmail = typeof sendEmail === "boolean"
-      ? sendEmail
-      : String(process.env.FIREFLIES_AUTO_EMAIL || "0").toLowerCase() === "1";
-    const notifyChannels = parseNotifyChannels(process.env.FIREFLIES_NOTIFY_CHANNELS || "");
-
-    for (const entry of transcripts) {
-      try {
-        const transcriptId = entry?.id;
-        if (!transcriptId) continue;
-
-        const existingCount = countChunksForMeeting(transcriptId);
-        const existingMeeting = existingCount ? getMeeting(transcriptId) : null;
-        const existingEmail = autoEmail ? getMeetingEmail(transcriptId) : null;
-        const needsEmail = autoEmail && (!existingEmail || existingEmail.status !== "sent");
-        const needsNotify = notifyChannels.length > 0;
-        const needsIndex = !existingCount || force;
-        const needsDetail = needsIndex || !existingMeeting?.raw_transcript || !existingMeeting?.title || !existingMeeting?.occurred_at;
-        const needsSummary = needsEmail || needsNotify;
-
-        if (existingCount && !force && !needsEmail) {
-          skippedMeetings += 1;
-          continue;
-        }
-
-        if (force && existingCount) {
-          deleteMeetingChunks(transcriptId);
-        }
-
-        const detail = needsDetail ? await getTranscript(transcriptId) : null;
-        if (needsDetail && !detail) {
-          skippedMeetings += 1;
-          continue;
-        }
-
-        const occurredAt = existingMeeting?.occurred_at || normalizeDate(detail) || "";
-        let participants = [];
-        if (existingMeeting?.participants_json) {
-          try {
-            participants = JSON.parse(existingMeeting.participants_json) || [];
-          } catch {
-            participants = [];
-          }
-        } else if (detail) {
-          participants = extractParticipants(detail);
-        }
-        const transcriptText =
-          existingMeeting?.raw_transcript ||
-          buildTranscriptText(detail?.sentences || [], detail?.transcript || detail?.text || "");
-        const title = existingMeeting?.title || detail?.title || entry.title || "Fireflies Meeting";
-        const sourceUrl = existingMeeting?.source_url || detail?.transcript_url || entry.transcript_url || "";
-
-        if (detail || needsIndex || needsEmail) {
-          upsertMeeting({
-            id: transcriptId,
-            title,
-            occurred_at: occurredAt,
-            participants_json: JSON.stringify(participants),
-            source_url: sourceUrl,
-            raw_transcript: transcriptText,
-            created_at: new Date().toISOString()
-          });
-        }
-
-        if (needsIndex) {
-          const chunks = chunkTranscript({ meetingId: transcriptId, sentences: detail?.sentences || [], rawText: transcriptText });
-          if (!chunks.length) {
-            skippedMeetings += 1;
-            continue;
-          }
-          upsertChunks(chunks);
-          const embeddings = [];
-          for (const chunk of chunks) {
-            const embedding = await getEmbedding(chunk.text);
-            embeddings.push(embedding);
-          }
-          await upsertVectors(chunks, embeddings);
-
-          syncedMeetings += 1;
-          syncedChunks += chunks.length;
-        }
-
-        let summary = null;
-        if (needsSummary) {
-          summary = await ensureSummary({
-            meetingId: transcriptId,
-            transcriptText,
-            title,
-            force
-          });
-        }
-
-        if (needsEmail && summary) {
-          const emailResult = await maybeSendEmail({
-            meetingId: transcriptId,
-            title,
-            occurredAt,
-            summary,
-            transcriptText,
-            sourceUrl
-          });
-          if (emailResult?.sent) emailedMeetings += 1;
-        }
-
-        if (needsNotify && summary) {
-          const notifyResult = await sendMeetingNotifications({
-            meetingId: transcriptId,
-            title,
-            occurredAt,
-            summary,
-            sourceUrl,
-            channels: notifyChannels,
-            force
-          });
-          if (notifyResult?.sent) notifiedMeetings += 1;
-        }
-      } catch (err) {
-        if (err?.code === "fireflies_rate_limited") {
-          if (err.retryAt) rateLimitUntil = err.retryAt;
-          throw err;
-        }
-        console.warn("Fireflies ingest failed:", err?.message || err);
-        skippedMeetings += 1;
-      } finally {
-        if (throttleMs && throttleMs > 0) {
-          await new Promise(resolve => setTimeout(resolve, throttleMs));
-        }
-      }
-    }
-
-    await persistHnsw();
-
-    return {
-      ok: true,
-      syncedMeetings,
-      syncedChunks,
-      skippedMeetings,
-      emailedMeetings,
-      notifiedMeetings
-    };
+    return await runFirefliesSync({ limit, force, sendEmail });
   } catch (err) {
     if (err?.code === "fireflies_rate_limited" && err.retryAt) {
       rateLimitUntil = err.retryAt;
@@ -350,7 +389,45 @@ export async function syncFireflies({ limit = 0, force = false, sendEmail } = {}
     };
   } finally {
     syncRunning = false;
+    syncStartedAt = 0;
   }
+}
+
+export function queueFirefliesSync({ limit = 0, force = false, sendEmail } = {}) {
+  const now = Date.now();
+  if (syncRunning && syncStartedAt && now - syncStartedAt > getSyncStaleMs()) {
+    syncRunning = false;
+    syncStartedAt = 0;
+  }
+  if (rateLimitUntil && Date.now() < rateLimitUntil) {
+    return {
+      ok: false,
+      error: "fireflies_rate_limited",
+      retryAt: new Date(rateLimitUntil).toISOString()
+    };
+  }
+  if (syncRunning) {
+    return { ok: false, error: "sync_in_progress", startedAt: syncStartedAt ? new Date(syncStartedAt).toISOString() : "" };
+  }
+  syncRunning = true;
+  syncStartedAt = Date.now();
+  initRagStore();
+  runFirefliesSync({ limit, force, sendEmail })
+    .then((result) => {
+      if (result?.error === "fireflies_rate_limited" && result.retryAt) {
+        rateLimitUntil = new Date(result.retryAt).getTime();
+      }
+    })
+    .catch((err) => {
+      if (err?.code === "fireflies_rate_limited" && err.retryAt) {
+        rateLimitUntil = err.retryAt;
+      }
+    })
+    .finally(() => {
+      syncRunning = false;
+      syncStartedAt = 0;
+    });
+  return { ok: true, status: "started", startedAt: new Date(syncStartedAt).toISOString() };
 }
 
 export function startFirefliesSyncLoop() {
