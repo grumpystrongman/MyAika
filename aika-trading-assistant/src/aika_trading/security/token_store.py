@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from ..db.models import OAuthToken
 from .crypto import encrypt_value, decrypt_value
@@ -18,13 +18,13 @@ def upsert_token(
     expires_in: int | None,
 ) -> OAuthToken:
     existing = db.query(OAuthToken).filter_by(provider=provider, subject_id=subject_id).first()
-    expires_at = datetime.utcnow() + timedelta(seconds=expires_in) if expires_in else None
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
     if existing:
         existing.access_token_enc = encrypt_value(access_token)
         existing.refresh_token_enc = encrypt_value(refresh_token) if refresh_token else None
         existing.scopes = scopes
         existing.expires_at = expires_at
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = datetime.now(timezone.utc)
         db.add(existing)
         db.commit()
         db.refresh(existing)

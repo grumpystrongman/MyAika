@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from ..db.models import TradeApproval
 from .policy import sign_approval
@@ -28,7 +28,7 @@ def approve(db: Session, approval_id: str, approved_by: str) -> TradeApproval | 
         return None
     record.status = "approved"
     record.approved_by = approved_by
-    record.approved_at = datetime.utcnow()
+    record.approved_at = datetime.now(timezone.utc)
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -41,7 +41,7 @@ def reject(db: Session, approval_id: str, approved_by: str) -> TradeApproval | N
         return None
     record.status = "rejected"
     record.approved_by = approved_by
-    record.approved_at = datetime.utcnow()
+    record.approved_at = datetime.now(timezone.utc)
     db.add(record)
     db.commit()
     db.refresh(record)

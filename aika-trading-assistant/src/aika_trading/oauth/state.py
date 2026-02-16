@@ -1,7 +1,7 @@
 import base64
 import hashlib
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from ..db.models import OAuthState
 
@@ -17,10 +17,16 @@ def build_pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
+def _ensure_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def create_state(db: Session, provider: str, redirect_uri: str, ttl_minutes: int = 10) -> dict:
     verifier, challenge = build_pkce()
     state_value = _random_urlsafe(24)
-    expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
     record = OAuthState(
         provider=provider,
         state=state_value,
@@ -43,7 +49,8 @@ def consume_state(db: Session, provider: str, state_value: str) -> OAuthState | 
     record = db.query(OAuthState).filter_by(provider=provider, state=state_value).first()
     if not record:
         return None
-    if record.expires_at < datetime.utcnow():
+    expires_at = _ensure_aware(record.expires_at)
+    if expires_at < datetime.now(timezone.utc):
         db.delete(record)
         db.commit()
         return None

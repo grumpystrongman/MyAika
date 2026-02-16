@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -136,7 +136,7 @@ class RunStore:
                     order.side,
                     order.quantity,
                     order.order_type,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                     json.dumps(order.to_dict()),
                 ),
             )

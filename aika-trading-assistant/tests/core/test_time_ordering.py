@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -22,13 +22,13 @@ def _bar(ts: datetime) -> Bar:
 
 
 def test_time_ordering_raises():
-    base = datetime.utcnow()
+    base = datetime.now(timezone.utc)
     bars = [_bar(base + timedelta(hours=1)), _bar(base)]
     with pytest.raises(ValueError):
         ensure_time_ordered(bars)
 
 
 def test_time_ordering_ok():
-    base = datetime.utcnow()
+    base = datetime.now(timezone.utc)
     bars = [_bar(base), _bar(base + timedelta(hours=1))]
     ensure_time_ordered(bars)

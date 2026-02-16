@@ -1,6 +1,6 @@
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from sqlalchemy.orm import Session
 from ..db.models import AuditEvent
@@ -14,7 +14,7 @@ def append_audit_event(db: Session, action: str, decision: str, detail: dict[str
     prev = db.query(AuditEvent).order_by(AuditEvent.ts.desc()).first()
     prev_hash = prev.hash if prev else ""
     base = {
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "action": action,
         "decision": decision,
         "detail": detail,

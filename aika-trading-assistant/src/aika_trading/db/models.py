@@ -1,12 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, DateTime, Boolean, Integer, Text, JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from .session import Base
 
 
 def now_ts() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 class OAuthState(Base):

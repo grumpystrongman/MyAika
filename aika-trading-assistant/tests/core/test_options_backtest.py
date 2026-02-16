@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aika_trading.core.models import Bar
 from aika_trading.core.options.backtest import backtest_wheel
 
 
 def _bars(n=120):
-    base = datetime.utcnow()
+    base = datetime.now(timezone.utc)
     bars = []
     price = 100.0
     for i in range(n):

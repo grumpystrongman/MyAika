@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .models import OptionContract
@@ -35,7 +35,7 @@ class OptionIVHistoryStore:
             )
 
     def record_snapshot(self, contracts: list[OptionContract], ts: datetime | None = None) -> None:
-        ts = ts or datetime.utcnow()
+        ts = ts or datetime.now(timezone.utc)
         rows = []
         for contract in contracts:
             if contract.iv is None:
@@ -69,7 +69,7 @@ class OptionIVHistoryStore:
         option_type: str,
         lookback_days: int = 90,
     ) -> list[float]:
-        since = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
         with self._connect() as conn:
             rows = conn.execute(
                 """
