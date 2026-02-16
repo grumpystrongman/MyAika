@@ -58,22 +58,53 @@ function computeSignal(candles = []) {
 async function fetchStockCandles(symbol) {
   const stooq = `${symbol.toLowerCase()}.us`;
   const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error("stooq_failed");
-  const text = await resp.text();
-  const lines = text.trim().split(/\r?\n/).slice(1);
-  return lines
-    .map(line => {
-      const [date, open, high, low, close, volume] = line.split(",");
-      return {
-        t: date ? new Date(date).getTime() : Date.now(),
-        o: Number(open),
-        h: Number(high),
-        l: Number(low),
-        c: Number(close),
-        v: Number(volume || 0)
-      };
-    })
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("stooq_failed");
+    const text = await resp.text();
+    if (/exceeded the daily hits limit/i.test(text)) {
+      throw new Error("stooq_rate_limited");
+    }
+    const lines = text.trim().split(/\r?\n/).slice(1);
+    const candles = lines
+      .map(line => {
+        const [date, open, high, low, close, volume] = line.split(",");
+        return {
+          t: date ? new Date(date).getTime() : Date.now(),
+          o: Number(open),
+          h: Number(high),
+          l: Number(low),
+          c: Number(close),
+          v: Number(volume || 0)
+        };
+      })
+      .filter(c => Number.isFinite(c.c));
+    if (candles.length) return candles;
+  } catch {
+    // fall through to Yahoo
+  }
+
+  const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d&includePrePost=false&events=div%7Csplit`;
+  const yahooResp = await fetch(yahooUrl);
+  if (!yahooResp.ok) throw new Error("yahoo_failed");
+  const data = await yahooResp.json().catch(() => ({}));
+  const result = data?.chart?.result?.[0];
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const quote = result?.indicators?.quote?.[0] || {};
+  const opens = Array.isArray(quote.open) ? quote.open : [];
+  const highs = Array.isArray(quote.high) ? quote.high : [];
+  const lows = Array.isArray(quote.low) ? quote.low : [];
+  const closes = Array.isArray(quote.close) ? quote.close : [];
+  const volumes = Array.isArray(quote.volume) ? quote.volume : [];
+  return timestamps
+    .map((ts, idx) => ({
+      t: ts * 1000,
+      o: opens[idx],
+      h: highs[idx],
+      l: lows[idx],
+      c: closes[idx],
+      v: Number.isFinite(volumes[idx]) ? volumes[idx] : 0
+    }))
     .filter(c => Number.isFinite(c.c));
 }
 

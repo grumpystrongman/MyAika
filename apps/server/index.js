@@ -89,8 +89,9 @@ import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
-import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus } from "./src/rag/vectorStore.js";
-import { syncFireflies, startFirefliesSyncLoop } from "./src/rag/firefliesIngest.js";
+import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus, getFirefliesGraph, getFirefliesNodeDetails } from "./src/rag/vectorStore.js";
+import { listRagModels, createRagModel } from "./src/rag/collections.js";
+import { syncFireflies, startFirefliesSyncLoop, getFirefliesSyncStatus, queueFirefliesSync } from "./src/rag/firefliesIngest.js";
 import { answerRagQuestion } from "./src/rag/query.js";
 import { recordFeedback } from "./src/feedback/feedback.js";
 import { startDailyPicksLoop, runDailyPicksEmail, generateDailyPicks, rescheduleDailyPicksLoop } from "./src/trading/dailyPicks.js";
@@ -107,8 +108,10 @@ import {
   queryTradingKnowledge,
   recordTradeAnalysis,
   startTradingKnowledgeSyncLoop,
+  ensureTradingKnowledgeSeeded,
   listTradingKnowledge,
   getTradingKnowledgeStats,
+  getTradingKnowledgeNodeDetails,
   listTradingSourcesUi,
   addTradingSource,
   updateTradingSourceUi,
@@ -125,7 +128,9 @@ import {
   seedRssSourcesFromFeedspot,
   listTradingRssItemsUi
 } from "./src/trading/rssIngest.js";
-import { runTradingScenario, listTradingScenarios } from "./src/trading/scenarios.js";
+import { runTradingScenario, listTradingScenarios, getScenarioDetail } from "./src/trading/scenarios.js";
+import { searchSymbols } from "./src/trading/symbolSearch.js";
+import { buildRecommendationDetail } from "./src/trading/recommendationDetail.js";
 import { getPolicy, savePolicy, reloadPolicy, getPolicyMeta } from "./src/safety/policyLoader.js";
 import { executeAction } from "./src/safety/executeAction.js";
 import { listAuditEvents, verifyAuditChain } from "./src/safety/auditLog.js";
@@ -158,7 +163,7 @@ import {
 import { getTradingSettings, updateTradingSettings, getTradingEmailSettings, getTradingTrainingSettings } from "./storage/trading_settings.js";
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({
   limit: "2mb",
   verify: (req, _res, buf) => {
@@ -1035,11 +1040,266 @@ function parseMemoryRecall(userText) {
   return text;
 }
 
+const PICK_WORDS = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10
+};
+
+function parsePickCount(text, fallback = 3) {
+  const lower = String(text || "").toLowerCase();
+  const match = lower.match(/\btop\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/);
+  if (match?.[1]) {
+    const raw = match[1];
+    const parsed = Number.isFinite(Number(raw)) ? Number(raw) : PICK_WORDS[raw];
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  const match2 = lower.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:picks?|stocks?|cryptos?)\b/);
+  if (match2?.[1]) {
+    const raw = match2[1];
+    const parsed = Number.isFinite(Number(raw)) ? Number(raw) : PICK_WORDS[raw];
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function clampInt(value, min, max) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return min;
+  return Math.max(min, Math.min(max, Math.trunc(num)));
+}
+
+function isTradingPickRequest(text) {
+  const lower = String(text || "").toLowerCase();
+  if (!/(pick|picks|top|best|recommend|recommendation)/.test(lower)) return false;
+  return /(stock|stocks|crypto|cryptos|cryptocurrency|coin|coins|ticker|trading)/.test(lower);
+}
+
+function parseTradingPickRequest(text) {
+  if (!isTradingPickRequest(text)) return null;
+  const lower = String(text || "").toLowerCase();
+  const count = clampInt(parsePickCount(lower, 3), 1, 6);
+  const wantsStocks = /(stock|stocks|equity|equities)/.test(lower);
+  const wantsCrypto = /(crypto|cryptos|cryptocurrency|coin|coins)/.test(lower);
+  if (wantsStocks || wantsCrypto) {
+    return {
+      stockCount: wantsStocks ? count : 0,
+      cryptoCount: wantsCrypto ? count : 0
+    };
+  }
+  return { stockCount: count, cryptoCount: count };
+}
+
+function formatNumber(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "n/a";
+  return num.toFixed(digits);
+}
+
+function formatPercent(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "n/a";
+  return `${num.toFixed(digits)}%`;
+}
+
+function buildAsciiSparkline(values, width = 24) {
+  const list = Array.isArray(values) ? values.filter(v => Number.isFinite(v)) : [];
+  if (!list.length) return "";
+  const slice = list.length > width ? list.slice(-width) : list;
+  const min = Math.min(...slice);
+  const max = Math.max(...slice);
+  const levels = " .:-=+*#%@";
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return "";
+  if (max === min) return levels[levels.length - 1].repeat(slice.length);
+  return slice
+    .map(v => {
+      const ratio = (v - min) / (max - min);
+      const idx = Math.max(0, Math.min(levels.length - 1, Math.round(ratio * (levels.length - 1))));
+      return levels[idx];
+    })
+    .join("");
+}
+
+function shortenSnippet(text, max = 160) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  if (raw.length <= max) return raw;
+  return `${raw.slice(0, max - 3)}...`;
+}
+
+function cleanSignalText(text, symbol) {
+  let cleaned = String(text || "").trim();
+  if (!cleaned) return "";
+  if (symbol) {
+    const symbolPattern = new RegExp(`^${symbol}\\s*\\([^)]*\\)\\s*\\|\\s*`, "i");
+    cleaned = cleaned.replace(symbolPattern, "");
+  }
+  cleaned = cleaned.replace(/Bias:\s*[^|]+\|\s*/i, "");
+  cleaned = cleaned.replace(/Confidence:\s*[^|]+\|\s*/i, "");
+  return cleaned.trim();
+}
+
+async function buildPickInsight(pick, { windowDays = 120 } = {}) {
+  const insight = {
+    symbol: pick.symbol,
+    assetClass: pick.assetClass || "stock",
+    bias: pick.bias || pick.label || "WATCH",
+    rationale: pick.abstract || pick.reason || "",
+    scenario: null,
+    ragSnippet: ""
+  };
+  try {
+    insight.scenario = await getScenarioDetail({
+      symbol: insight.symbol,
+      assetClass: insight.assetClass,
+      windowDays,
+      includeCandles: true
+    });
+  } catch (err) {
+    insight.scenario = { error: err?.message || "scenario_failed" };
+  }
+  try {
+    const knowledge = await queryTradingKnowledge(
+      `Key risks, catalysts, and setups for ${insight.symbol}`,
+      { topK: 3 }
+    );
+    insight.ragSnippet = knowledge?.citations?.[0]?.snippet || "";
+  } catch {
+    insight.ragSnippet = "";
+  }
+  return insight;
+}
+
+async function handleTradingPickRequest({ userText, userId } = {}) {
+  const request = parseTradingPickRequest(userText);
+  if (!request) return null;
+  const stockCount = request.stockCount || 0;
+  const cryptoCount = request.cryptoCount || 0;
+  if (stockCount + cryptoCount === 0) return null;
+
+  const settings = getTradingEmailSettings(userId || "local");
+  const emailSettings = {
+    ...settings,
+    stockCount,
+    cryptoCount,
+    minPicks: 0,
+    maxPicks: stockCount + cryptoCount
+  };
+
+  let picks = [];
+  try {
+    picks = await generateDailyPicks({ emailSettings });
+  } catch {
+    picks = [];
+  }
+
+  const stockPicks = picks.filter(p => p.assetClass === "stock").slice(0, stockCount);
+  const cryptoPicks = picks.filter(p => p.assetClass === "crypto").slice(0, cryptoCount);
+  const combined = [...stockPicks, ...cryptoPicks];
+
+  if (!combined.length) {
+    return {
+      text: "I couldn't generate picks right now. Check your trading watchlist and data sources, then try again."
+    };
+  }
+
+  const insights = [];
+  for (const pick of combined) {
+    // Sequential to avoid hammering data providers.
+    insights.push(await buildPickInsight(pick, { windowDays: 120 }));
+  }
+
+  const formatSection = (title, items) => {
+    if (!items.length) return [];
+    const lines = [title];
+    items.forEach((item, idx) => {
+      const scenario = item.scenario || {};
+      const closeSeries = (scenario.candles || []).map(c => c.c).filter(v => Number.isFinite(v));
+      const chart = buildAsciiSparkline(closeSeries.slice(-30), 24);
+      const trend = scenario.trendLabel || "n/a";
+      const rsi = formatNumber(scenario.rsi14, 2);
+      const windowReturn = formatPercent(scenario.returnPct, 2);
+      const vol = formatPercent(scenario.annualVol, 2);
+      const momentum20 = formatPercent(scenario.momentum20, 2);
+      const support = formatNumber(scenario.support, 2);
+      const resistance = formatNumber(scenario.resistance, 2);
+      const rationale = shortenSnippet(cleanSignalText(item.rationale, item.symbol), 160);
+      if (scenario?.error) {
+        lines.push(`${idx + 1}) ${item.symbol} (${item.assetClass}) | Bias ${item.bias}`);
+        if (rationale) lines.push(`Signal: ${rationale}`);
+        lines.push(`Data: unavailable (${scenario.error})`);
+      } else {
+        lines.push(
+          `${idx + 1}) ${item.symbol} (${item.assetClass}) | Bias ${item.bias} | Trend ${trend} | RSI ${rsi} | ${scenario.windowDays || 120}d ${windowReturn}`
+        );
+        if (rationale) lines.push(`Signal: ${rationale}`);
+        if (chart) lines.push(`Chart(30d): ${chart}`);
+        lines.push(`Momentum20 ${momentum20} | Vol ${vol} | Support ${support} | Resistance ${resistance}`);
+      }
+      const ragSnippet = shortenSnippet(item.ragSnippet, 180);
+      lines.push(`RAG: ${ragSnippet || "No relevant knowledge snippet found."}`);
+    });
+    return lines;
+  };
+
+  const stockInsights = insights.filter(item => item.assetClass === "stock");
+  const cryptoInsights = insights.filter(item => item.assetClass === "crypto");
+  const outputLines = [
+    "Here are signal-based picks from your configured watchlist (educational, not financial advice):",
+    "",
+    ...formatSection("Stocks:", stockInsights),
+    "",
+    ...formatSection("Crypto:", cryptoInsights),
+    "",
+    "Data: daily candles via Stooq/Coinbase/Alpaca. RAG snippets come from your trading knowledge store."
+  ].filter(Boolean);
+
+  return {
+    text: outputLines.join("\n"),
+    picks: combined
+  };
+}
+
 function shouldUseRag(text) {
   const t = String(text || "").toLowerCase();
   if (!t) return false;
   if (t.startsWith("rag:") || t.startsWith("meeting:")) return true;
-  return /\b(fireflies|meeting|meetings|transcript|minutes|action items|decisions|recap|summary|summarize|what did we decide|last week|this week)\b/i.test(t);
+  return /\b(fireflies|meeting|meetings|transcript|minutes|action items|decisions|recap|summary|summarize|what did we decide|last week|this week|trading|stock|stocks|crypto|options|portfolio)\b/i.test(t);
+}
+
+function parseRagModelCommand(text) {
+  const match = String(text || "").match(/\b(?:create|build|make)\s+(?:a\s+)?rag\s+(?:model|collection)\s+(?:on|for)\s+(.+)$/i);
+  if (!match?.[1]) return null;
+  return match[1].trim();
+}
+
+function resolveRagSelection(text, requested) {
+  const cleaned = String(requested || "").trim().toLowerCase();
+  const rawText = String(text || "");
+  const lower = rawText.toLowerCase();
+  const prefixMatch = lower.match(/^rag:\s*([a-z0-9_-]+)/);
+  const hinted = prefixMatch?.[1] || "";
+  const selected = cleaned && cleaned !== "auto" ? cleaned : hinted;
+  if (selected) {
+    if (selected === "trading") return { id: "trading", forced: true, filters: { meetingIdPrefix: "trading:" } };
+    if (selected === "fireflies") return { id: "fireflies", forced: true, filters: { meetingType: "fireflies" } };
+    if (selected === "all") return { id: "all", forced: true, filters: {} };
+    return { id: selected, forced: true, filters: { meetingIdPrefix: `rag:${selected}:` } };
+  }
+  if (/\b(fireflies|meeting|transcript|minutes|action items|decisions|recap)\b/i.test(lower)) {
+    return { id: "fireflies", forced: false, filters: { meetingType: "fireflies" } };
+  }
+  if (/\b(stock|stocks|crypto|trading|options|portfolio|ticker)\b/i.test(lower)) {
+    return { id: "trading", forced: false, filters: { meetingIdPrefix: "trading:" } };
+  }
+  return { id: "all", forced: false, filters: {} };
 }
 
 function isAdmin(req) {
@@ -1353,7 +1613,7 @@ app.post("/api/auth/logout", (req, res) => {
 // Chat endpoint
 app.post("/chat", async (req, res) => {
   try {
-    const { userText, maxOutputTokens } = req.body;
+    const { userText, maxOutputTokens, ragModel } = req.body;
     if (!userText || typeof userText !== "string") {
       return res.status(400).json({ error: "userText required" });
     }
@@ -1452,12 +1712,49 @@ app.post("/chat", async (req, res) => {
       );
     }
 
-    if (shouldUseRag(userText)) {
+    const tradingPickResult = await handleTradingPickRequest({
+      userText,
+      userId: getUserId(req)
+    });
+    if (tradingPickResult) {
+      return sendAssistantReply(
+        tradingPickResult.text,
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 }),
+        { tradingPicks: tradingPickResult.picks || [] }
+      );
+    }
+
+    const ragTopic = parseRagModelCommand(userText);
+    if (ragTopic) {
+      try {
+        const model = await createRagModel({ topic: ragTopic, autoDiscover: true });
+        return sendAssistantReply(
+          `Created RAG model "${model.title}" with ${model.sources?.length || 0} seed source(s). You can select it from the Knowledge Map dropdown.`,
+          makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.45 }),
+          { ragModel: model.id }
+        );
+      } catch (err) {
+        return sendAssistantReply(
+          `I couldn't create that RAG model. ${err?.message || "Please try a different topic."}`,
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 })
+        );
+      }
+    }
+
+    const ragSelection = resolveRagSelection(userText, ragModel);
+    const shouldRag = ragSelection?.forced || shouldUseRag(userText);
+    if (shouldRag && ragSelection) {
       try {
         const ragCounts = getRagCounts();
         if (ragCounts.totalChunks > 0) {
-          const queryText = userText.replace(/^rag:\s*/i, "").replace(/^meeting:\s*/i, "").trim() || userText;
-          const ragResult = await answerRagQuestion(queryText, { topK: Number(process.env.RAG_TOP_K || 8) });
+          const queryText = userText
+            .replace(/^rag:\s*[a-z0-9_-]+/i, "")
+            .replace(/^meeting:\s*/i, "")
+            .trim() || userText;
+          const ragResult = await answerRagQuestion(queryText, {
+            topK: Number(process.env.RAG_TOP_K || 8),
+            filters: ragSelection.filters || {}
+          });
           if (ragResult?.answer) {
             const ragCitations = ragResult.citations || [];
             const memoryRecall = ragCitations.some(cite => {
@@ -1467,7 +1764,7 @@ app.post("/chat", async (req, res) => {
             return sendAssistantReply(
               ragResult.answer,
               makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
-              { citations: ragCitations, source: "rag", memoryRecall }
+              { citations: ragCitations, source: "rag", memoryRecall, ragModel: ragSelection.id }
             );
           }
         }
@@ -2858,7 +3155,8 @@ app.get("/api/integrations", (req, res) => {
 const firefliesSyncSchema = z.object({
   limit: z.number().int().min(0).optional(),
   force: z.boolean().optional(),
-  sendEmail: z.boolean().optional()
+  sendEmail: z.boolean().optional(),
+  async: z.boolean().optional()
 });
 
 const ragAskSchema = z.object({
@@ -2868,9 +3166,19 @@ const ragAskSchema = z.object({
     dateFrom: z.string().optional(),
     dateTo: z.string().optional(),
     titleContains: z.string().optional(),
-    meetingId: z.string().optional()
+    meetingId: z.string().optional(),
+    meetingIdPrefix: z.string().optional(),
+    meetingType: z.string().optional()
   }).optional()
 });
+
+const ragModelCreateSchema = z.object({
+  topic: z.string().min(2).optional(),
+  name: z.string().min(2).optional(),
+  description: z.string().optional(),
+  sources: z.array(z.string()).optional(),
+  autoDiscover: z.boolean().optional()
+}).refine(data => data.topic || data.name, { message: "topic_required" });
 
 const feedbackSchema = z.object({
   source: z.string().optional(),
@@ -3043,6 +3351,23 @@ const macroRunSchema = z.object({
 app.post("/api/fireflies/sync", async (req, res) => {
   try {
     const parsed = firefliesSyncSchema.parse(req.body || {});
+    if (parsed.async) {
+      const queued = queueFirefliesSync({
+        limit: parsed.limit ?? 0,
+        force: Boolean(parsed.force),
+        sendEmail: parsed.sendEmail
+      });
+      if (queued?.ok === false) {
+        const status =
+          queued.error === "fireflies_rate_limited"
+            ? 429
+            : queued.error === "sync_in_progress"
+              ? 409
+              : 400;
+        return res.status(status).json(queued);
+      }
+      return res.json(queued);
+    }
     const result = await executeAction({
       actionType: "integrations.fireflies.sync",
       params: parsed,
@@ -3079,6 +3404,10 @@ app.post("/api/fireflies/sync", async (req, res) => {
   }
 });
 
+app.get("/api/fireflies/sync/status", (_req, res) => {
+  res.json(getFirefliesSyncStatus());
+});
+
 app.post("/api/rag/ask", async (req, res) => {
   try {
     const parsed = ragAskSchema.parse(req.body || {});
@@ -3106,6 +3435,35 @@ app.get("/api/rag/status", (_req, res) => {
   }
 });
 
+app.get("/api/rag/models", (_req, res) => {
+  try {
+    const models = listRagModels();
+    res.json({ models });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "rag_models_failed" });
+  }
+});
+
+app.post("/api/rag/models", rateLimit, async (req, res) => {
+  try {
+    const parsed = ragModelCreateSchema.parse(req.body || {});
+    const model = await createRagModel({
+      topic: parsed.topic,
+      name: parsed.name,
+      description: parsed.description,
+      sources: parsed.sources,
+      autoDiscover: parsed.autoDiscover !== false
+    });
+    res.json({ ok: true, model });
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    const message = err?.message || "rag_model_create_failed";
+    res.status(500).json({ error: message });
+  }
+});
+
 app.get("/api/trading/settings", (req, res) => {
   try {
     const settings = getTradingSettings(getUserId(req));
@@ -3129,11 +3487,21 @@ app.post("/api/trading/settings", (req, res) => {
   }
 });
 
-  app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
+app.get("/api/trading/symbols/search", rateLimit, async (req, res) => {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: "missing_openai_api_key" });
-    }
+    const query = String(req.query.q || req.query.query || "").trim();
+    const assetClass = String(req.query.assetClass || req.query.asset || "all").toLowerCase();
+    const limit = Number(req.query.limit || 12);
+    if (!query) return res.json({ results: [] });
+    const result = await searchSymbols({ query, assetClass, limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "symbol_search_failed" });
+  }
+});
+
+app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
+  try {
     const parsed = tradingRecommendationsSchema.parse(req.body || {});
     const assetClass = parsed.assetClass || "all";
     const topN = parsed.topN || 12;
@@ -3153,6 +3521,9 @@ app.post("/api/trading/settings", (req, res) => {
       return res.status(400).json({ error: "watchlist_empty" });
     }
 
+    let picks = [];
+    let source = "daily_picks";
+    if (process.env.OPENAI_API_KEY) {
       const preferenceBlock = buildTradingPreferenceBlock(training);
       let knowledgeContext = "";
       try {
@@ -3163,9 +3534,9 @@ app.post("/api/trading/settings", (req, res) => {
         knowledgeContext = "";
       }
       const systemPrompt = `
-  You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
-  Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
-  If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
+You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
+Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
+If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
 Return ONLY a JSON array like:
 [
   {"symbol":"BTC-USD","assetClass":"crypto","bias":"BUY","confidence":0.72,"rationale":"..."}
@@ -3173,78 +3544,110 @@ Return ONLY a JSON array like:
 Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
 `.trim();
 
-    const userPrompt = `
-  Asset focus: ${assetClass}
-  Requested picks: ${topN}
-  Watchlist: ${watchlist.join(", ")}
-  ${knowledgeContext ? `Trading knowledge context:\n${knowledgeContext}` : "Trading knowledge context: (none)"}
-  ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
-  `.trim();
+      const userPrompt = `
+Asset focus: ${assetClass}
+Requested picks: ${topN}
+Watchlist: ${watchlist.join(", ")}
+${knowledgeContext ? `Trading knowledge context:\n${knowledgeContext}` : "Trading knowledge context: (none)"}
+${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
+`.trim();
 
-    let response;
-    try {
-      response = await client.responses.create({
-        model: OPENAI_MODEL,
-        max_output_tokens: 700,
-        input: [
-          {
-            role: "system",
-            content: [{ type: "input_text", text: systemPrompt }]
-          },
-          {
-            role: "user",
-            content: [{ type: "input_text", text: userPrompt }]
+      try {
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          max_output_tokens: 700,
+          input: [
+            { role: "system", content: [{ type: "input_text", text: systemPrompt }] },
+            { role: "user", content: [{ type: "input_text", text: userPrompt }] }
+          ]
+        });
+        let rawText = extractResponseText(response);
+        if (!rawText.trim()) {
+          rawText = await fallbackChatCompletion({ systemPrompt, userText: userPrompt, maxOutputTokens: 700 });
+        }
+        if (rawText.trim()) {
+          const parsedJson = extractJsonArray(rawText);
+          const rawList = Array.isArray(parsedJson) ? parsedJson : Array.isArray(parsedJson?.picks) ? parsedJson.picks : null;
+          if (rawList) {
+            picks = rawList
+              .map(item => ({
+                symbol: String(item?.symbol || "").trim(),
+                assetClass: String(item?.assetClass || item?.asset_class || "").trim()
+                  || (stockList.includes(item?.symbol) ? "stock" : "crypto"),
+                bias: String(item?.bias || "WATCH").toUpperCase(),
+                confidence: Number(item?.confidence || 0),
+                rationale: String(item?.rationale || item?.abstract || "").trim()
+              }))
+              .filter(item => item.symbol)
+              .slice(0, topN);
+            source = knowledgeContext ? "llm+rag" : "llm";
           }
-        ]
+        }
+      } catch {
+        // fall back to daily picks
+      }
+    }
+
+    if (!picks.length) {
+      const daily = await generateDailyPicks({
+        emailSettings: {
+          ...emailSettings,
+          stocks: stockList,
+          cryptos: cryptoList
+        }
       });
-    } catch (err) {
-      return res.status(502).json({ error: "openai_request_failed", detail: err?.message || String(err) });
+      picks = (daily || []).slice(0, topN).map(item => ({
+        symbol: item.symbol,
+        assetClass: item.assetClass || item.asset_class || "stock",
+        bias: item.bias || "WATCH",
+        confidence: item.score != null ? Math.min(0.9, Math.max(0.1, Math.abs(item.score) * 10)) : 0,
+        rationale: item.abstract || item.reason || ""
+      }));
+      source = "daily_picks";
     }
 
-    let rawText = extractResponseText(response);
-    if (!rawText.trim()) {
-      rawText = await fallbackChatCompletion({ systemPrompt, userText: userPrompt, maxOutputTokens: 700 });
-    }
-    if (!rawText.trim()) {
-      return res.status(502).json({ error: "empty_model_response" });
-    }
-
-    const parsedJson = extractJsonArray(rawText);
-    const rawList = Array.isArray(parsedJson) ? parsedJson : Array.isArray(parsedJson?.picks) ? parsedJson.picks : null;
-    if (!rawList) {
-      return res.status(502).json({ error: "recommendations_parse_failed" });
-    }
-
-    const picks = rawList
-      .map(item => ({
-        symbol: String(item?.symbol || "").trim(),
-        assetClass: String(item?.assetClass || item?.asset_class || "").trim() || (stockList.includes(item?.symbol) ? "stock" : "crypto"),
-        bias: String(item?.bias || "WATCH").toUpperCase(),
-        confidence: Number(item?.confidence || 0),
-        rationale: String(item?.rationale || item?.abstract || "").trim()
-      }))
-      .filter(item => item.symbol)
-      .slice(0, topN);
-
-      res.json({ picks, source: knowledgeContext ? "llm+rag" : "llm" });
+    res.json({ picks, source });
   } catch (err) {
     if (err?.issues) {
       return res.status(400).json({ error: "invalid_request", detail: err.issues });
     }
     res.status(500).json({ error: err?.message || "recommendations_failed" });
-    }
-  });
+  }
+});
 
-  app.post("/api/trading/knowledge/ingest", rateLimit, async (req, res) => {
-    try {
-      const parsed = tradingKnowledgeIngestSchema.parse(req.body || {});
-      const result = await ingestTradingHowTo({
-        title: parsed.title,
-        text: parsed.text,
-        tags: parsed.tags || []
-      });
-      res.json(result);
-    } catch (err) {
+app.post("/api/trading/recommendations/detail", rateLimit, async (req, res) => {
+  try {
+    const symbol = String(req.body?.symbol || "").trim();
+    const assetClass = String(req.body?.assetClass || "stock").toLowerCase();
+    const bias = String(req.body?.bias || "WATCH").toUpperCase();
+    const windowDays = Number(req.body?.windowDays || 120);
+    const collectionId = String(req.body?.collectionId || "").trim() || undefined;
+    if (!symbol) return res.status(400).json({ error: "symbol_required" });
+    const detail = await buildRecommendationDetail({
+      symbol,
+      assetClass,
+      bias,
+      windowDays,
+      collectionId: collectionId === "trading" ? undefined : collectionId
+    });
+    res.json(detail);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "recommendation_detail_failed" });
+  }
+});
+
+app.post("/api/trading/knowledge/ingest", rateLimit, async (req, res) => {
+  try {
+    const parsed = tradingKnowledgeIngestSchema.parse(req.body || {});
+    const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+    const result = await ingestTradingHowTo({
+      title: parsed.title,
+      text: parsed.text,
+      tags: parsed.tags || [],
+      collectionId: collectionId === "trading" ? undefined : collectionId
+    });
+    res.json(result);
+  } catch (err) {
       if (err?.issues) {
         return res.status(400).json({ error: "invalid_request", detail: err.issues });
       }
@@ -3252,18 +3655,20 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
     }
   });
 
-  app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
-    try {
-      const parsed = tradingKnowledgeUrlSchema.parse(req.body || {});
-      const result = await ingestTradingUrl({
-        url: parsed.url,
-        title: parsed.title,
-        tags: parsed.tags || [],
-        useOcr: parsed.useOcr,
-        ocrMaxPages: parsed.ocrMaxPages,
-        ocrScale: parsed.ocrScale,
-        force: parsed.force
-      });
+app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
+  try {
+    const parsed = tradingKnowledgeUrlSchema.parse(req.body || {});
+    const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+    const result = await ingestTradingUrl({
+      url: parsed.url,
+      title: parsed.title,
+      tags: parsed.tags || [],
+      useOcr: parsed.useOcr,
+      ocrMaxPages: parsed.ocrMaxPages,
+      ocrScale: parsed.ocrScale,
+      force: parsed.force,
+      collectionId: collectionId === "trading" ? undefined : collectionId
+    });
       if (!result?.ok) {
         return res.status(400).json({ error: result?.error || "knowledge_ingest_failed" });
       }
@@ -3280,6 +3685,7 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
     try {
       const file = req.file;
       if (!file) return res.status(400).json({ error: "file_required" });
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
       const payload = {
         title: req.body?.title || "",
         tags: parseTagList(req.body?.tags),
@@ -3304,7 +3710,8 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
         useOcr: parsed.useOcr,
         ocrMaxPages: parsed.ocrMaxPages,
         ocrScale: parsed.ocrScale,
-        force: parsed.force
+        force: parsed.force,
+        collectionId: collectionId === "trading" ? undefined : collectionId
       });
       if (!result?.ok) {
         return res.status(400).json({ error: result?.error || "knowledge_ingest_failed" });
@@ -3341,9 +3748,13 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
   app.post("/api/trading/knowledge/crawl", rateLimit, async (req, res) => {
     try {
       const parsed = tradingKnowledgeCrawlSchema.parse(req.body || {});
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
       const envSources = String(process.env.TRADING_RAG_SOURCES || "").trim();
-      const storedSources = listTradingSourcesUi({ limit: 500, includeDisabled: false });
-      if (!envSources && storedSources.length === 0) {
+      const storedSources = listTradingSourcesUi({ limit: 500, includeDisabled: false, collectionId });
+      if (collectionId === "trading" && !envSources && storedSources.length === 0) {
+        return res.status(400).json({ error: "trading_sources_empty" });
+      }
+      if (collectionId !== "trading" && storedSources.length === 0) {
         return res.status(400).json({ error: "trading_sources_empty" });
       }
       const result = await crawlTradingSources({
@@ -3352,14 +3763,15 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
             id: item.id,
             url: item.url,
             tags: item.tags || [],
-            sourceGroup: item.url
+            sourceGroup: collectionId && collectionId !== "trading" ? `${collectionId}::${item.url}` : item.url
           }))
           : undefined,
         maxDepth: parsed.maxDepth,
         maxPages: parsed.maxPages,
         maxPagesPerDomain: parsed.maxPagesPerDomain,
         delayMs: parsed.delayMs,
-        force: parsed.force
+        force: parsed.force,
+        collectionId: collectionId === "trading" ? undefined : collectionId
       });
       res.json(result);
     } catch (err) {
@@ -3375,7 +3787,8 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
       const limit = Number(req.query.limit || 100);
       const search = String(req.query.search || "");
       const includeDisabled = String(req.query.includeDisabled || "1") !== "0";
-      const items = listTradingSourcesUi({ limit, search, includeDisabled });
+      const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      const items = listTradingSourcesUi({ limit, search, includeDisabled, collectionId });
       res.json({ items });
     } catch (err) {
       res.status(500).json({ error: err?.message || "sources_list_failed" });
@@ -3385,7 +3798,8 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
   app.post("/api/trading/knowledge/sources", rateLimit, async (req, res) => {
     try {
       const parsed = tradingSourceSchema.parse(req.body || {});
-      const source = addTradingSource(parsed);
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const source = addTradingSource({ ...parsed, collectionId });
       res.json({ source, queued: true });
     } catch (err) {
       if (err?.issues) {
@@ -3432,7 +3846,8 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
       const deleteKnowledge = String(req.query.deleteKnowledge || "0") === "1";
-      const result = removeTradingSource(id, { deleteKnowledge });
+      const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      const result = removeTradingSource(id, { deleteKnowledge, collectionId });
       if (!result.ok) return res.status(404).json({ error: "not_found" });
       res.json(result);
     } catch (err) {
@@ -3440,25 +3855,105 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
     }
   });
 
-  app.get("/api/trading/knowledge/list", rateLimit, async (req, res) => {
-    try {
-      const limit = Number(req.query.limit || 25);
-      const search = String(req.query.search || "");
-      const tag = String(req.query.tag || "");
-      const rows = await listTradingKnowledge({ limit, search, tag });
-      res.json({ items: rows });
-    } catch (err) {
-      res.status(500).json({ error: err?.message || "knowledge_list_failed" });
-    }
-  });
+    app.get("/api/trading/knowledge/list", rateLimit, async (req, res) => {
+      try {
+        const limit = Number(req.query.limit || 25);
+        const search = String(req.query.search || "");
+        const tag = String(req.query.tag || "");
+        const source = String(req.query.source || "");
+        const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+        const rows = await listTradingKnowledge({ limit, search, tag, source, collectionId });
+        res.json({ items: rows });
+      } catch (err) {
+        res.status(500).json({ error: err?.message || "knowledge_list_failed" });
+      }
+    });
 
   app.get("/api/trading/knowledge/stats", rateLimit, async (req, res) => {
     try {
       const limit = Number(req.query.limit || 500);
-      const stats = getTradingKnowledgeStats({ limit });
+      const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      if (!collectionId || collectionId === "trading") {
+        await ensureTradingKnowledgeSeeded();
+      }
+      const stats = getTradingKnowledgeStats({ limit, collectionId });
       res.json(stats);
     } catch (err) {
       res.status(500).json({ error: err?.message || "knowledge_stats_failed" });
+    }
+  });
+
+  function buildTradingNodeSummaryFallback(detail) {
+    if (!detail) return "";
+    const docCount = detail.count || detail.docs?.length || 0;
+    const snippet = detail.snippets?.[0]?.text || "";
+    const trimmedSnippet = snippet ? snippet.replace(/\s+/g, " ").slice(0, 220) : "";
+    const parts = [];
+    if (detail.type === "tag") {
+      const sourceNames = (detail.sources || []).slice(0, 3).map(s => s.title || s.key).join("; ");
+      parts.push(`Tag appears in ${docCount} knowledge item(s).`);
+      if (sourceNames) parts.push(`Top sources: ${sourceNames}.`);
+    } else if (detail.type === "source") {
+      const tagNames = (detail.tags || []).slice(0, 4).map(t => `#${t.tag}`).join(", ");
+      parts.push(`Source contributed ${docCount} knowledge item(s).`);
+      if (tagNames) parts.push(`Top tags: ${tagNames}.`);
+    }
+    if (trimmedSnippet) {
+      parts.push(`Example snippet: ${trimmedSnippet}${trimmedSnippet.length >= 220 ? "â€¦" : ""}`);
+    }
+    return parts.join(" ");
+  }
+
+  app.get("/api/trading/knowledge/node", rateLimit, async (req, res) => {
+    try {
+      const nodeId = String(req.query.node || "").trim();
+      if (!nodeId) return res.status(400).json({ error: "node_required" });
+      const limitDocs = Number(req.query.limitDocs || 8);
+      const limitSnippets = Number(req.query.limitSnippets || 6);
+      const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      const detail = await getTradingKnowledgeNodeDetails(nodeId, { limitDocs, limitSnippets, collectionId });
+      if (!detail) return res.status(404).json({ error: "node_not_found" });
+
+      let summary = buildTradingNodeSummaryFallback(detail);
+      if (process.env.OPENAI_API_KEY) {
+        const contextParts = [];
+        contextParts.push(`Node: ${detail.type} ${detail.label}`);
+        if (detail.sources?.length) {
+          contextParts.push("Sources:");
+          detail.sources.slice(0, 6).forEach(source => contextParts.push(`- ${source.title || source.key} (${source.count})`));
+        }
+        if (detail.tags?.length) {
+          contextParts.push("Tags:");
+          detail.tags.slice(0, 6).forEach(tag => contextParts.push(`- #${tag.tag} (${tag.count})`));
+        }
+        if (detail.docs?.length) {
+          contextParts.push("Documents:");
+          detail.docs.slice(0, 6).forEach(doc => contextParts.push(`- ${doc.title || "Doc"} (${doc.occurred_at || ""})`));
+        }
+        if (detail.snippets?.length) {
+          contextParts.push("Snippets:");
+          detail.snippets.slice(0, 6).forEach(snippet => contextParts.push(`- ${snippet.text}`));
+        }
+        try {
+          const system = "Summarize the trading knowledge node in 2-3 sentences using only the provided context.";
+          const user = `Context:\n${contextParts.join("\n")}`;
+          const response = await client.responses.create({
+            model: OPENAI_MODEL,
+            input: [
+              { role: "system", content: [{ type: "input_text", text: system }] },
+              { role: "user", content: [{ type: "input_text", text: user }] }
+            ],
+            max_output_tokens: 220
+          });
+          summary = response?.output_text?.trim() || summary;
+        } catch (err) {
+          // fallback to heuristic summary
+        }
+      }
+
+      res.json({ ...detail, summary });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "knowledge_node_failed" });
     }
   });
 
@@ -3467,7 +3962,8 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
       const limit = Number(req.query.limit || 100);
       const search = String(req.query.search || "");
       const includeDisabled = String(req.query.includeDisabled || "1") !== "0";
-      const items = listTradingRssSourcesUi({ limit, search, includeDisabled });
+      const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      const items = listTradingRssSourcesUi({ limit, search, includeDisabled, collectionId });
       res.json({ items });
     } catch (err) {
       res.status(500).json({ error: err?.message || "rss_sources_list_failed" });
@@ -3477,12 +3973,14 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
   app.post("/api/trading/rss/sources", rateLimit, async (req, res) => {
     try {
       const parsed = tradingRssSourceSchema.parse(req.body || {});
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
       const source = addTradingRssSource({
         url: parsed.url,
         title: parsed.title,
         tags: parsed.tags || [],
         enabled: parsed.enabled !== false,
-        includeForeign: parsed.includeForeign || false
+        includeForeign: parsed.includeForeign || false,
+        collectionId
       });
       res.json({ source });
     } catch (err) {
@@ -3523,9 +4021,11 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
   app.post("/api/trading/rss/crawl", rateLimit, async (req, res) => {
     try {
       const parsed = tradingRssCrawlSchema.parse(req.body || {});
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
       const result = await crawlTradingRssSources({
         force: parsed.force,
-        maxItemsPerFeed: parsed.maxItemsPerFeed
+        maxItemsPerFeed: parsed.maxItemsPerFeed,
+        collectionId
       });
       res.json(result);
     } catch (err) {
@@ -3541,12 +4041,14 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
       const id = Number(req.params.id);
       if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
       const parsed = tradingRssCrawlSchema.parse(req.body || {});
-      const source = listTradingRssSourcesUi({ includeDisabled: true }).find(item => item.id === id);
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const source = listTradingRssSourcesUi({ includeDisabled: true, collectionId }).find(item => item.id === id);
       if (!source) return res.status(404).json({ error: "not_found" });
       const result = await crawlTradingRssSources({
         entries: [source],
         force: parsed.force,
-        maxItemsPerFeed: parsed.maxItemsPerFeed
+        maxItemsPerFeed: parsed.maxItemsPerFeed,
+        collectionId
       });
       res.json(result);
     } catch (err) {
@@ -3561,7 +4063,8 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
     try {
       const parsed = tradingRssSeedSchema.parse(req.body || {});
       const seedUrl = parsed.url || "https://rss.feedspot.com/stock_market_news_rss_feeds/";
-      const result = await seedRssSourcesFromFeedspot(seedUrl);
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const result = await seedRssSourcesFromFeedspot(seedUrl, { collectionId });
       res.json(result);
     } catch (err) {
       if (err?.issues) {
@@ -3585,7 +4088,11 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
   app.post("/api/trading/knowledge/ask", rateLimit, async (req, res) => {
     try {
       const parsed = tradingKnowledgeAskSchema.parse(req.body || {});
-      const base = await queryTradingKnowledge(parsed.question, { topK: parsed.topK || 6 });
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const base = await queryTradingKnowledge(parsed.question, {
+        topK: parsed.topK || 6,
+        collectionId: collectionId === "trading" ? undefined : collectionId
+      });
       let answer = base.answer;
       if (base.context && process.env.OPENAI_API_KEY) {
         const system = "Answer using ONLY the provided trading knowledge context. If unsure, say you don't know.";
@@ -3614,7 +4121,11 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
   app.post("/api/trading/knowledge/ask-deep", rateLimit, async (req, res) => {
     try {
       const parsed = tradingKnowledgeDeepSchema.parse(req.body || {});
-      const base = await queryTradingKnowledge(parsed.question, { topK: parsed.topK || 6 });
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const base = await queryTradingKnowledge(parsed.question, {
+        topK: parsed.topK || 6,
+        collectionId: collectionId === "trading" ? undefined : collectionId
+      });
       const allowFallback = parsed.allowFallback !== false;
       let answer = base.answer;
       let source = base.context ? "rag" : "rag_empty";
@@ -3682,6 +4193,19 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
         return res.status(400).json({ error: "invalid_request", detail: err.issues });
       }
       res.status(500).json({ error: err?.message || "scenario_run_failed" });
+    }
+  });
+
+  app.get("/api/trading/scenarios/detail", rateLimit, async (req, res) => {
+    try {
+      const symbol = String(req.query.symbol || "").trim();
+      if (!symbol) return res.status(400).json({ error: "symbol_required" });
+      const assetClass = String(req.query.assetClass || "stock");
+      const windowDays = Number(req.query.windowDays || 30);
+      const detail = await getScenarioDetail({ symbol, assetClass, windowDays });
+      res.json(detail);
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "scenario_detail_failed" });
     }
   });
 
@@ -3767,10 +4291,79 @@ app.get("/api/rag/meetings", (req, res) => {
     const limit = Number(req.query.limit || 20);
     const offset = Number(req.query.offset || 0);
     const search = String(req.query.search || "");
-    const meetings = listMeetings({ type, limit, offset, search });
+    const participant = String(req.query.participant || "");
+    const meetings = listMeetings({ type, limit, offset, search, participant });
     res.json({ meetings });
   } catch (err) {
     res.status(500).json({ error: err?.message || "rag_meetings_failed" });
+  }
+});
+
+app.get("/api/fireflies/graph", (req, res) => {
+  try {
+    const limit = Number(req.query.limit || 500);
+    const graph = getFirefliesGraph({ limit });
+    res.json(graph);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "fireflies_graph_failed" });
+  }
+});
+
+function buildNodeSummaryFallback(detail) {
+  if (!detail) return "";
+  const meetingCount = detail.meetings?.length || 0;
+  const titleList = (detail.meetings || []).slice(0, 3).map(m => m.title || "Meeting").join("; ");
+  const snippet = detail.snippets?.[0]?.text || "";
+  const trimmedSnippet = snippet ? snippet.replace(/\s+/g, " ").slice(0, 220) : "";
+  const parts = [
+    `Appears in ${meetingCount} meeting(s).`,
+    titleList ? `Sample titles: ${titleList}.` : "",
+    trimmedSnippet ? `Example snippet: ${trimmedSnippet}${trimmedSnippet.length >= 220 ? "…" : ""}` : ""
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+app.get("/api/fireflies/node", async (req, res) => {
+  try {
+    const nodeId = String(req.query.node || "").trim();
+    if (!nodeId) return res.status(400).json({ error: "node_required" });
+    const limitMeetings = Number(req.query.limitMeetings || 8);
+    const limitSnippets = Number(req.query.limitSnippets || 6);
+    const detail = getFirefliesNodeDetails(nodeId, { limitMeetings, limitSnippets });
+    if (!detail) return res.status(404).json({ error: "node_not_found" });
+
+    let summary = buildNodeSummaryFallback(detail);
+    if (process.env.OPENAI_API_KEY) {
+      const contextParts = [];
+      contextParts.push(`Node: ${detail.type} ${detail.label}`);
+      if (detail.meetings?.length) {
+        contextParts.push("Meeting titles:");
+        detail.meetings.slice(0, 6).forEach(m => contextParts.push(`- ${m.title || "Meeting"} (${m.occurred_at || ""})`));
+      }
+      if (detail.snippets?.length) {
+        contextParts.push("Snippets:");
+        detail.snippets.slice(0, 6).forEach(s => contextParts.push(`- ${s.text}`));
+      }
+      try {
+        const system = "Summarize the node in 2-3 sentences using only the provided context.";
+        const user = `Context:\n${contextParts.join("\n")}`;
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          input: [
+            { role: "system", content: [{ type: "input_text", text: system }] },
+            { role: "user", content: [{ type: "input_text", text: user }] }
+          ],
+          max_output_tokens: 220
+        });
+        summary = response?.output_text?.trim() || summary;
+      } catch (err) {
+        // fallback to heuristic summary
+      }
+    }
+
+    res.json({ ...detail, summary });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "fireflies_node_failed" });
   }
 });
 

@@ -22,6 +22,62 @@ function getAlpacaCreds() {
   return { key, secret };
 }
 
+async function fetchYahooCandles(symbol, windowDays) {
+  const rangeDays = Math.max(30, Math.min(730, Number(windowDays || 120)));
+  const range = rangeDays >= 365 ? "1y" : `${rangeDays}d`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d&includePrePost=false&events=div%7Csplit`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("yahoo_failed");
+  const data = await resp.json().catch(() => ({}));
+  const result = data?.chart?.result?.[0];
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const quote = result?.indicators?.quote?.[0] || {};
+  const opens = Array.isArray(quote.open) ? quote.open : [];
+  const highs = Array.isArray(quote.high) ? quote.high : [];
+  const lows = Array.isArray(quote.low) ? quote.low : [];
+  const closes = Array.isArray(quote.close) ? quote.close : [];
+  const volumes = Array.isArray(quote.volume) ? quote.volume : [];
+  const candles = [];
+  for (let i = 0; i < timestamps.length; i += 1) {
+    const c = closes[i];
+    if (!Number.isFinite(c)) continue;
+    candles.push({
+      t: timestamps[i] * 1000,
+      o: opens[i],
+      h: highs[i],
+      l: lows[i],
+      c,
+      v: Number.isFinite(volumes[i]) ? volumes[i] : 0
+    });
+  }
+  return candles;
+}
+
+async function fetchStooqCandles(symbol) {
+  const stooqSymbol = `${symbol.toLowerCase()}.us`;
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSymbol)}&i=d`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("stooq_failed");
+  const text = await resp.text();
+  if (/exceeded the daily hits limit/i.test(text)) {
+    throw new Error("stooq_rate_limited");
+  }
+  const lines = String(text || "").trim().split(/\r?\n/);
+  if (lines.length <= 1) throw new Error("stooq_empty");
+  return lines.slice(1).map(line => {
+    const [date, open, high, low, close, volume] = line.split(",");
+    const ts = date ? new Date(date).getTime() : Date.now();
+    return {
+      t: ts,
+      o: Number(open),
+      h: Number(high),
+      l: Number(low),
+      c: Number(close),
+      v: Number(volume || 0)
+    };
+  }).filter(c => Number.isFinite(c.c));
+}
+
 async function fetchCryptoCandles(symbol, windowDays) {
   const granularity = mapGranularity("1d");
   const end = Math.floor(Date.now() / 1000);
@@ -69,25 +125,16 @@ async function fetchStockCandles(symbol, windowDays) {
       : [];
   }
 
-  const stooqSymbol = `${symbol.toLowerCase()}.us`;
-  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSymbol)}&i=d`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error("stooq_failed");
-  const text = await resp.text();
-  const lines = String(text || "").trim().split(/\r?\n/);
-  if (lines.length <= 1) return [];
-  return lines.slice(1).map(line => {
-    const [date, open, high, low, close, volume] = line.split(",");
-    const ts = date ? new Date(date).getTime() : Date.now();
-    return {
-      t: ts,
-      o: Number(open),
-      h: Number(high),
-      l: Number(low),
-      c: Number(close),
-      v: Number(volume || 0)
-    };
-  }).filter(c => Number.isFinite(c.c));
+  try {
+    const stooq = await fetchStooqCandles(symbol);
+    if (stooq.length) return stooq;
+  } catch {
+    // fall through to Yahoo
+  }
+
+  const yahoo = await fetchYahooCandles(symbol, windowDays).catch(() => []);
+  if (yahoo.length) return yahoo;
+  return [];
 }
 
 function computeScenarioResult(candles, windowDays) {
@@ -104,6 +151,426 @@ function computeScenarioResult(candles, windowDays) {
     end,
     returnPct: Number(returnPct.toFixed(2)),
     points: recent.length
+  };
+}
+
+function computeReturns(candles) {
+  const closes = candles.map(c => c.c).filter(v => Number.isFinite(v));
+  const returns = [];
+  for (let i = 1; i < closes.length; i += 1) {
+    const prev = closes[i - 1];
+    const current = closes[i];
+    if (!prev) continue;
+    returns.push((current - prev) / prev);
+  }
+  return returns;
+}
+
+function mean(values) {
+  if (!values?.length) return null;
+  const sum = values.reduce((acc, v) => acc + v, 0);
+  return sum / values.length;
+}
+
+function stddev(values) {
+  if (!values?.length) return null;
+  const avg = mean(values);
+  if (avg == null) return null;
+  const variance = values.reduce((acc, v) => acc + (v - avg) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+function simpleMovingAverage(values, period) {
+  if (!values?.length || values.length < period) return null;
+  const slice = values.slice(-period);
+  const avg = mean(slice);
+  return avg == null ? null : avg;
+}
+
+function computeRSI(values, period = 14) {
+  if (!values?.length || values.length <= period) return null;
+  let gains = 0;
+  let losses = 0;
+  for (let i = 1; i <= period; i += 1) {
+    const diff = values[i] - values[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  let rsi = 100 - (100 / (1 + avgGain / avgLoss));
+  for (let i = period + 1; i < values.length; i += 1) {
+    const diff = values[i] - values[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    if (avgLoss === 0) {
+      rsi = 100;
+    } else {
+      const rs = avgGain / avgLoss;
+      rsi = 100 - (100 / (1 + rs));
+    }
+  }
+  return rsi;
+}
+
+function computeAtr(candles, period = 14) {
+  if (!candles?.length || candles.length <= period) return null;
+  const trs = [];
+  for (let i = 1; i < candles.length; i += 1) {
+    const prevClose = candles[i - 1].c;
+    const high = candles[i].h;
+    const low = candles[i].l;
+    if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(prevClose)) continue;
+    const tr = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+    trs.push(tr);
+  }
+  if (trs.length < period) return null;
+  const slice = trs.slice(-period);
+  return mean(slice);
+}
+
+function computeWinStats(returns) {
+  if (!returns?.length) return { upDays: 0, downDays: 0, flatDays: 0, winRate: null, avgUp: null, avgDown: null };
+  const up = returns.filter(r => r > 0);
+  const down = returns.filter(r => r < 0);
+  const flat = returns.length - up.length - down.length;
+  return {
+    upDays: up.length,
+    downDays: down.length,
+    flatDays: flat,
+    winRate: returns.length ? up.length / returns.length : null,
+    avgUp: up.length ? mean(up) * 100 : null,
+    avgDown: down.length ? mean(down) * 100 : null
+  };
+}
+
+function computeTrendStrength(values) {
+  if (!values?.length) return null;
+  const n = values.length;
+  if (n < 3) return null;
+  const meanX = (n - 1) / 2;
+  const meanY = mean(values);
+  if (meanY == null) return null;
+  let num = 0;
+  let denX = 0;
+  let denY = 0;
+  for (let i = 0; i < n; i += 1) {
+    const dx = i - meanX;
+    const dy = values[i] - meanY;
+    num += dx * dy;
+    denX += dx * dx;
+    denY += dy * dy;
+  }
+  if (!denX || !denY) return null;
+  const r = num / Math.sqrt(denX * denY);
+  return r * r;
+}
+
+function computeMaxDrawdown(values) {
+  if (!values?.length) return null;
+  let peak = values[0];
+  let maxDrawdown = 0;
+  values.forEach(value => {
+    if (value > peak) peak = value;
+    const drawdown = peak ? (value - peak) / peak : 0;
+    if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+  });
+  return maxDrawdown;
+}
+
+function computeSlope(values) {
+  if (!values?.length) return null;
+  const n = values.length;
+  const xs = Array.from({ length: n }, (_, i) => i);
+  const meanX = (n - 1) / 2;
+  const meanY = mean(values);
+  if (meanY == null) return null;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i += 1) {
+    const dx = xs[i] - meanX;
+    const dy = values[i] - meanY;
+    num += dx * dy;
+    den += dx * dx;
+  }
+  if (!den) return null;
+  return num / den;
+}
+
+function formatNumber(value, digits = 2) {
+  if (value == null || Number.isNaN(value)) return null;
+  return Number(value.toFixed(digits));
+}
+
+function buildScenarioNarrative({
+  symbol,
+  assetClass,
+  windowDays,
+  points,
+  startDate,
+  endDate,
+  startPrice,
+  endPrice,
+  returnPct,
+  rangeHigh,
+  rangeLow,
+  rangePct,
+  positionPct,
+  rsi14,
+  ma10,
+  ma20,
+  ma50,
+  momentum5,
+  momentum10,
+  momentum20,
+  dailyVol,
+  annualVol,
+  avgDailyReturn,
+  annualReturn,
+  sharpe,
+  maxDrawdownPct,
+  bestDayPct,
+  worstDayPct,
+  trendSlopePct,
+  trendLabel,
+  regime,
+  avgVolume,
+  recentVolume,
+  lastVolume,
+  volumeChangePct,
+  support,
+  resistance,
+  warnings
+} = {}) {
+  const lines = [];
+  lines.push(`Scenario detail for ${symbol} (${assetClass}) over the last ${windowDays} days.`);
+  lines.push(`Data coverage: ${points} daily bars from ${startDate || "unknown"} to ${endDate || "unknown"}.`);
+  if (startPrice != null && endPrice != null && returnPct != null) {
+    lines.push(`Price moved from ${startPrice} to ${endPrice}, a ${returnPct}% return over the window.`);
+  }
+  if (rangeHigh != null && rangeLow != null && rangePct != null) {
+    lines.push(`The price range was ${rangeLow} to ${rangeHigh} (${rangePct}% span). The latest close sits about ${positionPct}% into that range.`);
+  }
+  if (trendLabel) {
+    lines.push(`Trend signal: ${trendLabel} with a slope of about ${trendSlopePct}% per day. Short/long averages: 10d ${ma10 ?? "Not enough data"}, 20d ${ma20 ?? "Not enough data"}, 50d ${ma50 ?? "Not enough data"}.`);
+  }
+  if (momentum5 != null || momentum10 != null || momentum20 != null || rsi14 != null) {
+    lines.push(`Momentum check: 5d ${momentum5 ?? "Not enough data"}%, 10d ${momentum10 ?? "Not enough data"}%, 20d ${momentum20 ?? "Not enough data"}%. RSI(14) is ${rsi14 ?? "Not enough data"}.`);
+  }
+  if (dailyVol != null || annualVol != null || maxDrawdownPct != null) {
+    lines.push(`Risk view: daily volatility about ${dailyVol ?? "Not enough data"}%, annualized volatility about ${annualVol ?? "Not enough data"}%. Max drawdown in the window was ${maxDrawdownPct ?? "Not enough data"}%. Best day ${bestDayPct ?? "Not enough data"}%, worst day ${worstDayPct ?? "Not enough data"}%.`);
+  }
+  if (avgDailyReturn != null || annualReturn != null || sharpe != null) {
+    lines.push(`Return efficiency: average daily return ${avgDailyReturn ?? "Not enough data"}%, annualized return ${annualReturn ?? "Not enough data"}%, Sharpe (0% rf) ${sharpe ?? "Not enough data"}.`);
+  }
+  if (support != null && resistance != null) {
+    lines.push(`Support/resistance snapshot: support near ${support}, resistance near ${resistance}.`);
+  }
+  if (avgVolume != null || lastVolume != null) {
+    lines.push(`Volume/liq: average volume ${avgVolume ?? "Not enough data"}, recent average ${recentVolume ?? "Not enough data"}, latest ${lastVolume ?? "Not enough data"} (${volumeChangePct ?? "Not enough data"}% vs avg).`);
+  }
+  if (regime) {
+    lines.push(`Regime read: ${regime}.`);
+  }
+  if (warnings?.length) {
+    lines.push(`Data warnings: ${warnings.join("; ")}.`);
+  }
+  return lines.join("\n\n");
+}
+
+export async function getScenarioDetail({ symbol, assetClass = "stock", windowDays = 30, includeCandles = false } = {}) {
+  const resolvedSymbol = String(symbol || "").trim();
+  if (!resolvedSymbol) throw new Error("symbol_required");
+  const resolvedClass = String(assetClass || "stock").toLowerCase();
+  const window = Number(windowDays || 30);
+  const isCrypto = resolvedClass === "crypto" || resolvedSymbol.includes("-") || resolvedSymbol.endsWith("-USD");
+  const creds = getAlpacaCreds();
+  const provider = isCrypto ? "coinbase" : (creds.key && creds.secret ? "alpaca" : "stooq");
+
+  const candles = isCrypto
+    ? await fetchCryptoCandles(resolvedSymbol, window)
+    : await fetchStockCandles(resolvedSymbol, window);
+  if (!candles?.length) {
+    return {
+      symbol: resolvedSymbol,
+      assetClass: resolvedClass,
+      windowDays: window,
+      provider,
+      error: "no_candles"
+    };
+  }
+
+  const sorted = [...candles].sort((a, b) => a.t - b.t);
+  const closes = sorted.map(c => c.c);
+  const highs = sorted.map(c => c.h).filter(v => Number.isFinite(v));
+  const lows = sorted.map(c => c.l).filter(v => Number.isFinite(v));
+  const volumes = sorted.map(c => c.v).filter(v => Number.isFinite(v));
+
+  const points = sorted.length;
+  const startPrice = sorted[0].c;
+  const endPrice = sorted[points - 1].c;
+  const startDate = sorted[0].t ? new Date(sorted[0].t).toISOString().slice(0, 10) : "";
+  const endDate = sorted[points - 1].t ? new Date(sorted[points - 1].t).toISOString().slice(0, 10) : "";
+  const returnPct = startPrice ? formatNumber(((endPrice - startPrice) / startPrice) * 100, 2) : null;
+
+  const rangeHigh = highs.length ? Math.max(...highs) : null;
+  const rangeLow = lows.length ? Math.min(...lows) : null;
+  const rangePct = rangeHigh && rangeLow && rangeLow !== 0
+    ? formatNumber(((rangeHigh - rangeLow) / rangeLow) * 100, 2)
+    : null;
+  const positionPct = rangeHigh && rangeLow && rangeHigh !== rangeLow
+    ? formatNumber(((endPrice - rangeLow) / (rangeHigh - rangeLow)) * 100, 1)
+    : null;
+
+  const returns = computeReturns(sorted);
+  const avgDailyReturn = returns.length ? formatNumber(mean(returns) * 100, 3) : null;
+  const dailyVol = returns.length ? formatNumber(stddev(returns) * 100, 3) : null;
+  const annualFactor = isCrypto ? 365 : 252;
+  const annualVol = returns.length ? formatNumber((stddev(returns) || 0) * Math.sqrt(annualFactor) * 100, 2) : null;
+  const annualReturn = returns.length ? formatNumber(((1 + (mean(returns) || 0)) ** annualFactor - 1) * 100, 2) : null;
+  const sharpe = returns.length && stddev(returns) ? formatNumber((mean(returns) / stddev(returns)) * Math.sqrt(annualFactor), 2) : null;
+
+  const maxDrawdown = computeMaxDrawdown(closes);
+  const maxDrawdownPct = maxDrawdown != null ? formatNumber(maxDrawdown * 100, 2) : null;
+
+  const bestDay = returns.length ? Math.max(...returns) * 100 : null;
+  const worstDay = returns.length ? Math.min(...returns) * 100 : null;
+  const bestDayPct = bestDay != null ? formatNumber(bestDay, 2) : null;
+  const worstDayPct = worstDay != null ? formatNumber(worstDay, 2) : null;
+
+  const ma10 = formatNumber(simpleMovingAverage(closes, 10), 2);
+  const ma20 = formatNumber(simpleMovingAverage(closes, 20), 2);
+  const ma50 = formatNumber(simpleMovingAverage(closes, 50), 2);
+  const rsi14 = formatNumber(computeRSI(closes, 14), 2);
+
+  const momentum5 = closes.length >= 6 ? formatNumber(((endPrice - closes[closes.length - 6]) / closes[closes.length - 6]) * 100, 2) : null;
+  const momentum10 = closes.length >= 11 ? formatNumber(((endPrice - closes[closes.length - 11]) / closes[closes.length - 11]) * 100, 2) : null;
+  const momentum20 = closes.length >= 21 ? formatNumber(((endPrice - closes[closes.length - 21]) / closes[closes.length - 21]) * 100, 2) : null;
+
+  const logPrices = closes.map(v => Math.log(v || 1));
+  const slope = computeSlope(logPrices);
+  const trendSlopePct = slope != null ? formatNumber((Math.exp(slope) - 1) * 100, 3) : null;
+  let trendLabel = "";
+  if (trendSlopePct != null) {
+    if (trendSlopePct > 0.15) trendLabel = "Uptrend (strong)";
+    else if (trendSlopePct > 0.05) trendLabel = "Uptrend";
+    else if (trendSlopePct < -0.15) trendLabel = "Downtrend (strong)";
+    else if (trendSlopePct < -0.05) trendLabel = "Downtrend";
+    else trendLabel = "Sideways / range-bound";
+  }
+
+  const regime = trendLabel
+    ? (dailyVol != null && dailyVol > 2
+        ? `${trendLabel} with elevated volatility`
+        : `${trendLabel} with moderate volatility`)
+    : "";
+
+  const avgVolume = volumes.length ? Math.round(mean(volumes)) : null;
+  const lastVolume = volumes.length ? Math.round(volumes[volumes.length - 1]) : null;
+  const recentVolume = volumes.length >= 5 ? Math.round(mean(volumes.slice(-5))) : null;
+  const volumeChangePct = avgVolume && lastVolume
+    ? formatNumber(((lastVolume - avgVolume) / avgVolume) * 100, 1)
+    : null;
+
+  const support = lows.length ? formatNumber(Math.min(...lows.slice(-20)), 2) : null;
+  const resistance = highs.length ? formatNumber(Math.max(...highs.slice(-20)), 2) : null;
+
+  const warnings = [];
+  if (points < Math.min(window, 30)) warnings.push("limited history in window");
+  if (closes.length < 14) warnings.push("RSI needs more than 14 bars");
+  if (closes.length < 50) warnings.push("50-day average unavailable");
+  if (!returns.length) warnings.push("returns unavailable");
+
+  const narrative = buildScenarioNarrative({
+    symbol: resolvedSymbol,
+    assetClass: resolvedClass,
+    windowDays: window,
+    points,
+    startDate,
+    endDate,
+    startPrice: formatNumber(startPrice, 2),
+    endPrice: formatNumber(endPrice, 2),
+    returnPct,
+    rangeHigh: formatNumber(rangeHigh, 2),
+    rangeLow: formatNumber(rangeLow, 2),
+    rangePct,
+    positionPct,
+    rsi14,
+    ma10,
+    ma20,
+    ma50,
+    momentum5,
+    momentum10,
+    momentum20,
+    dailyVol,
+    annualVol,
+    avgDailyReturn,
+    annualReturn,
+    sharpe,
+    maxDrawdownPct: maxDrawdownPct != null ? Math.abs(maxDrawdownPct) : null,
+    bestDayPct,
+    worstDayPct,
+    trendSlopePct,
+    trendLabel,
+    regime,
+    avgVolume,
+    recentVolume,
+    lastVolume,
+    volumeChangePct,
+    support,
+    resistance,
+    warnings
+  });
+
+  return {
+    symbol: resolvedSymbol,
+    assetClass: resolvedClass,
+    windowDays: window,
+    provider,
+    points,
+    startDate,
+    endDate,
+    startPrice: formatNumber(startPrice, 2),
+    endPrice: formatNumber(endPrice, 2),
+    returnPct,
+    rangeHigh: formatNumber(rangeHigh, 2),
+    rangeLow: formatNumber(rangeLow, 2),
+    rangePct,
+    positionPct,
+    rsi14,
+    ma10,
+    ma20,
+    ma50,
+    momentum5,
+    momentum10,
+    momentum20,
+    avgDailyReturn,
+    dailyVol,
+    annualVol,
+    annualReturn,
+    sharpe,
+    maxDrawdownPct: maxDrawdownPct != null ? Math.abs(maxDrawdownPct) : null,
+    bestDayPct,
+    worstDayPct,
+    trendSlopePct,
+    trendLabel,
+    regime,
+    avgVolume,
+    recentVolume,
+    lastVolume,
+    volumeChangePct,
+    support,
+    resistance,
+    warnings,
+    narrative,
+    candles: includeCandles ? sorted : undefined
   };
 }
 
