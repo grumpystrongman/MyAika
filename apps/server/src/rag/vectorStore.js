@@ -764,6 +764,7 @@ export function initRagStore() {
   if (db) return { db, vecEnabled };
   ensureDir(dataDir);
   db = new Database(dbPath);
+  db.pragma("busy_timeout = 8000");
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   ensureSchema();

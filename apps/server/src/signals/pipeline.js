@@ -394,7 +394,12 @@ export async function runSignalsIngestion({ sourceIds = [], force = false } = {}
     try {
       const items = await fetchSourceItems(source, config);
       sourceStats.pulled = items.length;
+      const maxDocsPerSource = config.defaults.maxDocsPerSourcePerDay || 20;
       for (const item of items) {
+        if (sourceStats.ingested >= maxDocsPerSource) {
+          sourceStats.skipped += Math.max(0, items.length - sourceStats.ingested);
+          break;
+        }
         const canonicalUrl = normalizeUrl(item.canonical_url || "") || normalizeUrl(item.source_url || "") || "";
         if (canonicalUrl && seenUrls.has(canonicalUrl)) {
           sourceStats.skipped += 1;

@@ -1,7 +1,7 @@
 {
   "defaults": {
     "language": "en",
-    "maxItemsPerFeed": 40,
+    "maxItemsPerFeed": 25,
     "maxDocChars": 50000,
     "fetchTimeoutMs": 15000,
     "requestDelayMs": 350,
@@ -10,7 +10,7 @@
       "minDelayMs": 600,
       "maxDelayMs": 4000
     },
-    "maxDocsPerSourcePerDay": 30,
+    "maxDocsPerSourcePerDay": 20,
     "maxDocsPerClusterPerDay": 12,
     "clusterCount": 8,
     "minClusterDocs": 3,
