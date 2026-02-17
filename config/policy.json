@@ -28,6 +28,7 @@
     "messaging.discordSend",
     "messaging.whatsapp.send",
     "messaging.sms.send",
+    "drive.upload",
     "action.run",
     "skill.vault.run",
     "browser.navigate",
@@ -52,6 +53,7 @@
     "messaging.discordSend",
     "messaging.whatsapp.send",
     "messaging.sms.send",
+    "drive.upload",
     "finance.transfer",
     "finance.trade",
     "kill_switch.disable"
