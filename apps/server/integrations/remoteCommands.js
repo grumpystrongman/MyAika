@@ -14,6 +14,8 @@ import {
   removeTradingSource
 } from "../src/trading/knowledgeRag.js";
 import { listMacros, getMacro, applyMacroParams } from "../src/actionRunner/macros.js";
+import { listRagModels } from "../src/rag/collections.js";
+import { getActiveThread, createThread, closeThread, ensureActiveThread, setThreadRagModel } from "../storage/threads.js";
 import { getSkillsState } from "../skills/index.js";
 
 const DEFAULT_PORT = 8790;
@@ -190,6 +192,110 @@ async function handleMacroCommand(args, context) {
   return "Unknown macro command. Try /macro help";
 }
 
+function formatThreadStatus(thread) {
+  if (!thread) return "No active thread. Use /thread new to start one.";
+  const ragModel = thread.rag_model || "auto";
+  const started = thread.created_at || "unknown";
+  const last = thread.last_message_at || "n/a";
+  return [
+    `Thread: ${thread.id}`,
+    `Status: ${thread.status || "active"}`,
+    `RAG: ${ragModel}`,
+    `Started: ${started}`,
+    `Last message: ${last}`
+  ].join("\n");
+}
+
+function normalizeRagSelection(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized || ["auto", "off", "none", "default"].includes(normalized)) return "auto";
+  return normalized;
+}
+
+function formatRagModelsList(models) {
+  const formatted = formatList(
+    models,
+    model => {
+      const kind = model.kind || "custom";
+      const desc = model.description ? ` - ${model.description}` : "";
+      return `- ${model.id} [${kind}]${desc}`;
+    },
+    12
+  );
+  return `RAG models (special: auto, all):\n${formatted}`;
+}
+
+async function handleThreadCommand(args, meta) {
+  const sub = (args[0] || "status").toLowerCase();
+  if (["help", "?"].includes(sub)) {
+    return "Thread commands: /thread new | /thread stop | /thread status";
+  }
+  if (["new", "start", "reset"].includes(sub)) {
+    const active = getActiveThread(meta);
+    if (active) closeThread(active.id);
+    const next = createThread({
+      channel: meta.channel,
+      senderId: meta.senderId,
+      chatId: meta.chatId,
+      senderName: meta.senderName,
+      workspaceId: meta.workspaceId
+    });
+    if (!next) return "Unable to start a new thread.";
+    return `Started new thread ${next.id}. Memory is fresh for this conversation.`;
+  }
+  if (["stop", "end", "close", "off"].includes(sub)) {
+    const active = getActiveThread(meta);
+    if (!active) return "No active thread to stop.";
+    closeThread(active.id);
+    return "Thread closed. Send /thread new to start a fresh one.";
+  }
+  if (["status", "info"].includes(sub)) {
+    return formatThreadStatus(getActiveThread(meta));
+  }
+  return "Thread commands: /thread new | /thread stop | /thread status";
+}
+
+function handleRagCommand(args, meta) {
+  const sub = (args[0] || "status").toLowerCase();
+  if (["help", "?"].includes(sub)) {
+    return "RAG commands: /rag list | /rag use <id|all|auto> | /rag status";
+  }
+  if (["list", "ls"].includes(sub)) {
+    const models = listRagModels();
+    return formatRagModelsList(models);
+  }
+  if (["status", "info"].includes(sub)) {
+    const active = getActiveThread(meta);
+    if (!active) return "No active thread. Use /thread new to start one.";
+    return `Thread RAG: ${active.rag_model || "auto"}`;
+  }
+  let target = "";
+  if (["use", "set"].includes(sub)) {
+    target = args[1] || "";
+  } else if (sub) {
+    target = args[0] || "";
+  }
+  if (!target) return "Usage: /rag use <id|all|auto>";
+  const normalized = normalizeRagSelection(target);
+  const models = listRagModels();
+  const ids = new Set(models.map(model => String(model.id || "").toLowerCase()));
+  if (normalized !== "auto" && normalized !== "all" && !ids.has(normalized)) {
+    return `Unknown RAG model "${target}". Try /rag list.`;
+  }
+  const thread = ensureActiveThread({
+    channel: meta.channel,
+    senderId: meta.senderId,
+    chatId: meta.chatId,
+    senderName: meta.senderName,
+    workspaceId: meta.workspaceId
+  });
+  if (!thread) return "Unable to set RAG model (no active thread).";
+  setThreadRagModel(thread.id, normalized);
+  return normalized === "auto"
+    ? "RAG set to auto (Aika will choose when to use it)."
+    : `RAG model set to ${normalized} for this thread.`;
+}
+
 async function handleRestart(context) {
   const result = await executor.callTool({
     name: "system.modify",
@@ -280,7 +386,7 @@ function handleResources() {
   ].join("\n");
 }
 
-export async function tryHandleRemoteCommand({ channel, senderId, senderName, text } = {}) {
+export async function tryHandleRemoteCommand({ channel, senderId, senderName, chatId, text } = {}) {
   const parsed = parseCommand(text);
   if (!parsed) return { handled: false };
   const { cmd, args } = parsed;
@@ -289,6 +395,7 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, te
     workspaceId: "default",
     source: `remote:${channel || "unknown"}`
   };
+  const meta = { channel, senderId, senderName, chatId, workspaceId: "default" };
   try {
     if (["help", "commands", "?"].includes(cmd)) {
       return {
@@ -298,6 +405,8 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, te
           "/status",
           "/restart",
           "/resources",
+          "/thread new | /thread stop | /thread status",
+          "/rag list | /rag use <id|all|auto> | /rag status",
           "/rss list | /rss crawl [--force] | /rss seed <url> | /rss add <url> | /rss remove <id>",
           "/knowledge list | /knowledge crawl [--force] | /knowledge add <url> | /knowledge remove <id>",
           "/macro list | /macro run <id>",
@@ -346,6 +455,14 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, te
 
     if (["approve"].includes(cmd)) {
       return { handled: true, response: await handleApprove(args, context) };
+    }
+
+    if (["thread", "threads"].includes(cmd)) {
+      return { handled: true, response: await handleThreadCommand(args, meta) };
+    }
+
+    if (["rag", "knowledgebase", "kb"].includes(cmd)) {
+      return { handled: true, response: handleRagCommand(args, meta) };
     }
 
     return { handled: true, response: "Unknown command. Try /help." };

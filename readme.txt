@@ -10,11 +10,40 @@ What this project is
 - Short description: (Replace) A personal assistant / utility app scaffold.
 - Purpose: Provide a starting point for development, testing, and documentation.
 
-Features (example)
-------------------
-- Core app structure and configuration
-- Basic CLI or GUI entrypoint (implement as needed)
-- Placeholder for tests and CI
+Features
+--------
+- Local-first assistant with chat, memory, and RAG
+- Web UI for chat, recordings, trading, tools, safety, and action runner
+- Integrations for Telegram, Slack, Discord, WhatsApp, Google Docs/Drive, Fireflies
+- Safety approvals, audit logging, and kill switch
+
+Telegram (chat + remote commands)
+-------------------------------
+Setup:
+- TELEGRAM_BOT_TOKEN (required)
+- TELEGRAM_WEBHOOK_SECRET (optional)
+- THREAD_HISTORY_MAX_MESSAGES (optional; caps per-thread memory)
+
+Inbound webhook:
+- POST /api/integrations/telegram/webhook
+- First-time senders must pair; Aika replies with a pairing code for approval in the UI.
+
+Threaded memory (per chat):
+- /thread new starts a new thread (fresh memory)
+- /thread stop closes the thread
+- /thread status shows the current thread info
+
+RAG controls (per thread):
+- /rag list | /rag use <id|all|auto> | /rag status
+- If RAG returns no evidence or says "I don't know" Aika falls back to the LLM.
+
+Remote command highlights:
+- /help, /status, /resources, /approvals, /approve <id> [token]
+- /rss and /knowledge for trading sources
+- /macro list and /macro run <id>
+
+Outbound send (requires approval by policy):
+- POST /api/integrations/telegram/send { chatId, text }
 
 Requirements
 ------------

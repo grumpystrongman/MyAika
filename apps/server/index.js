@@ -85,6 +85,7 @@ import {
 } from "./storage/agent_actions.js";
 import { writeOutbox } from "./storage/outbox.js";
 import { listPairings, approvePairing, denyPairing } from "./storage/pairings.js";
+import { getThread, listThreadMessages, appendThreadMessage } from "./storage/threads.js";
 import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
@@ -1946,17 +1947,38 @@ app.post("/api/auth/logout", (req, res) => {
 // Chat endpoint
 app.post("/chat", async (req, res) => {
   try {
-    const { userText, maxOutputTokens, ragModel } = req.body;
+    const { userText, maxOutputTokens, ragModel, threadId, channel, senderId, senderName } = req.body;
     if (!userText || typeof userText !== "string") {
       return res.status(400).json({ error: "userText required" });
     }
     const lowerText = userText.toLowerCase();
+    const requestedRagModel = typeof ragModel === "string" ? ragModel.trim() : "";
+    const threadHistoryLimit = Math.max(1, Number(process.env.THREAD_HISTORY_MAX_MESSAGES || 14) || 14);
+    const thread = threadId ? getThread(threadId) : null;
+    const threadActive = Boolean(thread && thread.status === "active");
+    const threadHistory = threadActive ? listThreadMessages(threadId, threadHistoryLimit) : [];
+    const threadContextText = threadHistory.length
+      ? threadHistory
+          .map(m => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
+          .join("\n")
+      : "";
+    const effectiveRagModel = requestedRagModel || (threadActive ? thread.rag_model : "");
+    const threadMessageMeta = threadActive ? { channel, senderId, senderName } : null;
+    const recordThreadMessage = (role, content) => {
+      if (!threadActive || !content) return;
+      try {
+        appendThreadMessage({ threadId: thread.id, role, content, metadata: threadMessageMeta });
+      } catch {
+        // ignore thread logging failures
+      }
+    };
     const sendAssistantReply = (text, behavior = makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }), extra = {}) => {
       addMemoryIndexed({
         role: "assistant",
         content: text,
         tags: "reply"
       });
+      recordThreadMessage("assistant", text);
       return res.json({ text, behavior, ...extra });
     };
 
@@ -1976,6 +1998,8 @@ app.post("/chat", async (req, res) => {
         { killSwitch: true }
       );
     }
+
+    recordThreadMessage("user", userText);
 
     addMemoryIndexed({
       role: "user",
@@ -2074,7 +2098,7 @@ app.post("/chat", async (req, res) => {
       }
     }
 
-    const ragSelection = resolveRagSelection(userText, ragModel);
+    const ragSelection = resolveRagSelection(userText, effectiveRagModel);
     const shouldRag = ragSelection?.forced || shouldUseRag(userText);
     if (shouldRag && ragSelection) {
       try {
@@ -2086,19 +2110,24 @@ app.post("/chat", async (req, res) => {
             .trim() || userText;
           const ragResult = await answerRagQuestion(queryText, {
             topK: Number(process.env.RAG_TOP_K || 8),
-            filters: ragSelection.filters || {}
+            filters: ragSelection.filters || {},
+            conversationContext: threadContextText
           });
           if (ragResult?.answer) {
+            const ragAnswer = String(ragResult.answer || "").trim();
             const ragCitations = ragResult.citations || [];
-            const memoryRecall = ragCitations.some(cite => {
-              const chunkId = String(cite?.chunk_id || "");
-              return chunkId.startsWith("memory:") || chunkId.startsWith("feedback:");
-            });
-            return sendAssistantReply(
-              ragResult.answer,
-              makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
-              { citations: ragCitations, source: "rag", memoryRecall, ragModel: ragSelection.id }
-            );
+            const ragUnknown = /i don't know based on the provided context/i.test(ragAnswer);
+            if (ragCitations.length && !ragUnknown) {
+              const memoryRecall = ragCitations.some(cite => {
+                const chunkId = String(cite?.chunk_id || "");
+                return chunkId.startsWith("memory:") || chunkId.startsWith("feedback:");
+              });
+              return sendAssistantReply(
+                ragAnswer,
+                makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+                { citations: ragCitations, source: "rag", memoryRecall, ragModel: ragSelection.id }
+              );
+            }
           }
         }
       } catch {
@@ -2287,6 +2316,13 @@ app.post("/chat", async (req, res) => {
             .join("\n")
         : "(none)";
 
+    const threadInput = threadHistory
+      .filter(m => m.role === "user" || m.role === "assistant")
+      .map(m => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: [{ type: "input_text", text: m.content }]
+      }));
+
     const systemPrompt = `
 You are ${persona.name}.
 
@@ -2325,6 +2361,7 @@ INSTRUCTIONS:
             }
           ]
         },
+        ...threadInput,
         {
           role: "user",
           content: [
@@ -2344,7 +2381,13 @@ INSTRUCTIONS:
     // Extract model text output
     let rawText = extractResponseText(response);
     if (!rawText.trim()) {
-      rawText = await fallbackChatCompletion({ systemPrompt, userText, maxOutputTokens });
+      const fallbackUserText = threadContextText
+        ? `Conversation context:
+${threadContextText}
+
+User: ${userText}`
+        : userText;
+      rawText = await fallbackChatCompletion({ systemPrompt, userText: fallbackUserText, maxOutputTokens });
     }
     if (!rawText.trim()) {
       const summary = {
@@ -2409,16 +2452,7 @@ INSTRUCTIONS:
     }
 
     // Save assistant reply
-    addMemoryIndexed({
-      role: "assistant",
-      content: replyText,
-      tags: "reply"
-    });
-
-    res.json({
-      text: replyText,
-      behavior
-    });
+    return sendAssistantReply(replyText, behavior);
   } catch (err) {
     console.error("CHAT ERROR:", err);
     res.status(500).json({ error: "chat_failed" });
@@ -5081,6 +5115,7 @@ app.post("/api/integrations/telegram/webhook", rateLimit, async (req, res) => {
         senderName,
         text,
         workspaceId: "default",
+        chatId,
         reply: async (replyText) => {
           const result = await executeAction({
             actionType: "messaging.telegramSend",
@@ -5123,6 +5158,7 @@ app.post("/api/integrations/slack/events", rateLimit, async (req, res) => {
         senderName,
         text,
         workspaceId: "default",
+        chatId: channelId,
         reply: async (replyText) => {
           const result = await executeAction({
             actionType: "messaging.slackPost",
@@ -5158,6 +5194,7 @@ app.post("/api/integrations/messages/webhook", rateLimit, async (req, res) => {
       senderName: String(from),
       text: String(text),
       workspaceId: "default",
+      chatId: String(from),
       reply: async (replyText) => {
         const actionType = channel === "whatsapp" ? "messaging.whatsapp.send" : "messaging.sms.send";
         const outboundTargets = channel === "whatsapp"

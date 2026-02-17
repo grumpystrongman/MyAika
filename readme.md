@@ -138,6 +138,40 @@ Notes:
 - Integrations are stubs until credentials are provided.
 - Add the credentials in `apps/server/.env` and restart the server.
 
+### Telegram (chat + remote commands)
+Setup:
+- `TELEGRAM_BOT_TOKEN` (required)
+- `TELEGRAM_WEBHOOK_SECRET` (optional; verifies inbound webhooks)
+- `TELEGRAM_CHAT_ID` (optional; used by outbound monitors/alerts)
+- `THREAD_HISTORY_MAX_MESSAGES` (optional; caps per-thread memory window)
+
+Inbound webhook:
+- `POST /api/integrations/telegram/webhook` (Telegram sends updates here)
+- First-time senders must pair; Aika replies with a pairing code. Approve it in the UI under Connections/Pairings.
+
+Threaded memory (per chat):
+- Each Telegram chat runs inside a persistent thread stored locally in SQLite.
+- Aika includes recent thread turns in the prompt for continuity.
+- Start/reset: `/thread new`
+- Stop a thread: `/thread stop` (next message starts a new clean thread)
+- Status: `/thread status`
+
+RAG controls (per thread):
+- `/rag list` to see available models (plus special `auto`, `all`)
+- `/rag use <id|all|auto>` to set the thread's RAG model
+- `/rag status` to view current selection
+- If RAG returns no evidence or says "I don't know" Aika falls back to the LLM.
+
+Remote command highlights:
+- `/help` to list all commands
+- `/status`, `/resources`, `/approvals`, `/approve <id> [token]`
+- `/rss` and `/knowledge` to manage trading sources
+- `/macro list` and `/macro run <id>`
+
+Outbound send (requires approval by policy):
+- `POST /api/integrations/telegram/send` `{ chatId, text }`
+
+
 ## Safety & Guardrails
 MyAika includes a Safety & Autonomy Guardrails layer that enforces deny-by-default, least privilege, approvals for high-risk actions, and a tamper-evident audit log.
 

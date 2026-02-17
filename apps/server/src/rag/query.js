@@ -116,8 +116,9 @@ function buildSummaryContext(summaries = []) {
     .join("\n\n");
 }
 
-export async function answerRagQuestion(question, { topK = 8, filters = {} } = {}) {
+export async function answerRagQuestion(question, { topK = 8, filters = {}, conversationContext = "" } = {}) {
   const query = String(question || "").trim();
+  const convoPrefix = conversationContext ? `Conversation context:\n${conversationContext}\n\n` : "";
   if (!query) {
     return { answer: "Question required.", citations: [], debug: { retrievedCount: 0, filters } };
   }
@@ -144,7 +145,7 @@ export async function answerRagQuestion(question, { topK = 8, filters = {} } = {
       const client = getOpenAIClient();
       if (client && context) {
         const system = "Answer using ONLY the provided context. If the answer is not in the context, say you don't know.";
-        const user = `Question: ${query}\n\nContext:\n${context}`;
+        const user = `${convoPrefix}Question: ${query}\n\nContext:\n${context}`;
         const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
         const response = await client.responses.create({
           model,
@@ -198,7 +199,7 @@ export async function answerRagQuestion(question, { topK = 8, filters = {} } = {
   const client = getOpenAIClient();
   if (client && context) {
     const system = "Answer using ONLY the provided context. If the answer is not in the context, say you don't know.";
-    const user = `Question: ${query}\n\nContext:\n${context}`;
+    const user = `${convoPrefix}Question: ${query}\n\nContext:\n${context}`;
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
     const response = await client.responses.create({
       model,

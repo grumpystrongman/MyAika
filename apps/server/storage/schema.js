@@ -276,6 +276,38 @@ const migrations = [
       notes TEXT
     );
     `
+  },
+  {
+    id: 8,
+    sql: `
+    CREATE TABLE IF NOT EXISTS chat_threads (
+      id TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      chat_id TEXT,
+      status TEXT NOT NULL,
+      title TEXT,
+      rag_model TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_message_at TEXT,
+      metadata_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS chat_threads_lookup
+      ON chat_threads (channel, sender_id, chat_id, status, updated_at);
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      metadata_json TEXT,
+      FOREIGN KEY(thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS chat_messages_thread
+      ON chat_messages (thread_id, created_at);
+    `
   }
 ];
 

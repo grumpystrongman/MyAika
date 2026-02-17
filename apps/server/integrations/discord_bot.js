@@ -30,6 +30,7 @@ export function startDiscordBot() {
         senderName,
         text,
         workspaceId: "default",
+        chatId: message.channel?.id || "",
         reply: async (replyText) => {
           await message.reply(replyText);
         }
