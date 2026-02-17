@@ -1,4 +1,4 @@
-import { getProvider } from "../integrations/store.js";
+import { getProvider } from "../../integrations/store.js";
 import { ingestConnectorDocument } from "./ingest.js";
 import { fetchJson, parseList, normalizeText } from "./utils.js";
 import { setRagMeta } from "../rag/vectorStore.js";
