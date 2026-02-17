@@ -32,10 +32,10 @@ function cleanSlackText(text) {
   return String(text || "")
     .replace(/<@([A-Z0-9]+)>/g, "@$1")
     .replace(/<#([A-Z0-9]+)\|([^>]+)>/g, "#$2")
-    .replace(/<https?:\\/\\/[^|>]+\\|([^>]+)>/g, "$1")
-    .replace(/<mailto:[^|>]+\\|([^>]+)>/g, "$1")
+    .replace(/<https?:\/\/[^|>]+\|([^>]+)>/g, "$1")
+    .replace(/<mailto:[^|>]+\|([^>]+)>/g, "$1")
     .replace(/<([^>]+)>/g, "$1")
-    .replace(/\\s+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
