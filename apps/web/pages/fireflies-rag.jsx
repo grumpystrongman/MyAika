@@ -193,7 +193,9 @@ export default function FirefliesRagPage() {
         <div style={{ marginTop: 24, background: "#ffffff", borderRadius: 16, padding: 20, border: "1px solid #e5e7eb" }}>
           <h2 style={{ fontSize: 18, marginBottom: 12 }}>Answer</h2>
           {answer ? (
-            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{answer}</div>
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, maxHeight: 320, overflowY: "auto", paddingRight: 6 }}>
+              {answer}
+            </div>
           ) : (
             <div style={{ color: "#6b7280" }}>No answer yet. Sync transcripts and ask a question.</div>
           )}

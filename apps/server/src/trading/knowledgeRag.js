@@ -164,7 +164,9 @@ function normalizeTags(tags) {
 }
 
 function buildSourceKey(row = {}) {
-  return row?.source_url || row?.source_group || row?.title || "manual";
+  const group = row?.source_group || "";
+  if (group && group.startsWith("youtube:")) return group;
+  return row?.source_url || group || row?.title || "manual";
 }
 
 function parseNodeId(rawId = "") {

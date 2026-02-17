@@ -595,7 +595,9 @@ export default function FirefliesPanel({ serverUrl }) {
             {asking ? "Asking..." : "Ask"}
           </button>
           {answer && (
-            <div style={{ marginTop: 10, fontSize: 12, whiteSpace: "pre-wrap" }}>{answer}</div>
+            <div style={{ marginTop: 10, fontSize: 12, color: "#334155", whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
+              {answer}
+            </div>
           )}
         </div>
       </div>

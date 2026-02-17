@@ -180,18 +180,136 @@ function ensureSchema() {
       FOREIGN KEY(source_id) REFERENCES trading_rss_sources(id)
     );
 
+    CREATE TABLE IF NOT EXISTS trading_youtube_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      collection_id TEXT,
+      channel_id TEXT,
+      handle TEXT,
+      title TEXT,
+      description TEXT,
+      url TEXT,
+      tags_json TEXT,
+      enabled INTEGER,
+      subscriber_count INTEGER,
+      video_count INTEGER,
+      view_count INTEGER,
+      max_videos INTEGER,
+      created_at TEXT,
+      updated_at TEXT,
+      last_crawled_at TEXT,
+      last_status TEXT,
+      last_error TEXT,
+      last_published_at TEXT,
+      UNIQUE(collection_id, channel_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS trading_youtube_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER,
+      video_id TEXT,
+      url TEXT,
+      title TEXT,
+      published_at TEXT,
+      ingested_at TEXT,
+      transcript_hash TEXT,
+      description_hash TEXT,
+      UNIQUE(source_id, video_id),
+      FOREIGN KEY(source_id) REFERENCES trading_youtube_sources(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS signals_documents (
+      doc_id TEXT PRIMARY KEY,
+      source_id TEXT,
+      source_title TEXT,
+      source_url TEXT,
+      canonical_url TEXT,
+      title TEXT,
+      summary TEXT,
+      raw_text TEXT,
+      cleaned_text TEXT,
+      content_hash TEXT,
+      simhash TEXT,
+      retrieved_at TEXT,
+      published_at TEXT,
+      language TEXT,
+      category TEXT,
+      tags_json TEXT,
+      signal_tags_json TEXT,
+      tickers_json TEXT,
+      entities_json TEXT,
+      freshness_score REAL,
+      reliability_score REAL,
+      stale INTEGER,
+      expired INTEGER,
+      stale_reason TEXT,
+      summary_json TEXT,
+      meeting_id TEXT,
+      cluster_id TEXT,
+      cluster_label TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS signals_runs (
+      run_id TEXT PRIMARY KEY,
+      status TEXT,
+      started_at TEXT,
+      finished_at TEXT,
+      source_count INTEGER,
+      ingested_count INTEGER,
+      skipped_count INTEGER,
+      expired_count INTEGER,
+      error_count INTEGER,
+      errors_json TEXT,
+      sources_json TEXT,
+      report_path TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS signals_trends (
+      trend_id TEXT PRIMARY KEY,
+      run_id TEXT,
+      cluster_id TEXT,
+      label TEXT,
+      representative_doc_id TEXT,
+      top_entities_json TEXT,
+      top_tickers_json TEXT,
+      signal_tags_json TEXT,
+      note TEXT,
+      doc_count INTEGER,
+      created_at TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chunks_meeting ON chunks(meeting_id);
     CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(occurred_at);
     CREATE INDEX IF NOT EXISTS idx_trading_sources_enabled ON trading_sources(enabled);
     CREATE INDEX IF NOT EXISTS idx_trading_rss_sources_enabled ON trading_rss_sources(enabled);
+    CREATE INDEX IF NOT EXISTS idx_trading_youtube_sources_enabled ON trading_youtube_sources(enabled);
+    CREATE INDEX IF NOT EXISTS idx_trading_youtube_items_source ON trading_youtube_items(source_id);
+    CREATE INDEX IF NOT EXISTS idx_signals_docs_published ON signals_documents(published_at);
+    CREATE INDEX IF NOT EXISTS idx_signals_docs_source ON signals_documents(source_id);
+    CREATE INDEX IF NOT EXISTS idx_signals_docs_freshness ON signals_documents(freshness_score);
+    CREATE INDEX IF NOT EXISTS idx_signals_docs_hash ON signals_documents(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_signals_runs_started ON signals_runs(started_at);
+    CREATE INDEX IF NOT EXISTS idx_signals_trends_run ON signals_trends(run_id);
   `);
 }
 
+function getTableColumns(table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
+}
+
 function ensureColumn(table, column, definition) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
+  const cols = getTableColumns(table);
   if (!cols.includes(column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+function ensureIndex(table, column, indexName) {
+  const cols = getTableColumns(table);
+  if (!cols.includes(column)) return;
+  db.exec(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${table}(${column})`);
 }
 
 function ensureMigrations() {
@@ -214,6 +332,87 @@ function ensureMigrations() {
   ensureColumn("trading_rss_items", "decision", "TEXT");
   ensureColumn("trading_rss_items", "reason", "TEXT");
   ensureColumn("trading_rss_items", "content_hash", "TEXT");
+  ensureColumn("trading_youtube_sources", "collection_id", "TEXT");
+  ensureColumn("trading_youtube_sources", "channel_id", "TEXT");
+  ensureColumn("trading_youtube_sources", "handle", "TEXT");
+  ensureColumn("trading_youtube_sources", "title", "TEXT");
+  ensureColumn("trading_youtube_sources", "description", "TEXT");
+  ensureColumn("trading_youtube_sources", "url", "TEXT");
+  ensureColumn("trading_youtube_sources", "tags_json", "TEXT");
+  ensureColumn("trading_youtube_sources", "enabled", "INTEGER");
+  ensureColumn("trading_youtube_sources", "subscriber_count", "INTEGER");
+  ensureColumn("trading_youtube_sources", "video_count", "INTEGER");
+  ensureColumn("trading_youtube_sources", "view_count", "INTEGER");
+  ensureColumn("trading_youtube_sources", "max_videos", "INTEGER");
+  ensureColumn("trading_youtube_sources", "created_at", "TEXT");
+  ensureColumn("trading_youtube_sources", "updated_at", "TEXT");
+  ensureColumn("trading_youtube_sources", "last_crawled_at", "TEXT");
+  ensureColumn("trading_youtube_sources", "last_status", "TEXT");
+  ensureColumn("trading_youtube_sources", "last_error", "TEXT");
+  ensureColumn("trading_youtube_sources", "last_published_at", "TEXT");
+  ensureColumn("trading_youtube_items", "source_id", "INTEGER");
+  ensureColumn("trading_youtube_items", "video_id", "TEXT");
+  ensureColumn("trading_youtube_items", "url", "TEXT");
+  ensureColumn("trading_youtube_items", "title", "TEXT");
+  ensureColumn("trading_youtube_items", "published_at", "TEXT");
+  ensureColumn("trading_youtube_items", "ingested_at", "TEXT");
+  ensureColumn("trading_youtube_items", "transcript_hash", "TEXT");
+  ensureColumn("trading_youtube_items", "description_hash", "TEXT");
+  migrateSignalsDocumentsSchema();
+  migrateSignalsRunsSchema();
+  migrateSignalsTrendsSchema();
+  ensureColumn("signals_documents", "source_title", "TEXT");
+  ensureColumn("signals_documents", "source_url", "TEXT");
+  ensureColumn("signals_documents", "canonical_url", "TEXT");
+  ensureColumn("signals_documents", "title", "TEXT");
+  ensureColumn("signals_documents", "summary", "TEXT");
+  ensureColumn("signals_documents", "raw_text", "TEXT");
+  ensureColumn("signals_documents", "cleaned_text", "TEXT");
+  ensureColumn("signals_documents", "content_hash", "TEXT");
+  ensureColumn("signals_documents", "simhash", "TEXT");
+  ensureColumn("signals_documents", "retrieved_at", "TEXT");
+  ensureColumn("signals_documents", "published_at", "TEXT");
+  ensureColumn("signals_documents", "language", "TEXT");
+  ensureColumn("signals_documents", "category", "TEXT");
+  ensureColumn("signals_documents", "tags_json", "TEXT");
+  ensureColumn("signals_documents", "signal_tags_json", "TEXT");
+  ensureColumn("signals_documents", "tickers_json", "TEXT");
+  ensureColumn("signals_documents", "entities_json", "TEXT");
+  ensureColumn("signals_documents", "freshness_score", "REAL");
+  ensureColumn("signals_documents", "reliability_score", "REAL");
+  ensureColumn("signals_documents", "stale", "INTEGER");
+  ensureColumn("signals_documents", "expired", "INTEGER");
+  ensureColumn("signals_documents", "stale_reason", "TEXT");
+  ensureColumn("signals_documents", "summary_json", "TEXT");
+  ensureColumn("signals_documents", "meeting_id", "TEXT");
+  ensureColumn("signals_documents", "cluster_id", "TEXT");
+  ensureColumn("signals_documents", "cluster_label", "TEXT");
+  ensureColumn("signals_documents", "created_at", "TEXT");
+  ensureColumn("signals_documents", "updated_at", "TEXT");
+  ensureIndex("signals_documents", "stale", "idx_signals_docs_stale");
+  ensureIndex("signals_documents", "expired", "idx_signals_docs_expired");
+  ensureColumn("signals_runs", "status", "TEXT");
+  ensureColumn("signals_runs", "started_at", "TEXT");
+  ensureColumn("signals_runs", "finished_at", "TEXT");
+  ensureColumn("signals_runs", "source_count", "INTEGER");
+  ensureColumn("signals_runs", "ingested_count", "INTEGER");
+  ensureColumn("signals_runs", "skipped_count", "INTEGER");
+  ensureColumn("signals_runs", "expired_count", "INTEGER");
+  ensureColumn("signals_runs", "error_count", "INTEGER");
+  ensureColumn("signals_runs", "errors_json", "TEXT");
+  ensureColumn("signals_runs", "sources_json", "TEXT");
+  ensureColumn("signals_runs", "report_path", "TEXT");
+  ensureColumn("signals_runs", "created_at", "TEXT");
+  ensureColumn("signals_trends", "run_id", "TEXT");
+  ensureColumn("signals_trends", "cluster_id", "TEXT");
+  ensureColumn("signals_trends", "label", "TEXT");
+  ensureColumn("signals_trends", "representative_doc_id", "TEXT");
+  ensureColumn("signals_trends", "top_entities_json", "TEXT");
+  ensureColumn("signals_trends", "top_tickers_json", "TEXT");
+  ensureColumn("signals_trends", "signal_tags_json", "TEXT");
+  ensureColumn("signals_trends", "note", "TEXT");
+  ensureColumn("signals_trends", "doc_count", "INTEGER");
+  ensureColumn("signals_trends", "created_at", "TEXT");
   migrateTradingSourcesSchema();
   migrateTradingRssSourcesSchema();
 }
@@ -236,6 +435,7 @@ function migrateTradingSourcesSchema() {
   const hasComposite = hasUniqueIndex("trading_sources", ["collection_id", "url"]);
   const hasLegacy = hasUniqueIndex("trading_sources", ["url"]);
   if (hasComposite || !hasLegacy) return;
+  db.exec("PRAGMA foreign_keys = OFF");
   db.exec("BEGIN");
   try {
     db.exec("ALTER TABLE trading_sources RENAME TO trading_sources_old");
@@ -264,8 +464,10 @@ function migrateTradingSourcesSchema() {
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
     throw err;
   }
+  db.exec("PRAGMA foreign_keys = ON");
 }
 
 function migrateTradingRssSourcesSchema() {
@@ -274,6 +476,7 @@ function migrateTradingRssSourcesSchema() {
   const hasComposite = hasUniqueIndex("trading_rss_sources", ["collection_id", "url"]);
   const hasLegacy = hasUniqueIndex("trading_rss_sources", ["url"]);
   if (hasComposite || !hasLegacy) return;
+  db.exec("PRAGMA foreign_keys = OFF");
   db.exec("BEGIN");
   try {
     db.exec("ALTER TABLE trading_rss_sources RENAME TO trading_rss_sources_old");
@@ -304,8 +507,224 @@ function migrateTradingRssSourcesSchema() {
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
     throw err;
   }
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
+function migrateSignalsDocumentsSchema() {
+  const cols = db.prepare("PRAGMA table_info(signals_documents)").all();
+  if (!cols.length) return;
+  const hasDocId = cols.some(col => col.name === "doc_id");
+  const hasLegacyId = cols.some(col => col.name === "id");
+  if (hasDocId || !hasLegacyId) return;
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE signals_documents RENAME TO signals_documents_old");
+    db.exec(`
+      CREATE TABLE signals_documents (
+        doc_id TEXT PRIMARY KEY,
+        source_id TEXT,
+        source_title TEXT,
+        source_url TEXT,
+        canonical_url TEXT,
+        title TEXT,
+        summary TEXT,
+        raw_text TEXT,
+        cleaned_text TEXT,
+        content_hash TEXT,
+        simhash TEXT,
+        retrieved_at TEXT,
+        published_at TEXT,
+        language TEXT,
+        category TEXT,
+        tags_json TEXT,
+        signal_tags_json TEXT,
+        tickers_json TEXT,
+        entities_json TEXT,
+        freshness_score REAL,
+        reliability_score REAL,
+        stale INTEGER,
+        expired INTEGER,
+        stale_reason TEXT,
+        summary_json TEXT,
+        meeting_id TEXT,
+        cluster_id TEXT,
+        cluster_label TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+    `);
+    db.exec(`
+      INSERT INTO signals_documents (
+        doc_id, source_id, source_title, source_url, canonical_url, title, summary, raw_text, cleaned_text,
+        content_hash, simhash, retrieved_at, published_at, language, category, tags_json, signal_tags_json,
+        tickers_json, entities_json, freshness_score, reliability_score, stale, expired, stale_reason,
+        summary_json, meeting_id, cluster_id, cluster_label, created_at, updated_at
+      )
+      SELECT
+        id,
+        source_id,
+        COALESCE(source_type, source_id),
+        source_url,
+        source_url,
+        title,
+        summary_text,
+        raw_text,
+        clean_text,
+        content_hash,
+        simhash,
+        retrieved_at,
+        published_at,
+        language,
+        category,
+        tags_json,
+        signal_tags_json,
+        tickers_json,
+        entities_json,
+        freshness_score,
+        reliability_score,
+        COALESCE(is_stale, 0),
+        COALESCE(is_expired, 0),
+        '',
+        '',
+        meeting_id,
+        cluster_id,
+        cluster_label,
+        created_at,
+        updated_at
+      FROM signals_documents_old;
+    `);
+    db.exec("DROP TABLE signals_documents_old");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_docs_published ON signals_documents(published_at)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_docs_source ON signals_documents(source_id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_docs_freshness ON signals_documents(freshness_score)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_docs_stale ON signals_documents(stale)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_docs_expired ON signals_documents(expired)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_docs_hash ON signals_documents(content_hash)");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
+    throw err;
+  }
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
+function migrateSignalsRunsSchema() {
+  const cols = db.prepare("PRAGMA table_info(signals_runs)").all();
+  if (!cols.length) return;
+  const hasRunId = cols.some(col => col.name === "run_id");
+  const hasLegacyId = cols.some(col => col.name === "id");
+  if (hasRunId || !hasLegacyId) return;
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE signals_runs RENAME TO signals_runs_old");
+    db.exec(`
+      CREATE TABLE signals_runs (
+        run_id TEXT PRIMARY KEY,
+        status TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        source_count INTEGER,
+        ingested_count INTEGER,
+        skipped_count INTEGER,
+        expired_count INTEGER,
+        error_count INTEGER,
+        errors_json TEXT,
+        sources_json TEXT,
+        report_path TEXT,
+        created_at TEXT
+      );
+    `);
+    db.exec(`
+      INSERT INTO signals_runs (
+        run_id, status, started_at, finished_at, source_count, ingested_count, skipped_count, expired_count,
+        error_count, errors_json, sources_json, report_path, created_at
+      )
+      SELECT
+        id,
+        status,
+        started_at,
+        finished_at,
+        source_count,
+        ingested_count,
+        skipped_count,
+        expired_count,
+        error_count,
+        errors_json,
+        sources_json,
+        report_path,
+        created_at
+      FROM signals_runs_old;
+    `);
+    db.exec("DROP TABLE signals_runs_old");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_runs_started ON signals_runs(started_at)");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
+    throw err;
+  }
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
+function migrateSignalsTrendsSchema() {
+  const cols = db.prepare("PRAGMA table_info(signals_trends)").all();
+  if (!cols.length) return;
+  const hasTrendId = cols.some(col => col.name === "trend_id");
+  const hasLegacyId = cols.some(col => col.name === "id");
+  if (hasTrendId || !hasLegacyId) return;
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE signals_trends RENAME TO signals_trends_old");
+    db.exec(`
+      CREATE TABLE signals_trends (
+        trend_id TEXT PRIMARY KEY,
+        run_id TEXT,
+        cluster_id TEXT,
+        label TEXT,
+        representative_doc_id TEXT,
+        top_entities_json TEXT,
+        top_tickers_json TEXT,
+        signal_tags_json TEXT,
+        note TEXT,
+        doc_count INTEGER,
+        created_at TEXT
+      );
+    `);
+    db.exec(`
+      INSERT INTO signals_trends (
+        trend_id, run_id, cluster_id, label, representative_doc_id, top_entities_json, top_tickers_json,
+        signal_tags_json, note, doc_count, created_at
+      )
+      SELECT
+        id,
+        run_id,
+        cluster_id,
+        label,
+        representative_doc_id,
+        top_entities_json,
+        top_tickers_json,
+        signal_tags_json,
+        note,
+        doc_count,
+        created_at
+      FROM signals_trends_old;
+    `);
+    db.exec("DROP TABLE signals_trends_old");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_signals_trends_run ON signals_trends(run_id)");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
+    throw err;
+  }
+  db.exec("PRAGMA foreign_keys = ON");
 }
 
 function getMeta(key) {
@@ -713,6 +1132,677 @@ export function listTradingRssItems({ sourceId, limit = 50 } = {}) {
   return rows;
 }
 
+function normalizeTradingYoutubeSourceRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    collection_id: row.collection_id || "trading",
+    channel_id: row.channel_id || "",
+    handle: row.handle || "",
+    title: row.title || "",
+    description: row.description || "",
+    url: row.url || "",
+    tags: row.tags_json ? JSON.parse(row.tags_json) : [],
+    enabled: Boolean(row.enabled),
+    subscriber_count: Number(row.subscriber_count || 0),
+    video_count: Number(row.video_count || 0),
+    view_count: Number(row.view_count || 0),
+    max_videos: row.max_videos == null ? null : Number(row.max_videos || 0),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    last_crawled_at: row.last_crawled_at,
+    last_status: row.last_status,
+    last_error: row.last_error,
+    last_published_at: row.last_published_at
+  };
+}
+
+export function listTradingYoutubeSources({ limit = 100, offset = 0, search = "", includeDisabled = true, collectionId = "trading" } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  if (collectionId) {
+    if (collectionId === "trading") {
+      where.push("(collection_id = ? OR collection_id IS NULL)");
+      params.push(collectionId);
+    } else {
+      where.push("collection_id = ?");
+      params.push(collectionId);
+    }
+  }
+  if (!includeDisabled) {
+    where.push("enabled = 1");
+  }
+  if (search) {
+    where.push("(title LIKE ? OR handle LIKE ? OR channel_id LIKE ? OR url LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = db.prepare(`
+    SELECT * FROM trading_youtube_sources
+    ${whereSql}
+    ORDER BY created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, Number(limit || 100), Number(offset || 0));
+  return rows.map(normalizeTradingYoutubeSourceRow).filter(Boolean);
+}
+
+export function getTradingYoutubeSource(id) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM trading_youtube_sources WHERE id = ?").get(id);
+  return normalizeTradingYoutubeSourceRow(row);
+}
+
+export function getTradingYoutubeSourceByChannelId(channelId, { collectionId = "trading" } = {}) {
+  initRagStore();
+  let row = null;
+  if (collectionId === "trading") {
+    row = db.prepare("SELECT * FROM trading_youtube_sources WHERE channel_id = ? AND (collection_id = ? OR collection_id IS NULL)").get(channelId, collectionId);
+  } else {
+    row = db.prepare("SELECT * FROM trading_youtube_sources WHERE channel_id = ? AND collection_id = ?").get(channelId, collectionId);
+  }
+  return normalizeTradingYoutubeSourceRow(row);
+}
+
+export function getTradingYoutubeSourceByHandle(handle, { collectionId = "trading" } = {}) {
+  initRagStore();
+  let row = null;
+  if (collectionId === "trading") {
+    row = db.prepare("SELECT * FROM trading_youtube_sources WHERE handle = ? AND (collection_id = ? OR collection_id IS NULL)").get(handle, collectionId);
+  } else {
+    row = db.prepare("SELECT * FROM trading_youtube_sources WHERE handle = ? AND collection_id = ?").get(handle, collectionId);
+  }
+  return normalizeTradingYoutubeSourceRow(row);
+}
+
+export function upsertTradingYoutubeSource({
+  channelId,
+  handle = "",
+  title = "",
+  description = "",
+  url = "",
+  tags = [],
+  enabled = true,
+  subscriberCount = 0,
+  videoCount = 0,
+  viewCount = 0,
+  maxVideos = null,
+  collectionId = "trading"
+} = {}) {
+  initRagStore();
+  const now = nowIso();
+  const resolvedHandle = handle || "";
+  let existing = null;
+  if (channelId) {
+    existing = getTradingYoutubeSourceByChannelId(channelId, { collectionId });
+  }
+  if (!existing && resolvedHandle) {
+    existing = getTradingYoutubeSourceByHandle(resolvedHandle, { collectionId });
+  }
+  if (existing) {
+    db.prepare(`
+      UPDATE trading_youtube_sources
+      SET channel_id = ?, handle = ?, title = ?, description = ?, url = ?, tags_json = ?, enabled = ?,
+          subscriber_count = ?, video_count = ?, view_count = ?, max_videos = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      channelId || existing.channel_id || null,
+      resolvedHandle,
+      title || existing.title || "",
+      description || existing.description || "",
+      url || existing.url || "",
+      JSON.stringify(tags || existing.tags || []),
+      enabled ? 1 : 0,
+      Number(subscriberCount || 0),
+      Number(videoCount || 0),
+      Number(viewCount || 0),
+      maxVideos == null ? existing.max_videos : Number(maxVideos || 0),
+      now,
+      existing.id
+    );
+    return getTradingYoutubeSource(existing.id);
+  }
+
+  db.prepare(`
+    INSERT INTO trading_youtube_sources (
+      collection_id,
+      channel_id,
+      handle,
+      title,
+      description,
+      url,
+      tags_json,
+      enabled,
+      subscriber_count,
+      video_count,
+      view_count,
+      max_videos,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    collectionId,
+    channelId || null,
+    resolvedHandle,
+    title || "",
+    description || "",
+    url || "",
+    JSON.stringify(tags || []),
+    enabled ? 1 : 0,
+    Number(subscriberCount || 0),
+    Number(videoCount || 0),
+    Number(viewCount || 0),
+    maxVideos == null ? null : Number(maxVideos || 0),
+    now,
+    now
+  );
+  if (channelId) return getTradingYoutubeSourceByChannelId(channelId, { collectionId });
+  if (resolvedHandle) return getTradingYoutubeSourceByHandle(resolvedHandle, { collectionId });
+  return null;
+}
+
+export function updateTradingYoutubeSource(id, { tags, enabled, maxVideos } = {}) {
+  initRagStore();
+  const existing = getTradingYoutubeSource(id);
+  if (!existing) return null;
+  const nextTags = tags ? JSON.stringify(tags) : JSON.stringify(existing.tags || []);
+  const nextEnabled = enabled == null ? (existing.enabled ? 1 : 0) : (enabled ? 1 : 0);
+  const nextMaxVideos = maxVideos == null ? existing.max_videos : Number(maxVideos || 0);
+  const now = nowIso();
+  db.prepare(`
+    UPDATE trading_youtube_sources
+    SET tags_json = ?, enabled = ?, max_videos = ?, updated_at = ?
+    WHERE id = ?
+  `).run(nextTags, nextEnabled, nextMaxVideos, now, id);
+  return getTradingYoutubeSource(id);
+}
+
+export function deleteTradingYoutubeSource(id) {
+  initRagStore();
+  db.prepare("DELETE FROM trading_youtube_sources WHERE id = ?").run(id);
+  db.prepare("DELETE FROM trading_youtube_items WHERE source_id = ?").run(id);
+}
+
+export function markTradingYoutubeCrawl({ id, status = "ok", error = "", crawledAt, lastPublishedAt } = {}) {
+  initRagStore();
+  const now = crawledAt || nowIso();
+  db.prepare(`
+    UPDATE trading_youtube_sources
+    SET last_crawled_at = ?, last_status = ?, last_error = ?, last_published_at = ?, updated_at = ?
+    WHERE id = ?
+  `).run(now, status, error || "", lastPublishedAt || "", now, id);
+}
+
+export function hasTradingYoutubeItem({ sourceId, videoId } = {}) {
+  initRagStore();
+  const row = db.prepare("SELECT id FROM trading_youtube_items WHERE source_id = ? AND video_id = ?").get(sourceId, videoId);
+  return Boolean(row?.id);
+}
+
+export function recordTradingYoutubeItem({
+  sourceId,
+  videoId,
+  url,
+  title,
+  publishedAt,
+  transcriptHash,
+  descriptionHash,
+  ingestedAt
+} = {}) {
+  if (!sourceId || !videoId) return;
+  initRagStore();
+  const now = ingestedAt || nowIso();
+  db.prepare(`
+    INSERT OR IGNORE INTO trading_youtube_items
+      (source_id, video_id, url, title, published_at, ingested_at, transcript_hash, description_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sourceId,
+    videoId,
+    url || "",
+    title || "",
+    publishedAt || "",
+    now,
+    transcriptHash || "",
+    descriptionHash || ""
+  );
+}
+
+export function listTradingYoutubeItems({ sourceId, limit = 50 } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  if (sourceId) {
+    where.push("source_id = ?");
+    params.push(sourceId);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  return db.prepare(`
+    SELECT * FROM trading_youtube_items
+    ${whereSql}
+    ORDER BY published_at DESC
+    LIMIT ?
+  `).all(...params, Number(limit || 50));
+}
+
+function normalizeSignalDocRow(row) {
+  if (!row) return null;
+  return {
+    doc_id: row.doc_id,
+    source_id: row.source_id || "",
+    source_title: row.source_title || "",
+    source_url: row.source_url || "",
+    canonical_url: row.canonical_url || "",
+    title: row.title || "",
+    summary: row.summary || "",
+    raw_text: row.raw_text || "",
+    cleaned_text: row.cleaned_text || "",
+    content_hash: row.content_hash || "",
+    simhash: row.simhash || "",
+    retrieved_at: row.retrieved_at || "",
+    published_at: row.published_at || "",
+    language: row.language || "",
+    category: row.category || "",
+    tags: row.tags_json ? JSON.parse(row.tags_json) : [],
+    signal_tags: row.signal_tags_json ? JSON.parse(row.signal_tags_json) : [],
+    tickers: row.tickers_json ? JSON.parse(row.tickers_json) : [],
+    entities: row.entities_json ? JSON.parse(row.entities_json) : {},
+    freshness_score: row.freshness_score ?? 0,
+    reliability_score: row.reliability_score ?? 0,
+    stale: Boolean(row.stale),
+    expired: Boolean(row.expired),
+    stale_reason: row.stale_reason || "",
+    summary_json: row.summary_json ? JSON.parse(row.summary_json) : null,
+    meeting_id: row.meeting_id || "",
+    cluster_id: row.cluster_id || "",
+    cluster_label: row.cluster_label || "",
+    created_at: row.created_at || "",
+    updated_at: row.updated_at || ""
+  };
+}
+
+function normalizeSignalRunRow(row) {
+  if (!row) return null;
+  return {
+    run_id: row.run_id,
+    status: row.status || "",
+    started_at: row.started_at || "",
+    finished_at: row.finished_at || "",
+    source_count: row.source_count || 0,
+    ingested_count: row.ingested_count || 0,
+    skipped_count: row.skipped_count || 0,
+    expired_count: row.expired_count || 0,
+    error_count: row.error_count || 0,
+    errors: row.errors_json ? JSON.parse(row.errors_json) : [],
+    sources: row.sources_json ? JSON.parse(row.sources_json) : [],
+    report_path: row.report_path || "",
+    created_at: row.created_at || ""
+  };
+}
+
+function normalizeSignalTrendRow(row) {
+  if (!row) return null;
+  return {
+    trend_id: row.trend_id,
+    run_id: row.run_id || "",
+    cluster_id: row.cluster_id || "",
+    label: row.label || "",
+    representative_doc_id: row.representative_doc_id || "",
+    top_entities: row.top_entities_json ? JSON.parse(row.top_entities_json) : [],
+    top_tickers: row.top_tickers_json ? JSON.parse(row.top_tickers_json) : [],
+    signal_tags: row.signal_tags_json ? JSON.parse(row.signal_tags_json) : [],
+    note: row.note || "",
+    doc_count: row.doc_count || 0,
+    created_at: row.created_at || ""
+  };
+}
+
+export function upsertSignalDocument(doc) {
+  if (!doc?.doc_id) return null;
+  initRagStore();
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO signals_documents (
+      doc_id, source_id, source_title, source_url, canonical_url, title, summary, raw_text, cleaned_text,
+      content_hash, simhash, retrieved_at, published_at, language, category, tags_json, signal_tags_json,
+      tickers_json, entities_json, freshness_score, reliability_score, stale, expired, stale_reason,
+      summary_json, meeting_id, cluster_id, cluster_label, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(doc_id) DO UPDATE SET
+      source_id = excluded.source_id,
+      source_title = excluded.source_title,
+      source_url = excluded.source_url,
+      canonical_url = excluded.canonical_url,
+      title = excluded.title,
+      summary = excluded.summary,
+      raw_text = excluded.raw_text,
+      cleaned_text = excluded.cleaned_text,
+      content_hash = excluded.content_hash,
+      simhash = excluded.simhash,
+      retrieved_at = excluded.retrieved_at,
+      published_at = excluded.published_at,
+      language = excluded.language,
+      category = excluded.category,
+      tags_json = excluded.tags_json,
+      signal_tags_json = excluded.signal_tags_json,
+      tickers_json = excluded.tickers_json,
+      entities_json = excluded.entities_json,
+      freshness_score = excluded.freshness_score,
+      reliability_score = excluded.reliability_score,
+      stale = excluded.stale,
+      expired = excluded.expired,
+      stale_reason = excluded.stale_reason,
+      summary_json = excluded.summary_json,
+      meeting_id = excluded.meeting_id,
+      cluster_id = excluded.cluster_id,
+      cluster_label = excluded.cluster_label,
+      updated_at = excluded.updated_at
+  `).run(
+    doc.doc_id,
+    doc.source_id || "",
+    doc.source_title || "",
+    doc.source_url || "",
+    doc.canonical_url || "",
+    doc.title || "",
+    doc.summary || "",
+    doc.raw_text || "",
+    doc.cleaned_text || "",
+    doc.content_hash || "",
+    doc.simhash || "",
+    doc.retrieved_at || "",
+    doc.published_at || "",
+    doc.language || "",
+    doc.category || "",
+    JSON.stringify(doc.tags || []),
+    JSON.stringify(doc.signal_tags || []),
+    JSON.stringify(doc.tickers || []),
+    JSON.stringify(doc.entities || {}),
+    Number(doc.freshness_score || 0),
+    Number(doc.reliability_score || 0),
+    doc.stale ? 1 : 0,
+    doc.expired ? 1 : 0,
+    doc.stale_reason || "",
+    doc.summary_json ? JSON.stringify(doc.summary_json) : "",
+    doc.meeting_id || "",
+    doc.cluster_id || "",
+    doc.cluster_label || "",
+    doc.created_at || now,
+    now
+  );
+  return getSignalDocument(doc.doc_id);
+}
+
+export function getSignalDocument(docId) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM signals_documents WHERE doc_id = ?").get(docId);
+  return normalizeSignalDocRow(row);
+}
+
+export function getSignalDocumentByUrl(url) {
+  if (!url) return null;
+  initRagStore();
+  const row = db.prepare("SELECT * FROM signals_documents WHERE canonical_url = ?").get(url);
+  return normalizeSignalDocRow(row);
+}
+
+export function getSignalDocumentByHash(hash) {
+  if (!hash) return null;
+  initRagStore();
+  const row = db.prepare("SELECT * FROM signals_documents WHERE content_hash = ?").get(hash);
+  return normalizeSignalDocRow(row);
+}
+
+export function listSignalDedupCandidates({ sinceHours = 96, limit = 500 } = {}) {
+  initRagStore();
+  const since = new Date(Date.now() - sinceHours * 3600000).toISOString();
+  return db.prepare(`
+    SELECT doc_id, canonical_url, content_hash, simhash
+    FROM signals_documents
+    WHERE (retrieved_at >= ? OR published_at >= ?)
+    ORDER BY retrieved_at DESC
+    LIMIT ?
+  `).all(since, since, Number(limit || 500));
+}
+
+export function updateSignalDocument(docId, patch = {}) {
+  if (!docId) return null;
+  initRagStore();
+  const fields = [];
+  const params = [];
+  const setField = (col, value) => {
+    fields.push(`${col} = ?`);
+    params.push(value);
+  };
+  if (patch.source_id !== undefined) setField("source_id", patch.source_id || "");
+  if (patch.source_title !== undefined) setField("source_title", patch.source_title || "");
+  if (patch.source_url !== undefined) setField("source_url", patch.source_url || "");
+  if (patch.canonical_url !== undefined) setField("canonical_url", patch.canonical_url || "");
+  if (patch.title !== undefined) setField("title", patch.title || "");
+  if (patch.summary !== undefined) setField("summary", patch.summary || "");
+  if (patch.raw_text !== undefined) setField("raw_text", patch.raw_text || "");
+  if (patch.cleaned_text !== undefined) setField("cleaned_text", patch.cleaned_text || "");
+  if (patch.content_hash !== undefined) setField("content_hash", patch.content_hash || "");
+  if (patch.simhash !== undefined) setField("simhash", patch.simhash || "");
+  if (patch.retrieved_at !== undefined) setField("retrieved_at", patch.retrieved_at || "");
+  if (patch.published_at !== undefined) setField("published_at", patch.published_at || "");
+  if (patch.language !== undefined) setField("language", patch.language || "");
+  if (patch.category !== undefined) setField("category", patch.category || "");
+  if (patch.tags !== undefined) setField("tags_json", JSON.stringify(patch.tags || []));
+  if (patch.signal_tags !== undefined) setField("signal_tags_json", JSON.stringify(patch.signal_tags || []));
+  if (patch.tickers !== undefined) setField("tickers_json", JSON.stringify(patch.tickers || []));
+  if (patch.entities !== undefined) setField("entities_json", JSON.stringify(patch.entities || {}));
+  if (patch.freshness_score !== undefined) setField("freshness_score", Number(patch.freshness_score || 0));
+  if (patch.reliability_score !== undefined) setField("reliability_score", Number(patch.reliability_score || 0));
+  if (patch.stale !== undefined) setField("stale", patch.stale ? 1 : 0);
+  if (patch.expired !== undefined) setField("expired", patch.expired ? 1 : 0);
+  if (patch.stale_reason !== undefined) setField("stale_reason", patch.stale_reason || "");
+  if (patch.summary_json !== undefined) setField("summary_json", patch.summary_json ? JSON.stringify(patch.summary_json) : "");
+  if (patch.meeting_id !== undefined) setField("meeting_id", patch.meeting_id || "");
+  if (patch.cluster_id !== undefined) setField("cluster_id", patch.cluster_id || "");
+  if (patch.cluster_label !== undefined) setField("cluster_label", patch.cluster_label || "");
+  if (!fields.length) return getSignalDocument(docId);
+  setField("updated_at", nowIso());
+  params.push(docId);
+  db.prepare(`UPDATE signals_documents SET ${fields.join(", ")} WHERE doc_id = ?`).run(...params);
+  return getSignalDocument(docId);
+}
+
+export function listSignalDocuments({
+  limit = 50,
+  offset = 0,
+  includeStale = false,
+  includeExpired = false,
+  category = "",
+  sourceId = "",
+  search = "",
+  includeSummaries = false,
+  dateFrom,
+  dateTo
+} = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  if (!includeExpired) {
+    where.push("(expired = 0 OR expired IS NULL)");
+  }
+  if (!includeStale) {
+    where.push("(stale = 0 OR stale IS NULL)");
+  }
+  if (category) {
+    where.push("category = ?");
+    params.push(category);
+  }
+  if (sourceId) {
+    where.push("source_id = ?");
+    params.push(sourceId);
+  }
+  if (search) {
+    where.push("(title LIKE ? OR summary LIKE ? OR cleaned_text LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  if (dateFrom) {
+    where.push("published_at >= ?");
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    where.push("published_at <= ?");
+    params.push(dateTo);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const rows = db.prepare(`
+    SELECT * FROM signals_documents
+    ${whereSql}
+    ORDER BY published_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, Number(limit || 50), Number(offset || 0));
+  return rows.map(normalizeSignalDocRow).filter(Boolean);
+}
+
+export function recordSignalsRun({ run_id, status, started_at, source_count, report_path } = {}) {
+  if (!run_id) return null;
+  initRagStore();
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO signals_runs (run_id, status, started_at, source_count, report_path, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(run_id) DO UPDATE SET
+      status = excluded.status,
+      started_at = excluded.started_at,
+      source_count = excluded.source_count,
+      report_path = excluded.report_path
+  `).run(
+    run_id,
+    status || "",
+    started_at || now,
+    Number(source_count || 0),
+    report_path || "",
+    now
+  );
+  return getSignalsRun(run_id);
+}
+
+export function updateSignalsRun(runId, patch = {}) {
+  if (!runId) return null;
+  initRagStore();
+  const fields = [];
+  const params = [];
+  const setField = (col, value) => {
+    fields.push(`${col} = ?`);
+    params.push(value);
+  };
+  if (patch.status !== undefined) setField("status", patch.status || "");
+  if (patch.started_at !== undefined) setField("started_at", patch.started_at || "");
+  if (patch.finished_at !== undefined) setField("finished_at", patch.finished_at || "");
+  if (patch.source_count !== undefined) setField("source_count", Number(patch.source_count || 0));
+  if (patch.ingested_count !== undefined) setField("ingested_count", Number(patch.ingested_count || 0));
+  if (patch.skipped_count !== undefined) setField("skipped_count", Number(patch.skipped_count || 0));
+  if (patch.expired_count !== undefined) setField("expired_count", Number(patch.expired_count || 0));
+  if (patch.error_count !== undefined) setField("error_count", Number(patch.error_count || 0));
+  if (patch.errors_json !== undefined) setField("errors_json", patch.errors_json || "");
+  if (patch.sources_json !== undefined) setField("sources_json", patch.sources_json || "");
+  if (patch.report_path !== undefined) setField("report_path", patch.report_path || "");
+  if (!fields.length) return getSignalsRun(runId);
+  params.push(runId);
+  db.prepare(`UPDATE signals_runs SET ${fields.join(", ")} WHERE run_id = ?`).run(...params);
+  return getSignalsRun(runId);
+}
+
+export function getSignalsRun(runId) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM signals_runs WHERE run_id = ?").get(runId);
+  return normalizeSignalRunRow(row);
+}
+
+export function getLatestSignalsRun() {
+  initRagStore();
+  const row = db.prepare(`
+    SELECT * FROM signals_runs
+    ORDER BY started_at DESC
+    LIMIT 1
+  `).get();
+  return normalizeSignalRunRow(row);
+}
+
+export function listSignalsRuns({ limit = 20 } = {}) {
+  initRagStore();
+  const rows = db.prepare(`
+    SELECT * FROM signals_runs
+    ORDER BY started_at DESC
+    LIMIT ?
+  `).all(Number(limit || 20));
+  return rows.map(normalizeSignalRunRow).filter(Boolean);
+}
+
+export function replaceSignalsTrends(runId, trends = []) {
+  if (!runId) return 0;
+  initRagStore();
+  db.prepare("DELETE FROM signals_trends WHERE run_id = ?").run(runId);
+  if (!trends.length) return 0;
+  const stmt = db.prepare(`
+    INSERT INTO signals_trends (
+      trend_id, run_id, cluster_id, label, representative_doc_id,
+      top_entities_json, top_tickers_json, signal_tags_json, note, doc_count, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const now = nowIso();
+  const tx = db.transaction(items => {
+    items.forEach(item => stmt.run(
+      item.trend_id,
+      item.run_id,
+      item.cluster_id,
+      item.label || "",
+      item.representative_doc_id || "",
+      JSON.stringify(item.top_entities || []),
+      JSON.stringify(item.top_tickers || []),
+      JSON.stringify(item.signal_tags || []),
+      item.note || "",
+      Number(item.doc_count || 0),
+      now
+    ));
+  });
+  const payload = trends.map(trend => ({
+    trend_id: `${runId}:${trend.cluster_id || trend.label || "cluster"}`,
+    run_id: runId,
+    cluster_id: trend.cluster_id || "",
+    label: trend.label || "",
+    representative_doc_id: trend.representative_doc_id || "",
+    top_entities: trend.top_entities || [],
+    top_tickers: trend.top_tickers || [],
+    signal_tags: trend.signal_tags || [],
+    note: trend.note || "",
+    doc_count: trend.doc_count || 0
+  }));
+  tx(payload);
+  return payload.length;
+}
+
+export function listSignalTrends({ runId, limit = 20 } = {}) {
+  initRagStore();
+  const resolvedRunId = runId || getLatestSignalsRun()?.run_id;
+  if (!resolvedRunId) return [];
+  const rows = db.prepare(`
+    SELECT * FROM signals_trends
+    WHERE run_id = ?
+    ORDER BY doc_count DESC
+    LIMIT ?
+  `).all(resolvedRunId, Number(limit || 20));
+  return rows.map(normalizeSignalTrendRow).filter(Boolean);
+}
+
+export function getSignalsOverview() {
+  initRagStore();
+  const total = db.prepare("SELECT COUNT(*) AS count FROM signals_documents").get()?.count || 0;
+  const stale = db.prepare("SELECT COUNT(*) AS count FROM signals_documents WHERE stale = 1 AND (expired = 0 OR expired IS NULL)").get()?.count || 0;
+  const expired = db.prepare("SELECT COUNT(*) AS count FROM signals_documents WHERE expired = 1").get()?.count || 0;
+  const latestRun = getLatestSignalsRun();
+  return {
+    total,
+    stale,
+    expired,
+    latestRun
+  };
+}
+
 export function listRagCollections({ limit = 100, offset = 0 } = {}) {
   initRagStore();
   const rows = db.prepare(`
@@ -1051,11 +2141,14 @@ export function getChunksByIds(chunkIds = [], filters = {}) {
       where.push("m.id LIKE 'recording:%'");
     } else if (type === "trading") {
       where.push("m.id LIKE 'trading:%'");
+    } else if (type === "signals") {
+      where.push("m.id LIKE 'signals:%'");
     } else if (type === "fireflies") {
       where.push("m.id NOT LIKE 'memory:%'");
       where.push("m.id NOT LIKE 'feedback:%'");
       where.push("m.id NOT LIKE 'recording:%'");
       where.push("m.id NOT LIKE 'trading:%'");
+      where.push("m.id NOT LIKE 'signals:%'");
       where.push("m.id NOT LIKE 'rag:%'");
     } else if (type === "custom") {
       where.push("m.id LIKE 'rag:%'");
@@ -1106,11 +2199,14 @@ export function listMeetingSummaries({ dateFrom, dateTo, limit = 20, meetingType
       where.push("m.id LIKE 'recording:%'");
     } else if (type === "trading") {
       where.push("m.id LIKE 'trading:%'");
+    } else if (type === "signals") {
+      where.push("m.id LIKE 'signals:%'");
     } else if (type === "fireflies") {
       where.push("m.id NOT LIKE 'memory:%'");
       where.push("m.id NOT LIKE 'feedback:%'");
       where.push("m.id NOT LIKE 'recording:%'");
       where.push("m.id NOT LIKE 'trading:%'");
+      where.push("m.id NOT LIKE 'signals:%'");
       where.push("m.id NOT LIKE 'rag:%'");
     } else if (type === "custom") {
       where.push("m.id LIKE 'rag:%'");
@@ -1143,11 +2239,14 @@ export function listMeetings({ type = "all", limit = 20, offset = 0, search = ""
     where.push("m.id LIKE 'recording:%'");
   } else if (normalizedType === "trading") {
     where.push("m.id LIKE 'trading:%'");
+  } else if (normalizedType === "signals") {
+    where.push("m.id LIKE 'signals:%'");
   } else if (normalizedType === "fireflies") {
     where.push("m.id NOT LIKE 'memory:%'");
     where.push("m.id NOT LIKE 'feedback:%'");
     where.push("m.id NOT LIKE 'recording:%'");
     where.push("m.id NOT LIKE 'trading:%'");
+    where.push("m.id NOT LIKE 'signals:%'");
   }
 
   if (search) {
@@ -1190,11 +2289,14 @@ export function listMeetingsRaw({ type = "all", limit = 200, offset = 0, search 
     where.push("m.id LIKE 'recording:%'");
   } else if (normalizedType === "trading") {
     where.push("m.id LIKE 'trading:%'");
+  } else if (normalizedType === "signals") {
+    where.push("m.id LIKE 'signals:%'");
   } else if (normalizedType === "fireflies") {
     where.push("m.id NOT LIKE 'memory:%'");
     where.push("m.id NOT LIKE 'feedback:%'");
     where.push("m.id NOT LIKE 'recording:%'");
     where.push("m.id NOT LIKE 'trading:%'");
+    where.push("m.id NOT LIKE 'signals:%'");
   }
 
   if (search) {
@@ -1365,7 +2467,8 @@ export function getRagCounts() {
   const feedbackMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'feedback:%'").get()?.count || 0;
   const recordingMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'recording:%'").get()?.count || 0;
   const tradingMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'trading:%'").get()?.count || 0;
-  const firefliesMeetings = totalMeetings - memoryMeetings - feedbackMeetings - recordingMeetings - tradingMeetings;
+  const signalsMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'signals:%'").get()?.count || 0;
+  const firefliesMeetings = totalMeetings - memoryMeetings - feedbackMeetings - recordingMeetings - tradingMeetings - signalsMeetings;
   return {
     totalMeetings,
     totalChunks,
@@ -1373,6 +2476,7 @@ export function getRagCounts() {
     recordingMeetings,
     memoryMeetings,
     feedbackMeetings,
-    tradingMeetings
+    tradingMeetings,
+    signalsMeetings
   };
 }

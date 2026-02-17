@@ -1,0 +1,505 @@
+{
+  "defaults": {
+    "language": "en",
+    "maxItemsPerFeed": 40,
+    "maxDocChars": 50000,
+    "fetchTimeoutMs": 15000,
+    "requestDelayMs": 350,
+    "retry": {
+      "retries": 2,
+      "minDelayMs": 600,
+      "maxDelayMs": 4000
+    },
+    "maxDocsPerSourcePerDay": 30,
+    "maxDocsPerClusterPerDay": 12,
+    "clusterCount": 8,
+    "minClusterDocs": 3,
+    "freshness": {
+      "expireThreshold": 0.08,
+      "staleThreshold": 0.22
+    },
+    "halfLifeHours": {
+      "breaking_market": 36,
+      "macro_regulatory": 168,
+      "environmental_outlook": 720,
+      "energy_inventory": 240,
+      "environmental_hazard": 72,
+      "shipping_disruption": 96
+    }
+  },
+  "reliability": {
+    "sec": 0.95,
+    "fed": 0.94,
+    "eia": 0.9,
+    "usgs": 0.88,
+    "noaa": 0.9,
+    "bis": 0.86,
+    "boe": 0.92,
+    "boj": 0.9,
+    "bls": 0.9,
+    "cftc": 0.85,
+    "dol": 0.88,
+    "wsj": 0.82,
+    "nytimes": 0.82,
+    "bbc": 0.85,
+    "guardian": 0.8,
+    "reuters": 0.8,
+    "bloomberg": 0.8,
+    "spc": 0.9,
+    "cnbc": 0.7,
+    "marketwatch": 0.68,
+    "nasdaq": 0.75,
+    "hapag": 0.78,
+    "dsv": 0.78,
+    "joc": 0.8,
+    "nasa": 0.84
+  },
+  "sources": [
+    {
+      "id": "cnbc_top",
+      "type": "rss",
+      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+      "category": "breaking_market",
+      "tags": ["news", "markets", "macro"],
+      "reliability": 0.7,
+      "allow_html": true
+    },
+    {
+      "id": "marketwatch_top",
+      "type": "rss",
+      "url": "https://feeds.marketwatch.com/marketwatch/topstories/",
+      "category": "breaking_market",
+      "tags": ["news", "markets"],
+      "reliability": 0.68,
+      "allow_html": true
+    },
+    {
+      "id": "nasdaq_markets",
+      "type": "rss",
+      "url": "https://www.nasdaq.com/feed/rssoutbound?category=markets",
+      "category": "breaking_market",
+      "tags": ["news", "markets"],
+      "reliability": 0.75,
+      "allow_html": true
+    },
+    {
+      "id": "wsj_business",
+      "type": "rss",
+      "url": "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",
+      "category": "breaking_market",
+      "tags": ["news", "markets", "business"],
+      "reliability": 0.82,
+      "allow_html": false
+    },
+    {
+      "id": "wsj_markets",
+      "type": "rss",
+      "url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+      "category": "breaking_market",
+      "tags": ["news", "markets"],
+      "reliability": 0.82,
+      "allow_html": false
+    },
+    {
+      "id": "nytimes_business",
+      "type": "rss",
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+      "category": "breaking_market",
+      "tags": ["news", "markets", "business"],
+      "reliability": 0.82,
+      "allow_html": false
+    },
+    {
+      "id": "bbc_business",
+      "type": "rss",
+      "url": "http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/business/rss.xml",
+      "category": "breaking_market",
+      "tags": ["news", "business", "macro"],
+      "reliability": 0.85,
+      "allow_html": false
+    },
+    {
+      "id": "guardian_business",
+      "type": "rss",
+      "url": "https://www.theguardian.com/business/rss",
+      "category": "breaking_market",
+      "tags": ["news", "business", "macro"],
+      "reliability": 0.8,
+      "allow_html": false
+    },
+    {
+      "id": "reuters_business",
+      "type": "rss",
+      "url": "https://feeds.reuters.com/reuters/businessNews",
+      "category": "breaking_market",
+      "tags": ["news", "markets", "macro"],
+      "reliability": 0.8,
+      "allow_html": false
+    },
+    {
+      "id": "bloomberg_markets",
+      "type": "rss",
+      "url": "https://feeds.bloomberg.com/markets/news.rss",
+      "category": "breaking_market",
+      "tags": ["news", "markets"],
+      "reliability": 0.8,
+      "allow_html": false
+    },
+    {
+      "id": "sec_press",
+      "type": "rss",
+      "url": "https://www.sec.gov/news/pressreleases.rss",
+      "category": "macro_regulatory",
+      "tags": ["sec", "regulatory"],
+      "reliability": 0.95,
+      "allow_html": true
+    },
+    {
+      "id": "fed_press",
+      "type": "rss",
+      "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "category": "macro_regulatory",
+      "tags": ["fed", "macro"],
+      "reliability": 0.94,
+      "allow_html": true
+    },
+    {
+      "id": "bis_press",
+      "type": "rss",
+      "url": "https://www.bis.org/doclist/all_pressrels.rss",
+      "category": "macro_regulatory",
+      "tags": ["central_bank", "macro"],
+      "reliability": 0.86,
+      "allow_html": true
+    },
+    {
+      "id": "boe_news",
+      "type": "rss",
+      "url": "https://www.bankofengland.co.uk/rss/news",
+      "category": "macro_regulatory",
+      "tags": ["central_bank", "macro"],
+      "reliability": 0.92,
+      "allow_html": true
+    },
+    {
+      "id": "boj_whatsnew",
+      "type": "rss",
+      "url": "https://www.boj.or.jp/rss/whatsnew.xml",
+      "category": "macro_regulatory",
+      "tags": ["central_bank", "macro"],
+      "reliability": 0.9,
+      "allow_html": true
+    },
+    {
+      "id": "bls_employment_situation",
+      "type": "rss",
+      "url": "https://www.bls.gov/feed/empsit.rss",
+      "category": "macro_regulatory",
+      "tags": ["labor", "macro", "employment"],
+      "reliability": 0.9,
+      "allow_html": true
+    },
+    {
+      "id": "bls_cpi",
+      "type": "rss",
+      "url": "https://www.bls.gov/feed/cpi.rss",
+      "category": "macro_regulatory",
+      "tags": ["inflation", "macro", "prices"],
+      "reliability": 0.9,
+      "allow_html": true
+    },
+    {
+      "id": "bls_ppi",
+      "type": "rss",
+      "url": "https://www.bls.gov/feed/ppi.rss",
+      "category": "macro_regulatory",
+      "tags": ["inflation", "macro", "prices"],
+      "reliability": 0.9,
+      "allow_html": true
+    },
+    {
+      "id": "cftc_press",
+      "type": "rss",
+      "url": "https://www.cftc.gov/RSS/RSSGP/rssgp.xml",
+      "category": "macro_regulatory",
+      "tags": ["regulatory", "derivatives", "markets"],
+      "reliability": 0.85,
+      "allow_html": true
+    },
+    {
+      "id": "dol_releases",
+      "type": "rss",
+      "url": "https://www.dol.gov/rss/releases.xml",
+      "category": "macro_regulatory",
+      "tags": ["labor", "macro", "regulatory"],
+      "reliability": 0.88,
+      "allow_html": true
+    },
+    {
+      "id": "eia_today_energy",
+      "type": "rss",
+      "url": "https://www.eia.gov/rss/todayinenergy.xml",
+      "category": "energy_inventory",
+      "tags": ["energy", "commodities", "inventory"],
+      "reliability": 0.9,
+      "allow_html": true
+    },
+    {
+      "id": "eia_press",
+      "type": "rss",
+      "url": "https://www.eia.gov/rss/press_rss.xml",
+      "category": "energy_inventory",
+      "tags": ["energy", "inventory", "supply"],
+      "reliability": 0.9,
+      "allow_html": true
+    },
+    {
+      "id": "eia_whats_new",
+      "type": "rss",
+      "url": "https://www.eia.gov/about/new/WNtest3.php",
+      "category": "energy_inventory",
+      "tags": ["energy", "reports"],
+      "reliability": 0.85,
+      "allow_html": true
+    },
+    {
+      "id": "eia_gas_diesel",
+      "type": "rss",
+      "url": "https://www.eia.gov/petroleum/gasdiesel/includes/gas_diesel_rss.xml",
+      "category": "energy_inventory",
+      "tags": ["energy", "prices", "inventory"],
+      "reliability": 0.88,
+      "allow_html": true
+    },
+    {
+      "id": "eia_heating_oil_propane",
+      "type": "rss",
+      "url": "https://www.eia.gov/petroleum/heatingoilpropane/includes/hopu_rss.xml",
+      "category": "energy_inventory",
+      "tags": ["energy", "prices", "inventory"],
+      "reliability": 0.88,
+      "allow_html": true
+    },
+    {
+      "id": "eia_testimony",
+      "type": "rss",
+      "url": "https://www.eia.gov/rss/testimony.xml",
+      "category": "energy_inventory",
+      "tags": ["energy", "policy"],
+      "reliability": 0.86,
+      "allow_html": true
+    },
+    {
+      "id": "eia_presentations",
+      "type": "rss",
+      "url": "https://www.eia.gov/rss/presentations.xml",
+      "category": "energy_inventory",
+      "tags": ["energy", "outlook"],
+      "reliability": 0.86,
+      "allow_html": true
+    },
+    {
+      "id": "eia_wpsr",
+      "type": "html",
+      "url": "https://www.eia.gov/petroleum/supply/weekly/index.php",
+      "category": "energy_inventory",
+      "tags": ["energy", "petroleum", "inventory"],
+      "reliability": 0.9
+    },
+    {
+      "id": "eia_wngsr",
+      "type": "html",
+      "url": "https://ir.eia.gov/ngs/ngs.html",
+      "category": "energy_inventory",
+      "tags": ["energy", "natural_gas", "storage"],
+      "reliability": 0.9
+    },
+    {
+      "id": "eia_steo",
+      "type": "html",
+      "url": "https://www.eia.gov/outlooks/steo/",
+      "category": "energy_inventory",
+      "tags": ["energy", "outlook", "macro"],
+      "reliability": 0.88
+    },
+    {
+      "id": "nws_alerts",
+      "type": "nws_alerts",
+      "url": "https://api.weather.gov/alerts/active",
+      "category": "environmental_hazard",
+      "tags": ["weather", "alerts"],
+      "reliability": 0.9
+    },
+    {
+      "id": "nhc_gtwo",
+      "type": "rss",
+      "url": "https://www.nhc.noaa.gov/gtwo.xml",
+      "category": "environmental_outlook",
+      "tags": ["hurricane", "outlook"],
+      "reliability": 0.9,
+      "allow_html": false
+    },
+    {
+      "id": "nhc_atlantic",
+      "type": "rss",
+      "url": "https://www.nhc.noaa.gov/index-at.xml",
+      "category": "environmental_outlook",
+      "tags": ["hurricane", "tropical_cyclone"],
+      "reliability": 0.9,
+      "allow_html": false
+    },
+    {
+      "id": "nhc_east_pacific",
+      "type": "rss",
+      "url": "https://www.nhc.noaa.gov/index-ep.xml",
+      "category": "environmental_outlook",
+      "tags": ["hurricane", "tropical_cyclone"],
+      "reliability": 0.9,
+      "allow_html": false
+    },
+    {
+      "id": "usgs_quakes",
+      "type": "rss",
+      "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_day.atom",
+      "category": "environmental_hazard",
+      "tags": ["earthquake"],
+      "reliability": 0.88,
+      "allow_html": false
+    },
+    {
+      "id": "spc_watches",
+      "type": "rss",
+      "url": "http://www.spc.noaa.gov/products/spcwwrss.xml",
+      "category": "environmental_hazard",
+      "tags": ["weather", "watch", "warning"],
+      "reliability": 0.9,
+      "allow_html": false
+    },
+    {
+      "id": "spc_mesoscale",
+      "type": "rss",
+      "url": "http://www.spc.noaa.gov/products/spcmdrss.xml",
+      "category": "environmental_hazard",
+      "tags": ["weather", "mesoscale", "severe"],
+      "reliability": 0.9,
+      "allow_html": false
+    },
+    {
+      "id": "spc_convective_outlooks",
+      "type": "rss",
+      "url": "http://www.spc.noaa.gov/products/spcacrss.xml",
+      "category": "environmental_hazard",
+      "tags": ["weather", "outlook", "severe"],
+      "reliability": 0.9,
+      "allow_html": false
+    },
+    {
+      "id": "spc_fire_weather",
+      "type": "rss",
+      "url": "http://www.spc.noaa.gov/products/spcfwrss.xml",
+      "category": "environmental_hazard",
+      "tags": ["weather", "fire", "outlook"],
+      "reliability": 0.9,
+      "allow_html": false
+    },
+    {
+      "id": "nasa_firms",
+      "type": "nasa_firms",
+      "category": "environmental_hazard",
+      "tags": ["wildfire"],
+      "reliability": 0.84,
+      "enabled": false
+    },
+    {
+      "id": "hapag_liner_services",
+      "type": "rss",
+      "url": "https://www.hapag-lloyd.com/feeds/en/news/liner_services.rss",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "liner_services"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "hapag_ports_inland",
+      "type": "rss",
+      "url": "https://www.hapag-lloyd.com/feeds/en/news/ports_inland.rss",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "ports"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "hapag_rates",
+      "type": "rss",
+      "url": "https://www.hapag-lloyd.com/feeds/en/press/rates.rss",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "rates"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "hapag_surcharges",
+      "type": "rss",
+      "url": "https://www.hapag-lloyd.com/feeds/en/press/surcharges.rss",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "surcharges"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "hapag_rules",
+      "type": "rss",
+      "url": "https://www.hapag-lloyd.com/feeds/en/news/rules_regulations_restrictions.rss",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "regulations"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "hapag_general",
+      "type": "rss",
+      "url": "https://www.hapag-lloyd.com/feeds/en/news/general_information.rss",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "general"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "dsv_press_news",
+      "type": "rss",
+      "url": "https://www.dsv.com/-/media/rss/announcements.xml",
+      "category": "shipping_disruption",
+      "tags": ["logistics", "announcements"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "dsv_investor_news",
+      "type": "rss",
+      "url": "https://investor.dsv.com/-/media/rss/announcements.xml",
+      "category": "shipping_disruption",
+      "tags": ["logistics", "investor"],
+      "reliability": 0.78,
+      "allow_html": false
+    },
+    {
+      "id": "joc_maritime",
+      "type": "rss",
+      "url": "https://www.joc.com/api/rssfeed/8876",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "maritime"],
+      "reliability": 0.8,
+      "allow_html": false
+    },
+    {
+      "id": "joc_ports",
+      "type": "rss",
+      "url": "https://www.joc.com/api/rssfeed/24517",
+      "category": "shipping_disruption",
+      "tags": ["shipping", "ports"],
+      "reliability": 0.8,
+      "allow_html": false
+    }
+  ]
+}
+

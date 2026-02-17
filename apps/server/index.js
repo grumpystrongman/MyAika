@@ -131,6 +131,23 @@ import {
   seedRssSourcesFromFeedspot,
   listTradingRssItemsUi
 } from "./src/trading/rssIngest.js";
+import {
+  runSignalsIngestion,
+  startSignalsScheduler,
+  getSignalsStatus,
+  listSignals,
+  listSignalsTrends,
+  getSignalDoc
+} from "./src/signals/index.js";
+import {
+  startTradingYoutubeLoop,
+  crawlTradingYoutubeSources,
+  listTradingYoutubeSourcesUi,
+  addTradingYoutubeSource,
+  updateTradingYoutubeSourceUi,
+  removeTradingYoutubeSource,
+  discoverTradingYoutubeChannels
+} from "./src/trading/youtubeIngest.js";
 import { runTradingScenario, listTradingScenarios, getScenarioDetail } from "./src/trading/scenarios.js";
 import { searchSymbols } from "./src/trading/symbolSearch.js";
 import { buildRecommendationDetail } from "./src/trading/recommendationDetail.js";
@@ -195,6 +212,8 @@ startFirefliesSyncLoop();
 startDailyPicksLoop();
 startTradingKnowledgeSyncLoop();
 startTradingRssLoop();
+startTradingYoutubeLoop();
+startSignalsScheduler();
 const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
 let monitorInterval = null;
 let monitorRunning = false;
@@ -781,6 +800,17 @@ function buildTradingPreferenceBlock(training) {
   return lines.join("\n");
 }
 
+function withTimeout(promise, timeoutMs, label = "timeout") {
+  if (!timeoutMs || timeoutMs <= 0) return promise;
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 async function computeTradingRecommendations({
   assetClass = "all",
   topN = 12,
@@ -803,6 +833,9 @@ async function computeTradingRecommendations({
   else watchlist = [...stockList, ...cryptoList];
 
   let warnings = [];
+  const knowledgeTimeoutMs = Number(process.env.TRADING_RECOMMENDATIONS_KNOWLEDGE_TIMEOUT_MS || 8000);
+  const llmTimeoutMs = Number(process.env.TRADING_RECOMMENDATIONS_LLM_TIMEOUT_MS || 20000);
+  const signalTimeoutMs = Number(process.env.TRADING_RECOMMENDATIONS_SIGNAL_TIMEOUT_MS || 20000);
   if (!watchlist.length) {
     const fallbackUniverse = getDefaultTradingUniverse();
     const fallbackStocks = Array.isArray(fallbackUniverse?.stocks) ? fallbackUniverse.stocks : [];
@@ -823,9 +856,16 @@ async function computeTradingRecommendations({
     let knowledgeContext = "";
     try {
       const knowledgeQuery = `Trading knowledge, risk considerations, and recent trade lessons for: ${watchlist.join(", ")}`;
-      const knowledge = await queryTradingKnowledge(knowledgeQuery, { topK: 6 });
+      const knowledge = await withTimeout(
+        queryTradingKnowledge(knowledgeQuery, { topK: 6 }),
+        knowledgeTimeoutMs,
+        "knowledge_timeout"
+      );
       knowledgeContext = knowledge?.context || "";
-    } catch {
+    } catch (err) {
+      if (err?.message === "knowledge_timeout") {
+        warnings.push("Trading knowledge lookup timed out; proceeding without context.");
+      }
       knowledgeContext = "";
     }
     const systemPrompt = `
@@ -848,17 +888,25 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
 `.trim();
 
     try {
-      const response = await client.responses.create({
-        model: OPENAI_MODEL,
-        max_output_tokens: 700,
-        input: [
-          { role: "system", content: [{ type: "input_text", text: systemPrompt }] },
-          { role: "user", content: [{ type: "input_text", text: userPrompt }] }
-        ]
-      });
+      const response = await withTimeout(
+        client.responses.create({
+          model: OPENAI_MODEL,
+          max_output_tokens: 700,
+          input: [
+            { role: "system", content: [{ type: "input_text", text: systemPrompt }] },
+            { role: "user", content: [{ type: "input_text", text: userPrompt }] }
+          ]
+        }),
+        llmTimeoutMs,
+        "llm_timeout"
+      );
       let rawText = extractResponseText(response);
       if (!rawText.trim()) {
-        rawText = await fallbackChatCompletion({ systemPrompt, userText: userPrompt, maxOutputTokens: 700 });
+        rawText = await withTimeout(
+          fallbackChatCompletion({ systemPrompt, userText: userPrompt, maxOutputTokens: 700 }),
+          llmTimeoutMs,
+          "llm_timeout"
+        );
       }
       if (rawText.trim()) {
         const parsedJson = extractJsonArray(rawText);
@@ -878,7 +926,10 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
           source = knowledgeContext ? "llm+rag" : "llm";
         }
       }
-    } catch {
+    } catch (err) {
+      if (err?.message === "llm_timeout") {
+        warnings.push("LLM request timed out; using daily picks.");
+      }
       // fall back to daily picks
     }
   }
@@ -902,19 +953,28 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
   }
 
   if (includeSignals && picks.length) {
+    let signalTimeouts = 0;
     const signalResults = await Promise.all(picks.map(async pick => {
       try {
-        const detail = await getScenarioDetail({
-          symbol: pick.symbol,
-          assetClass: pick.assetClass,
-          windowDays: resolvedHorizon
-        });
+        const detail = await withTimeout(
+          getScenarioDetail({
+            symbol: pick.symbol,
+            assetClass: pick.assetClass,
+            windowDays: resolvedHorizon
+          }),
+          signalTimeoutMs,
+          "signal_timeout"
+        );
         if (!detail || detail.error) return null;
         return buildLongTermSignal(detail, { horizonDays: resolvedHorizon });
-      } catch {
+      } catch (err) {
+        if (err?.message === "signal_timeout") signalTimeouts += 1;
         return null;
       }
     }));
+    if (signalTimeouts) {
+      warnings.push(`Signal data timed out for ${signalTimeouts} pick${signalTimeouts === 1 ? "" : "s"}.`);
+    }
     picks = picks.map((pick, idx) => ({
       ...pick,
       signal: signalResults[idx] || null
@@ -3577,6 +3637,38 @@ const tradingRssSeedSchema = z.object({
   url: z.string().url().optional()
 });
 
+const tradingYoutubeSourceSchema = z.object({
+  channel: z.string().min(2),
+  tags: z.array(z.string()).optional(),
+  enabled: z.boolean().optional(),
+  maxVideos: z.number().int().min(0).max(10000).optional()
+});
+
+const tradingYoutubeSourceUpdateSchema = z.object({
+  tags: z.array(z.string()).optional(),
+  enabled: z.boolean().optional(),
+  maxVideos: z.number().int().min(0).max(10000).optional()
+});
+
+const signalsRunSchema = z.object({
+  force: z.boolean().optional(),
+  sourceIds: z.array(z.string()).optional()
+});
+
+const tradingYoutubeCrawlSchema = z.object({
+  force: z.boolean().optional(),
+  maxVideos: z.number().int().min(0).max(10000).optional(),
+  maxNewVideos: z.number().int().min(0).max(1000).optional()
+});
+
+const tradingYoutubeSearchSchema = z.object({
+  queries: z.array(z.string()).optional(),
+  maxChannels: z.number().int().min(1).max(200).optional(),
+  minSubscribers: z.number().int().min(0).max(100000000).optional(),
+  minScore: z.number().min(0).max(25).optional(),
+  autoAdd: z.boolean().optional()
+});
+
 const tradingScenarioSchema = z.object({
   assetClass: z.enum(["crypto", "stock", "all"]).optional(),
   windowDays: z.number().int().min(3).max(365).optional(),
@@ -4291,6 +4383,170 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
       res.json({ items });
     } catch (err) {
       res.status(500).json({ error: err?.message || "rss_items_failed" });
+    }
+  });
+
+  app.get("/api/signals/status", rateLimit, (_req, res) => {
+    try {
+      const status = getSignalsStatus();
+      res.json(status);
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "signals_status_failed" });
+    }
+  });
+
+  app.post("/api/signals/run", rateLimit, async (req, res) => {
+    try {
+      const parsed = signalsRunSchema.parse(req.body || {});
+      const result = await runSignalsIngestion({
+        sourceIds: parsed.sourceIds || [],
+        force: parsed.force
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "signals_run_failed" });
+    }
+  });
+
+  app.get("/api/signals/docs", rateLimit, (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 50);
+      const offset = Number(req.query.offset || 0);
+      const includeStale = String(req.query.includeStale || "0") === "1";
+      const includeExpired = String(req.query.includeExpired || "0") === "1";
+      const category = String(req.query.category || "");
+      const sourceId = String(req.query.sourceId || "");
+      const search = String(req.query.search || "");
+      const items = listSignals({ limit, offset, includeStale, includeExpired, category, sourceId, search });
+      res.json({ items });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "signals_docs_failed" });
+    }
+  });
+
+  app.get("/api/signals/docs/:id", rateLimit, (req, res) => {
+    try {
+      const docId = String(req.params.id || "").trim();
+      if (!docId) return res.status(400).json({ error: "doc_id_required" });
+      const doc = getSignalDoc(docId);
+      if (!doc) return res.status(404).json({ error: "not_found" });
+      res.json({ doc });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "signals_doc_failed" });
+    }
+  });
+
+  app.get("/api/signals/trends", rateLimit, (req, res) => {
+    try {
+      const runId = String(req.query.runId || "");
+      const limit = Number(req.query.limit || 12);
+      const items = listSignalsTrends({ runId, limit });
+      res.json({ items });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "signals_trends_failed" });
+    }
+  });
+
+  app.get("/api/trading/youtube/sources", rateLimit, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 100);
+      const search = String(req.query.search || "");
+      const includeDisabled = String(req.query.includeDisabled || "1") !== "0";
+      const collectionId = String(req.query.collection || req.query.collectionId || "trading").trim();
+      const items = listTradingYoutubeSourcesUi({ limit, search, includeDisabled, collectionId });
+      res.json({ items });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "youtube_sources_list_failed" });
+    }
+  });
+
+  app.post("/api/trading/youtube/sources", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingYoutubeSourceSchema.parse(req.body || {});
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const source = await addTradingYoutubeSource({
+        channel: parsed.channel,
+        tags: parsed.tags || [],
+        enabled: parsed.enabled !== false,
+        maxVideos: parsed.maxVideos,
+        collectionId
+      });
+      res.json({ source });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "youtube_source_add_failed" });
+    }
+  });
+
+  app.patch("/api/trading/youtube/sources/:id", rateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const parsed = tradingYoutubeSourceUpdateSchema.parse(req.body || {});
+      const source = updateTradingYoutubeSourceUi(id, parsed);
+      if (!source) return res.status(404).json({ error: "not_found" });
+      res.json({ source });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "youtube_source_update_failed" });
+    }
+  });
+
+  app.delete("/api/trading/youtube/sources/:id", rateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "invalid_id" });
+      const result = removeTradingYoutubeSource(id);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "youtube_source_delete_failed" });
+    }
+  });
+
+  app.post("/api/trading/youtube/crawl", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingYoutubeCrawlSchema.parse(req.body || {});
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const result = await crawlTradingYoutubeSources({
+        force: parsed.force,
+        maxVideosPerChannel: parsed.maxVideos,
+        maxNewVideosPerChannel: parsed.maxNewVideos,
+        collectionId
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "youtube_crawl_failed" });
+    }
+  });
+
+  app.post("/api/trading/youtube/search", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingYoutubeSearchSchema.parse(req.body || {});
+      const collectionId = String(req.body?.collection || req.body?.collectionId || "trading").trim();
+      const result = await discoverTradingYoutubeChannels({
+        queries: parsed.queries,
+        maxChannels: parsed.maxChannels,
+        minSubscribers: parsed.minSubscribers,
+        minScore: parsed.minScore,
+        autoAdd: parsed.autoAdd,
+        collectionId
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "youtube_search_failed" });
     }
   });
 

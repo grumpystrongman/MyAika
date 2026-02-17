@@ -545,4 +545,21 @@ This repo includes an MCP-lite policy + approvals + audit layer for tools. See `
 ## Features tab
 Use the Features tab in the web app to discover MCP tools and manage connections.
 
+## Signals Ingestion
+Daily signals ingestion for market, energy, weather, and supply chain sources.
+- Configure sources, reliability scores, and freshness thresholds in `config/signals_sources.json`.
+- Manual run: `npm run ingest:signals`.
+- UI monitor: open `/signals` in the web app for run status, trends, and documents.
+- Run reports and logs: `data/signals/runs/` and `data/signals/logs/`.
+
+Environment variables:
+- `SIGNALS_CONFIG_PATH` (optional override for config path)
+- `SIGNALS_INGEST_TIME` (default `06:15`)
+- `SIGNALS_TIMEZONE` (default `America/New_York`)
+- `SIGNALS_INGEST_ON_STARTUP` (set `1` to run on startup)
+- `NASA_FIRMS_MAP_KEY` (optional, enables NASA FIRMS wildfire adapter)
+- `SIGNALS_SIMHASH_DISTANCE` (near-duplicate threshold, default 3)
+- `SIGNALS_DEDUP_LOOKBACK_HOURS` (default 96)
+- `SIGNALS_MAX_RECENT_DEDUP` (default 1500)
+
 See `docs/QA_CHECKLIST.md` for validation steps.

@@ -2,6 +2,16 @@ import { createScenarioRun, listScenarioRuns } from "../../storage/trading_scena
 import { getTradingEmailSettings } from "../../storage/trading_settings.js";
 import { generateDailyPicks } from "./dailyPicks.js";
 
+const MARKET_DATA_TIMEOUT_MS = Number(process.env.TRADING_MARKET_DATA_FETCH_TIMEOUT_MS || 15000);
+
+function fetchWithTimeout(url, options = {}, timeoutMs = MARKET_DATA_TIMEOUT_MS) {
+  if (!timeoutMs || timeoutMs <= 0) return fetch(url, options);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 function mapGranularity(interval) {
   const lookup = {
     "1d": 86400
@@ -26,7 +36,7 @@ async function fetchYahooCandles(symbol, windowDays) {
   const rangeDays = Math.max(30, Math.min(730, Number(windowDays || 120)));
   const range = rangeDays >= 365 ? "1y" : `${rangeDays}d`;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d&includePrePost=false&events=div%7Csplit`;
-  const resp = await fetch(url);
+  const resp = await fetchWithTimeout(url);
   if (!resp.ok) throw new Error("yahoo_failed");
   const data = await resp.json().catch(() => ({}));
   const result = data?.chart?.result?.[0];
@@ -56,7 +66,7 @@ async function fetchYahooCandles(symbol, windowDays) {
 async function fetchStooqCandles(symbol) {
   const stooqSymbol = `${symbol.toLowerCase()}.us`;
   const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSymbol)}&i=d`;
-  const resp = await fetch(url);
+  const resp = await fetchWithTimeout(url);
   if (!resp.ok) throw new Error("stooq_failed");
   const text = await resp.text();
   if (/exceeded the daily hits limit/i.test(text)) {
@@ -83,7 +93,7 @@ async function fetchCryptoCandles(symbol, windowDays) {
   const end = Math.floor(Date.now() / 1000);
   const start = end - windowDays * 86400;
   const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(symbol)}/candles?granularity=${granularity}&start=${start}&end=${end}`;
-  const resp = await fetch(url, { headers: { "User-Agent": "AikaTrading/1.0" } });
+  const resp = await fetchWithTimeout(url, { headers: { "User-Agent": "AikaTrading/1.0" } });
   if (!resp.ok) throw new Error("coinbase_candles_failed");
   const data = await resp.json();
   return Array.isArray(data)
@@ -105,7 +115,7 @@ async function fetchStockCandles(symbol, windowDays) {
     const limit = Math.min(300, Math.max(30, windowDays + 5));
     const feed = process.env.ALPACA_DATA_FEED || "iex";
     const url = `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}&feed=${encodeURIComponent(feed)}`;
-    const resp = await fetch(url, {
+    const resp = await fetchWithTimeout(url, {
       headers: {
         "APCA-API-KEY-ID": key,
         "APCA-API-SECRET-KEY": secret

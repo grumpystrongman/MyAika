@@ -5,6 +5,15 @@ import { executeAction } from "../safety/executeAction.js";
 import { getTradingEmailSettings, getTradingTrainingSettings } from "../../storage/trading_settings.js";
 
 const FLAG_KEY = "trading_daily_picks";
+const MARKET_DATA_TIMEOUT_MS = Number(process.env.TRADING_MARKET_DATA_FETCH_TIMEOUT_MS || 15000);
+
+function fetchWithTimeout(url, options = {}, timeoutMs = MARKET_DATA_TIMEOUT_MS) {
+  if (!timeoutMs || timeoutMs <= 0) return fetch(url, options);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
 
 function todayKey() {
   const now = new Date();
@@ -59,7 +68,7 @@ async function fetchStockCandles(symbol) {
   const stooq = `${symbol.toLowerCase()}.us`;
   const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d`;
   try {
-    const resp = await fetch(url);
+    const resp = await fetchWithTimeout(url);
     if (!resp.ok) throw new Error("stooq_failed");
     const text = await resp.text();
     if (/exceeded the daily hits limit/i.test(text)) {
@@ -85,7 +94,7 @@ async function fetchStockCandles(symbol) {
   }
 
   const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d&includePrePost=false&events=div%7Csplit`;
-  const yahooResp = await fetch(yahooUrl);
+  const yahooResp = await fetchWithTimeout(yahooUrl);
   if (!yahooResp.ok) throw new Error("yahoo_failed");
   const data = await yahooResp.json().catch(() => ({}));
   const result = data?.chart?.result?.[0];
@@ -110,7 +119,7 @@ async function fetchStockCandles(symbol) {
 
 async function fetchCryptoCandles(symbol) {
   const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(symbol)}/candles?granularity=86400`;
-  const resp = await fetch(url, { headers: { "User-Agent": "AikaTrading/1.0" } });
+  const resp = await fetchWithTimeout(url, { headers: { "User-Agent": "AikaTrading/1.0" } });
   if (!resp.ok) throw new Error("coinbase_failed");
   const data = await resp.json();
   return Array.isArray(data)
@@ -198,27 +207,23 @@ export async function generateDailyPicks({ emailSettings } = {}) {
   const stocks = Array.isArray(settings.stocks) ? settings.stocks : [];
   const cryptos = Array.isArray(settings.cryptos) ? settings.cryptos : [];
 
-  const stockResults = [];
-  for (const symbol of stocks) {
-    try {
+  const stockResults = (await Promise.allSettled(
+    stocks.map(async symbol => {
       const candles = await fetchStockCandles(symbol);
       const signal = computeSignal(candles);
-      stockResults.push(buildPickEntry({ symbol, assetClass: "stock", signal }));
-    } catch {
-      // skip
-    }
-  }
+      return buildPickEntry({ symbol, assetClass: "stock", signal });
+    })
+  ))
+    .flatMap(result => (result.status === "fulfilled" && result.value ? [result.value] : []));
 
-  const cryptoResults = [];
-  for (const symbol of cryptos) {
-    try {
+  const cryptoResults = (await Promise.allSettled(
+    cryptos.map(async symbol => {
       const candles = await fetchCryptoCandles(symbol);
       const signal = computeSignal(candles);
-      cryptoResults.push(buildPickEntry({ symbol, assetClass: "crypto", signal }));
-    } catch {
-      // skip
-    }
-  }
+      return buildPickEntry({ symbol, assetClass: "crypto", signal });
+    })
+  ))
+    .flatMap(result => (result.status === "fulfilled" && result.value ? [result.value] : []));
 
   const stockCount = Number(settings.stockCount || 0);
   const cryptoCount = Number(settings.cryptoCount || 0);
