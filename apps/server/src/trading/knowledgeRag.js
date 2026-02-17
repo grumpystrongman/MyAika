@@ -26,9 +26,14 @@ import {
   deleteMeetingsBySourceGroup,
   upsertKnowledgeDocument,
   getKnowledgeDocumentByHash,
-  listKnowledgeDedupCandidates
+  listKnowledgeDedupCandidates,
+  listKnowledgeHealthCandidates,
+  updateKnowledgeDocument,
+  getKnowledgeHealthSummary,
+  listKnowledgeSourceStats
 } from "../rag/vectorStore.js";
 import { hashContent, computeSimhash, hammingDistance, computeFreshnessScore } from "../signals/utils.js";
+import { findAssistantTaskByTitle, createAssistantTask } from "../../storage/assistant_tasks.js";
 
 const MAX_DOC_CHARS = Number(process.env.TRADING_RAG_MAX_DOC_CHARS || 50000);
 const MAX_FETCH_BYTES = Number(process.env.TRADING_RAG_MAX_BYTES || 2000000);
@@ -50,6 +55,20 @@ const DEDUP_LOOKBACK_HOURS = Number(process.env.TRADING_RAG_DEDUP_LOOKBACK_HOURS
 const SIMHASH_DISTANCE = Number(process.env.TRADING_RAG_SIMHASH_DISTANCE || 3);
 const FRESHNESS_HALFLIFE_HOURS = Number(process.env.TRADING_RAG_FRESHNESS_HALFLIFE_HOURS || 720);
 const EVERGREEN_HALFLIFE_HOURS = Number(process.env.TRADING_RAG_EVERGREEN_HALFLIFE_HOURS || 8760);
+const HEALTH_INTERVAL_MINUTES = Number(process.env.TRADING_RAG_HEALTH_INTERVAL_MINUTES || 360);
+const HEALTH_REVIEW_INTERVAL_HOURS = Number(process.env.TRADING_RAG_HEALTH_REVIEW_INTERVAL_HOURS || 24);
+const HEALTH_BATCH_SIZE = Number(process.env.TRADING_RAG_HEALTH_BATCH_SIZE || 400);
+const HEALTH_STALE_THRESHOLD = Number(process.env.TRADING_RAG_STALE_THRESHOLD || 0.35);
+const HEALTH_EXPIRE_THRESHOLD = Number(process.env.TRADING_RAG_EXPIRE_THRESHOLD || 0.12);
+const HEALTH_RUN_ON_STARTUP = String(process.env.TRADING_RAG_HEALTH_RUN_ON_STARTUP || "0") === "1";
+const HEALTH_REFRESH_ON_STALE = String(process.env.TRADING_RAG_HEALTH_REFRESH_ON_STALE || "0") === "1";
+const HEALTH_REFRESH_STALE_RATIO = Number(process.env.TRADING_RAG_HEALTH_REFRESH_STALE_RATIO || 0.45);
+const HEALTH_REFRESH_MIN_AGE_HOURS = Number(process.env.TRADING_RAG_HEALTH_REFRESH_MIN_AGE_HOURS || 72);
+const HEALTH_REFRESH_MAX_SOURCES = Number(process.env.TRADING_RAG_HEALTH_REFRESH_MAX_SOURCES || 6);
+const HEALTH_TASK_ENABLED = String(process.env.TRADING_RAG_HEALTH_TASK_ENABLED || "0") === "1";
+const HEALTH_TASK_TIME_OF_DAY = String(process.env.TRADING_RAG_HEALTH_TASK_TIME_OF_DAY || "09:00");
+const HEALTH_TASK_TIMEZONE = String(process.env.TRADING_RAG_HEALTH_TASK_TIMEZONE || "");
+const HEALTH_TASK_OWNER = String(process.env.TRADING_RAG_HEALTH_TASK_OWNER || "local");
 
 const DEFAULT_TRADING_SOURCES = [
   { url: "https://www.investopedia.com", tags: ["education", "basics"] },
@@ -205,6 +224,7 @@ const dedupCache = {
   collectionId: "",
   items: []
 };
+const HEALTH_TASK_TITLE = "Trading Knowledge Health Review";
 
 function getDedupCandidates(collectionId) {
   const now = Date.now();
@@ -220,6 +240,67 @@ function getDedupCandidates(collectionId) {
   dedupCache.collectionId = collectionId;
   dedupCache.items = items || [];
   return dedupCache.items;
+}
+
+function clamp01(value, fallback) {
+  const num = Number.isFinite(value) ? value : fallback;
+  if (!Number.isFinite(num)) return 0;
+  return Math.min(1, Math.max(0, num));
+}
+
+function computeKnowledgeHealth(doc, tags = []) {
+  const safeTags = Array.isArray(tags) ? tags : normalizeTags(tags);
+  const baseTime = doc.published_at || doc.retrieved_at || doc.created_at || "";
+  const halfLife = isEvergreenTags(safeTags) ? EVERGREEN_HALFLIFE_HOURS : FRESHNESS_HALFLIFE_HOURS;
+  const freshness = computeFreshnessScore(baseTime, halfLife);
+  const reliability = scoreReliability(doc.source_url || "", safeTags);
+  const staleThreshold = clamp01(HEALTH_STALE_THRESHOLD, 0.35);
+  const expireThreshold = clamp01(HEALTH_EXPIRE_THRESHOLD, 0.12);
+  let stale = false;
+  let expired = false;
+  let reason = "";
+  if (freshness <= expireThreshold) {
+    stale = true;
+    expired = true;
+    reason = "expired";
+  } else if (freshness <= staleThreshold) {
+    stale = true;
+    reason = "stale";
+  }
+  return { freshness, reliability, stale, expired, reason, tags: safeTags };
+}
+
+function buildHealthReviewPrompt(collectionId) {
+  const resolved = collectionId || TRADING_PREFIX;
+  const placeholder = `{{trading_knowledge_health:${resolved}}}`;
+  return [
+    "Review the trading knowledge health snapshot below.",
+    "Summarize the stale/expired situation and name the top sources that need refresh.",
+    "Suggest 3 concrete improvements (source curation, tags, or refresh cadence).",
+    "",
+    placeholder
+  ].join("\n");
+}
+
+function ensureTradingKnowledgeHealthTask(collectionId) {
+  if (!HEALTH_TASK_ENABLED) return null;
+  const ownerId = HEALTH_TASK_OWNER || "local";
+  const resolved = collectionId || TRADING_PREFIX;
+  const title = resolved === TRADING_PREFIX
+    ? HEALTH_TASK_TITLE
+    : `${HEALTH_TASK_TITLE} (${resolved})`;
+  const existing = findAssistantTaskByTitle(ownerId, title);
+  if (existing) return existing;
+  return createAssistantTask(ownerId, {
+    title,
+    prompt: buildHealthReviewPrompt(resolved),
+    schedule: {
+      type: "daily",
+      timeOfDay: HEALTH_TASK_TIME_OF_DAY,
+      timezone: HEALTH_TASK_TIMEZONE
+    },
+    notificationChannels: ["in_app", "email", "telegram"]
+  });
 }
 
 function buildSourceKey(row = {}) {
@@ -1048,6 +1129,7 @@ export async function listTradingKnowledge({ limit = 25, offset = 0, search = ""
 
 export function getTradingKnowledgeStats({ limit = 500, collectionId } = {}) {
   const prefix = resolveCollectionPrefix(collectionId);
+  const resolvedCollection = collectionId || TRADING_PREFIX;
   const rows = listMeetingsRaw({ meetingIdPrefix: `${prefix}:`, limit, offset: 0 });
   const tagCounts = new Map();
   const sourceMap = new Map();
@@ -1135,6 +1217,15 @@ export function getTradingKnowledgeStats({ limit = 500, collectionId } = {}) {
     return { ...source, age_days: ageDays };
   }).sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
 
+  const healthSummary = getKnowledgeHealthSummary({ collectionId: resolvedCollection });
+  const sourceQuality = listKnowledgeSourceStats({ collectionId: resolvedCollection, limit: 40 })
+    .map(source => ({
+      ...source,
+      stale_rate: source.doc_count ? source.stale_count / source.doc_count : 0,
+      expired_rate: source.doc_count ? source.expired_count / source.doc_count : 0
+    }))
+    .sort((a, b) => b.doc_count - a.doc_count);
+
   const nodes = [
     ...tagsSorted.map(item => ({ id: `tag:${item.tag}`, label: item.tag, value: item.tag, type: "tag", count: item.count })),
     ...topSources.map(source => ({
@@ -1161,6 +1252,12 @@ export function getTradingKnowledgeStats({ limit = 500, collectionId } = {}) {
       source_url: source.source_url || "",
       count: source.count
     })),
+    health: {
+      ...healthSummary,
+      staleRate: healthSummary.total ? healthSummary.stale / healthSummary.total : 0,
+      expiredRate: healthSummary.total ? healthSummary.expired / healthSummary.total : 0
+    },
+    sourceQuality,
     graph: {
       nodes,
       links: [...tagLinks, ...tagSourceLinks]
@@ -1396,4 +1493,127 @@ export async function startTradingKnowledgeSyncLoop() {
   setInterval(() => {
     run().catch(() => {});
   }, intervalMin * 60_000);
+}
+
+export function getTradingKnowledgeHealthSnapshot({ collectionId, limitSources = 8 } = {}) {
+  const resolved = collectionId || TRADING_PREFIX;
+  const summary = getKnowledgeHealthSummary({ collectionId: resolved });
+  if (!summary.total) {
+    return "No trading knowledge documents are available yet.";
+  }
+  const sources = listKnowledgeSourceStats({ collectionId: resolved, limit: Math.max(limitSources, 6) });
+  const rankedSources = sources
+    .map(source => ({
+      ...source,
+      stale_rate: source.doc_count ? source.stale_count / source.doc_count : 0
+    }))
+    .sort((a, b) => b.stale_rate - a.stale_rate)
+    .slice(0, limitSources);
+
+  const staleRate = summary.total ? (summary.stale / summary.total) : 0;
+  const expiredRate = summary.total ? (summary.expired / summary.total) : 0;
+  const lines = [
+    `Collection: ${resolved}`,
+    `Docs: ${summary.total} | stale: ${summary.stale} (${Math.round(staleRate * 100)}%) | expired: ${summary.expired} (${Math.round(expiredRate * 100)}%)`,
+    `Avg freshness: ${summary.avgFreshness.toFixed(2)} | Avg reliability: ${summary.avgReliability.toFixed(2)}`,
+    summary.lastReviewedAt ? `Last reviewed: ${summary.lastReviewedAt}` : "Last reviewed: n/a"
+  ];
+
+  if (rankedSources.length) {
+    lines.push("Top stale sources:");
+    rankedSources.forEach(source => {
+      const rate = source.doc_count ? Math.round((source.stale_count / source.doc_count) * 100) : 0;
+      lines.push(`- ${source.source_key} | docs: ${source.doc_count} | stale: ${source.stale_count} (${rate}%)`);
+    });
+  }
+  return lines.join("\n");
+}
+
+export async function runTradingKnowledgeHealthScan({ collectionId } = {}) {
+  const resolved = collectionId || TRADING_PREFIX;
+  const candidates = listKnowledgeHealthCandidates({
+    reviewIntervalHours: HEALTH_REVIEW_INTERVAL_HOURS,
+    limit: HEALTH_BATCH_SIZE,
+    collectionId: resolved
+  });
+  const now = nowIso();
+  let updated = 0;
+  let staleCount = 0;
+  let expiredCount = 0;
+
+  for (const doc of candidates) {
+    if (!doc?.doc_id) continue;
+    const health = computeKnowledgeHealth(doc, doc.tags || []);
+    if (health.stale) staleCount += 1;
+    if (health.expired) expiredCount += 1;
+    updateKnowledgeDocument(doc.doc_id, {
+      freshness_score: health.freshness,
+      reliability_score: health.reliability,
+      stale: health.stale,
+      expired: health.expired,
+      stale_reason: health.reason,
+      reviewed_at: now,
+      tags: health.tags
+    });
+    updated += 1;
+  }
+
+  setRagMeta(`trading_health_last_run:${resolved}`, now);
+
+  const refreshCandidates = [];
+  if (HEALTH_REFRESH_ON_STALE) {
+    const sources = listTradingSources({ limit: 500, includeDisabled: false, collectionId: resolved });
+    const sourcesByUrl = new Map(
+      sources.map(source => [normalizeUrl(source.url), source])
+    );
+    const sourceStats = listKnowledgeSourceStats({ collectionId: resolved, limit: 200 })
+      .map(item => ({
+        ...item,
+        stale_rate: item.doc_count ? item.stale_count / item.doc_count : 0
+      }))
+      .filter(item => item.source_url && item.stale_rate >= HEALTH_REFRESH_STALE_RATIO)
+      .sort((a, b) => b.stale_rate - a.stale_rate)
+      .slice(0, HEALTH_REFRESH_MAX_SOURCES);
+
+    for (const stat of sourceStats) {
+      const normalized = normalizeUrl(stat.source_url);
+      const source = sourcesByUrl.get(normalized);
+      if (!source) continue;
+      const lastCrawl = source.last_crawled_at ? Date.parse(source.last_crawled_at) : 0;
+      const minAgeMs = HEALTH_REFRESH_MIN_AGE_HOURS * 3600000;
+      if (lastCrawl && Date.now() - lastCrawl < minAgeMs) {
+        refreshCandidates.push({ ...stat, refreshed: false, reason: "recently_crawled" });
+        continue;
+      }
+      enqueueSourceCrawl({ ...source, tags: source.tags || [] }, { collectionId: resolved, force: true });
+      refreshCandidates.push({ ...stat, refreshed: true, reason: "stale_ratio" });
+    }
+  }
+
+  return {
+    collectionId: resolved,
+    scanned: candidates.length,
+    updated,
+    stale: staleCount,
+    expired: expiredCount,
+    refreshed: refreshCandidates.filter(item => item.refreshed).length,
+    refreshCandidates
+  };
+}
+
+let healthInterval = null;
+
+export function startTradingKnowledgeHealthLoop() {
+  if (healthInterval) return;
+  ensureTradingKnowledgeHealthTask();
+  if (!HEALTH_INTERVAL_MINUTES || HEALTH_INTERVAL_MINUTES <= 0) return;
+  const run = () => {
+    runTradingKnowledgeHealthScan().catch(() => {});
+  };
+  if (HEALTH_RUN_ON_STARTUP) {
+    run();
+  }
+  healthInterval = setInterval(() => {
+    run();
+  }, Math.max(60_000, HEALTH_INTERVAL_MINUTES * 60_000));
 }

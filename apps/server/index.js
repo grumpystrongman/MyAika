@@ -113,6 +113,7 @@ import {
   queryTradingKnowledge,
   recordTradeAnalysis,
   startTradingKnowledgeSyncLoop,
+  startTradingKnowledgeHealthLoop,
   ensureTradingSourcesSeeded,
   ensureTradingKnowledgeSeeded,
   listTradingKnowledge,
@@ -216,6 +217,7 @@ try {
 startFirefliesSyncLoop();
 startDailyPicksLoop();
 startTradingKnowledgeSyncLoop();
+startTradingKnowledgeHealthLoop();
 startTradingRssLoop();
 startTradingYoutubeLoop();
 startSignalsScheduler();

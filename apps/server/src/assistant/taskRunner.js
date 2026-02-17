@@ -9,6 +9,7 @@ import {
 import { executeAction } from "../safety/executeAction.js";
 import { sendGmailMessage, getGoogleStatus } from "../../integrations/google.js";
 import { sendTelegramMessage } from "../../integrations/messaging.js";
+import { getTradingKnowledgeHealthSnapshot } from "../trading/knowledgeRag.js";
 
 let runnerInterval = null;
 let runnerActive = false;
@@ -34,8 +35,23 @@ function limitText(value, maxChars = 8000) {
   return `${text.slice(0, maxChars)}...`;
 }
 
+function injectTradingKnowledgeSnapshot(prompt) {
+  let output = String(prompt || "");
+  if (!output.includes("{{trading_knowledge_health")) return output;
+  const cache = new Map();
+  const regex = /\{\{trading_knowledge_health(?::([^}]+))?\}\}/gi;
+  output = output.replace(regex, (_match, rawCollection) => {
+    const collectionId = String(rawCollection || "trading").trim() || "trading";
+    if (!cache.has(collectionId)) {
+      cache.set(collectionId, getTradingKnowledgeHealthSnapshot({ collectionId }));
+    }
+    return cache.get(collectionId);
+  });
+  return output;
+}
+
 async function runTaskPrompt(task) {
-  const prompt = String(task.prompt || "").trim();
+  const prompt = injectTradingKnowledgeSnapshot(String(task.prompt || "").trim());
   if (!prompt) throw new Error("task_prompt_missing");
   const client = getOpenAIClient();
   if (!client) {

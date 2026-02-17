@@ -161,6 +161,16 @@ export function getAssistantTask(ownerId = "local", id) {
   return mapRow(row);
 }
 
+export function findAssistantTaskByTitle(ownerId = "local", title = "") {
+  const trimmed = String(title || "").trim();
+  if (!trimmed) return null;
+  const db = getDb();
+  const row = db.prepare(
+    "SELECT * FROM assistant_tasks WHERE owner_id = ? AND title = ? ORDER BY created_at DESC LIMIT 1"
+  ).get(ownerId, trimmed);
+  return mapRow(row);
+}
+
 export function listDueAssistantTasks({ limit = 10 } = {}) {
   const db = getDb();
   const now = nowIso();

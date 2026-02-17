@@ -293,6 +293,10 @@ function ensureSchema() {
       retrieved_at TEXT,
       freshness_score REAL,
       reliability_score REAL,
+      stale INTEGER,
+      expired INTEGER,
+      stale_reason TEXT,
+      reviewed_at TEXT,
       tags_json TEXT,
       metadata_json TEXT,
       meeting_id TEXT,
@@ -315,6 +319,7 @@ function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_knowledge_docs_hash ON knowledge_documents(content_hash);
     CREATE INDEX IF NOT EXISTS idx_knowledge_docs_collection ON knowledge_documents(collection_id);
     CREATE INDEX IF NOT EXISTS idx_knowledge_docs_retrieved ON knowledge_documents(retrieved_at);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_docs_reviewed ON knowledge_documents(reviewed_at);
   `);
 }
 
@@ -436,6 +441,11 @@ function ensureMigrations() {
   ensureColumn("signals_trends", "note", "TEXT");
   ensureColumn("signals_trends", "doc_count", "INTEGER");
   ensureColumn("signals_trends", "created_at", "TEXT");
+  ensureColumn("knowledge_documents", "stale", "INTEGER");
+  ensureColumn("knowledge_documents", "expired", "INTEGER");
+  ensureColumn("knowledge_documents", "stale_reason", "TEXT");
+  ensureColumn("knowledge_documents", "reviewed_at", "TEXT");
+  ensureIndex("knowledge_documents", "reviewed_at", "idx_knowledge_docs_reviewed");
   migrateTradingSourcesSchema();
   migrateTradingRssSourcesSchema();
 }
@@ -1697,6 +1707,10 @@ function normalizeKnowledgeDocRow(row) {
     retrieved_at: row.retrieved_at || "",
     freshness_score: Number(row.freshness_score || 0),
     reliability_score: Number(row.reliability_score || 0),
+    stale: Boolean(row.stale),
+    expired: Boolean(row.expired),
+    stale_reason: row.stale_reason || "",
+    reviewed_at: row.reviewed_at || "",
     tags: row.tags_json ? JSON.parse(row.tags_json) : [],
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) : {},
     meeting_id: row.meeting_id || "",
@@ -1713,8 +1727,9 @@ export function upsertKnowledgeDocument(doc) {
     INSERT INTO knowledge_documents (
       doc_id, collection_id, source_type, source_url, source_group, title,
       content_hash, simhash, published_at, retrieved_at, freshness_score,
-      reliability_score, tags_json, metadata_json, meeting_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      reliability_score, stale, expired, stale_reason, reviewed_at,
+      tags_json, metadata_json, meeting_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(doc_id) DO UPDATE SET
       collection_id = excluded.collection_id,
       source_type = excluded.source_type,
@@ -1727,6 +1742,10 @@ export function upsertKnowledgeDocument(doc) {
       retrieved_at = excluded.retrieved_at,
       freshness_score = excluded.freshness_score,
       reliability_score = excluded.reliability_score,
+      stale = excluded.stale,
+      expired = excluded.expired,
+      stale_reason = excluded.stale_reason,
+      reviewed_at = excluded.reviewed_at,
       tags_json = excluded.tags_json,
       metadata_json = excluded.metadata_json,
       meeting_id = excluded.meeting_id,
@@ -1744,6 +1763,10 @@ export function upsertKnowledgeDocument(doc) {
     doc.retrieved_at || "",
     Number(doc.freshness_score || 0),
     Number(doc.reliability_score || 0),
+    doc.stale ? 1 : 0,
+    doc.expired ? 1 : 0,
+    doc.stale_reason || "",
+    doc.reviewed_at || "",
     JSON.stringify(doc.tags || []),
     JSON.stringify(doc.metadata || {}),
     doc.meeting_id || "",
@@ -1782,12 +1805,155 @@ export function listKnowledgeDedupCandidates({ sinceHours = 720, limit = 1000, c
     WHERE (retrieved_at >= ? OR published_at >= ?)
   `;
   if (collectionId) {
-    sql += " AND collection_id = ?";
-    params.push(collectionId);
+    if (collectionId === "trading") {
+      sql += " AND (collection_id = ? OR collection_id IS NULL OR collection_id = '')";
+      params.push(collectionId);
+    } else {
+      sql += " AND collection_id = ?";
+      params.push(collectionId);
+    }
   }
   sql += " ORDER BY retrieved_at DESC LIMIT ?";
   params.push(Number(limit || 1000));
   return db.prepare(sql).all(...params);
+}
+
+export function listKnowledgeHealthCandidates({ reviewIntervalHours = 24, limit = 500, collectionId = "" } = {}) {
+  initRagStore();
+  const since = new Date(Date.now() - reviewIntervalHours * 3600000).toISOString();
+  const params = [since];
+  let where = "(reviewed_at IS NULL OR reviewed_at <= ?)";
+  if (collectionId) {
+    if (collectionId === "trading") {
+      where += " AND (collection_id = ? OR collection_id IS NULL OR collection_id = '')";
+      params.push(collectionId);
+    } else {
+      where += " AND collection_id = ?";
+      params.push(collectionId);
+    }
+  }
+  const rows = db.prepare(`
+    SELECT * FROM knowledge_documents
+    WHERE ${where}
+    ORDER BY reviewed_at ASC
+    LIMIT ?
+  `).all(...params, Number(limit || 500));
+  return rows.map(normalizeKnowledgeDocRow).filter(Boolean);
+}
+
+export function updateKnowledgeDocument(docId, patch = {}) {
+  if (!docId) return null;
+  initRagStore();
+  const fields = [];
+  const params = [];
+  const setField = (col, value) => {
+    fields.push(`${col} = ?`);
+    params.push(value);
+  };
+  if (patch.collection_id !== undefined) setField("collection_id", patch.collection_id || "");
+  if (patch.source_type !== undefined) setField("source_type", patch.source_type || "");
+  if (patch.source_url !== undefined) setField("source_url", patch.source_url || "");
+  if (patch.source_group !== undefined) setField("source_group", patch.source_group || "");
+  if (patch.title !== undefined) setField("title", patch.title || "");
+  if (patch.content_hash !== undefined) setField("content_hash", patch.content_hash || "");
+  if (patch.simhash !== undefined) setField("simhash", patch.simhash || "");
+  if (patch.published_at !== undefined) setField("published_at", patch.published_at || "");
+  if (patch.retrieved_at !== undefined) setField("retrieved_at", patch.retrieved_at || "");
+  if (patch.freshness_score !== undefined) setField("freshness_score", Number(patch.freshness_score || 0));
+  if (patch.reliability_score !== undefined) setField("reliability_score", Number(patch.reliability_score || 0));
+  if (patch.stale !== undefined) setField("stale", patch.stale ? 1 : 0);
+  if (patch.expired !== undefined) setField("expired", patch.expired ? 1 : 0);
+  if (patch.stale_reason !== undefined) setField("stale_reason", patch.stale_reason || "");
+  if (patch.reviewed_at !== undefined) setField("reviewed_at", patch.reviewed_at || "");
+  if (patch.tags !== undefined) setField("tags_json", JSON.stringify(patch.tags || []));
+  if (patch.metadata !== undefined) setField("metadata_json", JSON.stringify(patch.metadata || {}));
+  if (patch.meeting_id !== undefined) setField("meeting_id", patch.meeting_id || "");
+  if (!fields.length) return getKnowledgeDocument(docId);
+  setField("updated_at", nowIso());
+  params.push(docId);
+  db.prepare(`UPDATE knowledge_documents SET ${fields.join(", ")} WHERE doc_id = ?`).run(...params);
+  return getKnowledgeDocument(docId);
+}
+
+export function getKnowledgeHealthSummary({ collectionId = "" } = {}) {
+  initRagStore();
+  const params = [];
+  let where = "1=1";
+  if (collectionId) {
+    if (collectionId === "trading") {
+      where += " AND (collection_id = ? OR collection_id IS NULL OR collection_id = '')";
+      params.push(collectionId);
+    } else {
+      where += " AND collection_id = ?";
+      params.push(collectionId);
+    }
+  }
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN stale = 1 THEN 1 ELSE 0 END) AS stale_count,
+      SUM(CASE WHEN expired = 1 THEN 1 ELSE 0 END) AS expired_count,
+      AVG(COALESCE(freshness_score, 0)) AS avg_freshness,
+      AVG(COALESCE(reliability_score, 0)) AS avg_reliability,
+      MAX(reviewed_at) AS last_reviewed_at
+    FROM knowledge_documents
+    WHERE ${where}
+  `).get(...params);
+  return {
+    total: row?.total || 0,
+    stale: row?.stale_count || 0,
+    expired: row?.expired_count || 0,
+    avgFreshness: Number(row?.avg_freshness || 0),
+    avgReliability: Number(row?.avg_reliability || 0),
+    lastReviewedAt: row?.last_reviewed_at || ""
+  };
+}
+
+export function listKnowledgeSourceStats({ collectionId = "", limit = 50 } = {}) {
+  initRagStore();
+  const params = [];
+  let where = "1=1";
+  if (collectionId) {
+    if (collectionId === "trading") {
+      where += " AND (collection_id = ? OR collection_id IS NULL OR collection_id = '')";
+      params.push(collectionId);
+    } else {
+      where += " AND collection_id = ?";
+      params.push(collectionId);
+    }
+  }
+  const rows = db.prepare(`
+    SELECT
+      COALESCE(NULLIF(source_group, ''), NULLIF(source_url, ''), NULLIF(source_type, ''), 'unknown') AS source_key,
+      MAX(source_url) AS source_url,
+      MAX(source_group) AS source_group,
+      MAX(source_type) AS source_type,
+      MIN(COALESCE(NULLIF(published_at, ''), NULLIF(retrieved_at, ''), NULLIF(created_at, ''))) AS first_seen,
+      MAX(COALESCE(NULLIF(published_at, ''), NULLIF(retrieved_at, ''), NULLIF(created_at, ''))) AS last_seen,
+      COUNT(*) AS doc_count,
+      SUM(CASE WHEN stale = 1 THEN 1 ELSE 0 END) AS stale_count,
+      SUM(CASE WHEN expired = 1 THEN 1 ELSE 0 END) AS expired_count,
+      AVG(COALESCE(freshness_score, 0)) AS avg_freshness,
+      AVG(COALESCE(reliability_score, 0)) AS avg_reliability
+    FROM knowledge_documents
+    WHERE ${where}
+    GROUP BY source_key
+    ORDER BY doc_count DESC
+    LIMIT ?
+  `).all(...params, Number(limit || 50));
+  return rows.map(row => ({
+    source_key: row.source_key || "unknown",
+    source_url: row.source_url || "",
+    source_group: row.source_group || "",
+    source_type: row.source_type || "",
+    first_seen: row.first_seen || "",
+    last_seen: row.last_seen || "",
+    doc_count: row.doc_count || 0,
+    stale_count: row.stale_count || 0,
+    expired_count: row.expired_count || 0,
+    avg_freshness: Number(row.avg_freshness || 0),
+    avg_reliability: Number(row.avg_reliability || 0)
+  }));
 }
 
 export function recordSignalsRun({ run_id, status, started_at, source_count, report_path } = {}) {
