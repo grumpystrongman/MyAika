@@ -181,6 +181,7 @@ import { listMacros, saveMacro, deleteMacro, getMacro, applyMacroParams, extract
 import { listCanvasCards, upsertCanvasCard } from "./src/canvas/store.js";
 import { listSkillVault, getSkillVaultEntry, scanSkillWithVirusTotal } from "./src/skillVault/registry.js";
 import { startAssistantTasksLoop } from "./src/assistant/taskRunner.js";
+import { startAssistantOpsLoop } from "./src/assistant/opsLoop.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -239,6 +240,7 @@ startTradingRssLoop();
 startTradingYoutubeLoop();
 startSignalsScheduler();
 startAssistantTasksLoop();
+startAssistantOpsLoop();
 const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
 let monitorInterval = null;
 let monitorRunning = false;

@@ -2,14 +2,17 @@ import OpenAI from "openai";
 import { writeOutbox } from "../../storage/outbox.js";
 import { nowIso } from "../../storage/utils.js";
 import {
+  listAssistantTasks,
   listDueAssistantTasks,
   recordAssistantTaskRun,
   computeNextRunAt
 } from "../../storage/assistant_tasks.js";
+import { listAssistantProposals } from "../../storage/assistant_change_proposals.js";
 import { executeAction } from "../safety/executeAction.js";
 import { sendGmailMessage, getGoogleStatus } from "../../integrations/google.js";
 import { sendTelegramMessage } from "../../integrations/messaging.js";
 import { getTradingKnowledgeHealthSnapshot } from "../trading/knowledgeRag.js";
+import { listAuditEvents } from "../safety/auditLog.js";
 
 let runnerInterval = null;
 let runnerActive = false;
@@ -35,6 +38,40 @@ function limitText(value, maxChars = 8000) {
   return `${text.slice(0, maxChars)}...`;
 }
 
+function formatPendingProposals(ownerId) {
+  const proposals = listAssistantProposals(ownerId, { status: "pending", limit: 20 });
+  if (!proposals.length) return "No pending change proposals.";
+  return proposals.map(proposal => {
+    const summary = proposal.summary ? ` - ${proposal.summary}` : "";
+    const approval = proposal.approvalId ? ` (approval: ${proposal.approvalId})` : "";
+    return `- ${proposal.title}${approval}${summary}`;
+  }).join("\n");
+}
+
+function formatTaskFailures(ownerId) {
+  const tasks = listAssistantTasks(ownerId, { limit: 50 });
+  const failures = tasks.filter(task => ["error", "partial", "approval_required"].includes(task.lastRunStatus));
+  if (!failures.length) return "No recent task failures.";
+  return failures.map(task => {
+    const status = task.lastRunStatus || "error";
+    const lastRun = task.lastRunAt || "unknown";
+    const error = task.lastRunError ? ` - ${task.lastRunError}` : "";
+    return `- ${task.title} (${status}, last run ${lastRun})${error}`;
+  }).join("\n");
+}
+
+function formatAuditRecent() {
+  const events = listAuditEvents({ limit: 20 });
+  if (!events.length) return "No recent audit events.";
+  return events.map(event => {
+    const ts = event.ts || "";
+    const action = event.action_type || "unknown";
+    const decision = event.decision || "";
+    const reason = event.reason ? ` - ${event.reason}` : "";
+    return `- ${ts} ${action} ${decision}${reason}`;
+  }).join("\n");
+}
+
 function injectTradingKnowledgeSnapshot(prompt) {
   let output = String(prompt || "");
   if (!output.includes("{{trading_knowledge_health")) return output;
@@ -50,8 +87,28 @@ function injectTradingKnowledgeSnapshot(prompt) {
   return output;
 }
 
+function injectOpsSnapshots(prompt, task) {
+  let output = String(prompt || "");
+  const ownerId = task?.ownerId || "local";
+  if (output.includes("{{assistant_proposals:pending}}") || output.includes("{{assistant_ops:pending_proposals}}")) {
+    const snapshot = formatPendingProposals(ownerId);
+    output = output
+      .replace(/\{\{assistant_proposals:pending\}\}/gi, snapshot)
+      .replace(/\{\{assistant_ops:pending_proposals\}\}/gi, snapshot);
+  }
+  if (output.includes("{{assistant_ops:task_failures}}")) {
+    output = output.replace(/\{\{assistant_ops:task_failures\}\}/gi, formatTaskFailures(ownerId));
+  }
+  if (output.includes("{{assistant_ops:audit_recent}}")) {
+    output = output.replace(/\{\{assistant_ops:audit_recent\}\}/gi, formatAuditRecent());
+  }
+  return output;
+}
+
 async function runTaskPrompt(task) {
-  const prompt = injectTradingKnowledgeSnapshot(String(task.prompt || "").trim());
+  let prompt = String(task.prompt || "").trim();
+  prompt = injectTradingKnowledgeSnapshot(prompt);
+  prompt = injectOpsSnapshots(prompt, task);
   if (!prompt) throw new Error("task_prompt_missing");
   const client = getOpenAIClient();
   if (!client) {
