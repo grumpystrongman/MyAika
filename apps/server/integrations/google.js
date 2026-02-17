@@ -331,10 +331,16 @@ export async function getGoogleDoc(documentId, userId = "") {
 }
 
 export async function uploadDriveFile(name, content, mimeType = "text/plain", userId = "") {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(String(content ?? ""), "utf8");
+  return uploadDriveFileBytes({ name, bytes, mimeType, userId });
+}
+
+export async function uploadDriveFileBytes({ name, bytes, mimeType = "application/octet-stream", folderId = "", userId = "" } = {}) {
   const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/drive.file"], userId);
-  const boundary = "aika_boundary";
+  const boundary = `aika_boundary_${Date.now()}`;
   const metadata = { name, mimeType };
-  const multipart = [
+  if (folderId) metadata.parents = [folderId];
+  const head = Buffer.from([
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
     "",
@@ -342,9 +348,10 @@ export async function uploadDriveFile(name, content, mimeType = "text/plain", us
     `--${boundary}`,
     `Content-Type: ${mimeType}`,
     "",
-    content,
-    `--${boundary}--`
-  ].join("\r\n");
+    ""
+  ].join("\r\n"));
+  const tail = Buffer.from(`\r\n--${boundary}--`);
+  const payload = Buffer.concat([head, Buffer.from(bytes || []), tail]);
 
   const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
     method: "POST",
@@ -352,7 +359,7 @@ export async function uploadDriveFile(name, content, mimeType = "text/plain", us
       Authorization: `Bearer ${token}`,
       "Content-Type": `multipart/related; boundary=${boundary}`
     },
-    body: multipart
+    body: payload
   });
   if (!r.ok) {
     const text = await r.text();

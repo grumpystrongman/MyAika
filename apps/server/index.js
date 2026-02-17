@@ -97,6 +97,7 @@ import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus, getFire
 import { listRagModels, createRagModel } from "./src/rag/collections.js";
 import { syncFireflies, startFirefliesSyncLoop, getFirefliesSyncStatus, queueFirefliesSync } from "./src/rag/firefliesIngest.js";
 import { answerRagQuestionRouted } from "./src/rag/router.js";
+import { backupRagToDrive } from "./src/rag/backup.js";
 import { startMetaRagLoop, maybeCreateAutoRagProposal } from "./src/rag/metaRag.js";
 import { recordFeedback } from "./src/feedback/feedback.js";
 import { startDailyPicksLoop, runDailyPicksEmail, generateDailyPicks, rescheduleDailyPicksLoop } from "./src/trading/dailyPicks.js";
@@ -3980,6 +3981,31 @@ app.get("/api/rag/status", (_req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err?.message || "rag_status_failed" });
+  }
+});
+
+app.post("/api/rag/backup", async (req, res) => {
+  try {
+    const { includeWal, includeHnsw, folderPath } = req.body || {};
+    const result = await executeAction({
+      actionType: "drive.upload",
+      params: { kind: "rag_backup" },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      outboundTargets: ["https://www.googleapis.com"],
+      summary: "Backup RAG to Google Drive",
+      handler: async () => backupRagToDrive({
+        userId: getUserId(req),
+        includeWal,
+        includeHnsw,
+        folderPath
+      })
+    });
+    if (result.status === "approval_required") {
+      return res.status(403).json(result);
+    }
+    res.json({ ok: true, backup: result.data });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "rag_backup_failed" });
   }
 });
 

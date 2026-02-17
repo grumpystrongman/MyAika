@@ -16,6 +16,7 @@
     "voice:test": "node apps/server/scripts/voice_fulltest.js",
     "aika": "node apps/server/cli/aika.js",
     "ingest:signals": "node apps/server/scripts/signals_ingest.js",
+    "rag:backup": "node apps/server/scripts/backup_rag_drive.js",
     "test": "node --test apps/server/tests/*.test.js",
     "smoke": "node scripts/full_smoke_test.js",
     "ui:smoke": "node scripts/ui_smoke.js",
