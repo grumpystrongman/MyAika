@@ -96,7 +96,7 @@ import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
 import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus, getFirefliesGraph, getFirefliesNodeDetails } from "./src/rag/vectorStore.js";
 import { listRagModels, createRagModel } from "./src/rag/collections.js";
 import { syncFireflies, startFirefliesSyncLoop, getFirefliesSyncStatus, queueFirefliesSync } from "./src/rag/firefliesIngest.js";
-import { answerRagQuestion } from "./src/rag/query.js";
+import { answerRagQuestionRouted } from "./src/rag/router.js";
 import { recordFeedback } from "./src/feedback/feedback.js";
 import { startDailyPicksLoop, runDailyPicksEmail, generateDailyPicks, rescheduleDailyPicksLoop } from "./src/trading/dailyPicks.js";
 import { createAlpacaTradeStream } from "./src/trading/alpacaStream.js";
@@ -2113,9 +2113,10 @@ app.post("/chat", async (req, res) => {
             .replace(/^rag:\s*[a-z0-9_-]+/i, "")
             .replace(/^meeting:\s*/i, "")
             .trim() || userText;
-          const ragResult = await answerRagQuestion(queryText, {
+          const ragResult = await answerRagQuestionRouted(queryText, {
             topK: Number(process.env.RAG_TOP_K || 8),
             filters: ragSelection.filters || {},
+            ragModel: ragSelection.id || "auto",
             conversationContext: threadContextText
           });
           if (ragResult?.answer) {
@@ -2131,6 +2132,13 @@ app.post("/chat", async (req, res) => {
                 ragAnswer,
                 makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
                 { citations: ragCitations, source: "rag", memoryRecall, ragModel: ragSelection.id }
+              );
+            }
+            if (ragResult?.gap && ragUnknown) {
+              return sendAssistantReply(
+                `I don't have enough knowledge to answer that. I can build a new RAG model on \"${ragResult.gap.topic}\" if you want me to.`,
+                makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
+                { ragGap: ragResult.gap, source: "rag", ragModel: ragSelection.id }
               );
             }
           }
@@ -3817,9 +3825,10 @@ app.get("/api/fireflies/sync/status", (_req, res) => {
 app.post("/api/rag/ask", async (req, res) => {
   try {
     const parsed = ragAskSchema.parse(req.body || {});
-    const result = await answerRagQuestion(parsed.question, {
+    const result = await answerRagQuestionRouted(parsed.question, {
       topK: parsed.topK,
-      filters: parsed.filters || {}
+      filters: parsed.filters || {},
+      ragModel: "auto"
     });
     res.json(result);
   } catch (err) {
