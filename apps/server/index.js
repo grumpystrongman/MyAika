@@ -87,6 +87,9 @@ import { writeOutbox } from "./storage/outbox.js";
 import { listPairings, approvePairing, denyPairing } from "./storage/pairings.js";
 import { getThread, listThreadMessages, appendThreadMessage } from "./storage/threads.js";
 import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
+import { getAssistantProfile, updateAssistantProfile } from "./storage/assistant_profile.js";
+import { listAssistantTasks, createAssistantTask, updateAssistantTask } from "./storage/assistant_tasks.js";
+import { listAssistantProposals, createAssistantProposal, updateAssistantProposal, getAssistantProposal } from "./storage/assistant_change_proposals.js";
 import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactStructured, redactText } from "./recordings/redaction.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
@@ -164,6 +167,7 @@ import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
 import { listMacros, saveMacro, deleteMacro, getMacro, applyMacroParams, extractMacroParams } from "./src/actionRunner/macros.js";
 import { listCanvasCards, upsertCanvasCard } from "./src/canvas/store.js";
 import { listSkillVault, getSkillVaultEntry, scanSkillWithVirusTotal } from "./src/skillVault/registry.js";
+import { startAssistantTasksLoop } from "./src/assistant/taskRunner.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -215,6 +219,7 @@ startTradingKnowledgeSyncLoop();
 startTradingRssLoop();
 startTradingYoutubeLoop();
 startSignalsScheduler();
+startAssistantTasksLoop();
 const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
 let monitorInterval = null;
 let monitorRunning = false;
@@ -5233,6 +5238,108 @@ app.get("/api/skills", (_req, res) => {
 
 app.get("/api/skills/events", (_req, res) => {
   res.json({ events: getSkillEvents() });
+});
+
+app.get("/api/assistant/profile", (req, res) => {
+  const userId = getUserId(req);
+  res.json({ profile: getAssistantProfile(userId) });
+});
+
+app.put("/api/assistant/profile", (req, res) => {
+  const userId = getUserId(req);
+  try {
+    const profile = updateAssistantProfile(userId, req.body || {});
+    res.json({ profile });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || "profile_update_failed" });
+  }
+});
+
+app.get("/api/assistant/tasks", (req, res) => {
+  const userId = getUserId(req);
+  const { status, limit, offset } = req.query || {};
+  const tasks = listAssistantTasks(userId, {
+    status: status ? String(status) : "",
+    limit: Number(limit || 50),
+    offset: Number(offset || 0)
+  });
+  res.json({ tasks });
+});
+
+app.post("/api/assistant/tasks", (req, res) => {
+  const userId = getUserId(req);
+  try {
+    const task = createAssistantTask(userId, req.body || {});
+    res.json({ task });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || "task_create_failed" });
+  }
+});
+
+app.patch("/api/assistant/tasks", (req, res) => {
+  const userId = getUserId(req);
+  const { id, ...patch } = req.body || {};
+  if (!id) return res.status(400).json({ error: "task_id_required" });
+  const task = updateAssistantTask(userId, id, patch);
+  if (!task) return res.status(404).json({ error: "task_not_found" });
+  res.json({ task });
+});
+
+app.get("/api/assistant/proposals", (req, res) => {
+  const userId = getUserId(req);
+  const { status, limit, offset } = req.query || {};
+  const proposals = listAssistantProposals(userId, {
+    status: status ? String(status) : "",
+    limit: Number(limit || 50),
+    offset: Number(offset || 0)
+  });
+  res.json({ proposals });
+});
+
+app.post("/api/assistant/proposals", (req, res) => {
+  const userId = getUserId(req);
+  const { title, summary, details } = req.body || {};
+  if (!title) return res.status(400).json({ error: "proposal_title_required" });
+  const approval = createSafetyApproval({
+    actionType: "assistant.change_proposal",
+    summary: summary || title,
+    payloadRedacted: { title, summary: summary || "" },
+    createdBy: userId,
+    reason: "assistant_change_proposal"
+  });
+  try {
+    const proposal = createAssistantProposal(userId, {
+      title,
+      summary: summary || "",
+      details: details || {},
+      status: "pending",
+      approvalId: approval?.id || ""
+    });
+    res.json({ proposal, approval });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || "proposal_create_failed" });
+  }
+});
+
+app.patch("/api/assistant/proposals", (req, res) => {
+  const userId = getUserId(req);
+  const { id, status, decidedBy, reason, ...patch } = req.body || {};
+  if (!id) return res.status(400).json({ error: "proposal_id_required" });
+  const existing = getAssistantProposal(userId, id);
+  if (!existing) return res.status(404).json({ error: "proposal_not_found" });
+  const normalizedStatus = status ? String(status).toLowerCase() : "";
+  let approval = null;
+  if (normalizedStatus === "approved" && existing.approvalId) {
+    approval = approveSafetyApproval(existing.approvalId, decidedBy || userId);
+    patch.decidedAt = new Date().toISOString();
+    patch.decidedBy = decidedBy || userId;
+  } else if (normalizedStatus === "rejected" && existing.approvalId) {
+    approval = rejectSafetyApproval(existing.approvalId, decidedBy || userId, reason || "");
+    patch.decidedAt = new Date().toISOString();
+    patch.decidedBy = decidedBy || userId;
+  }
+  const proposal = updateAssistantProposal(userId, id, { status: normalizedStatus || undefined, ...patch });
+  res.json({ proposal, approval });
 });
 
 app.post("/api/skills/toggle", (req, res) => {

@@ -308,6 +308,71 @@ const migrations = [
     CREATE INDEX IF NOT EXISTS chat_messages_thread
       ON chat_messages (thread_id, created_at);
     `
+  },
+  {
+    id: 9,
+    sql: `
+    CREATE TABLE IF NOT EXISTS assistant_profile (
+      id TEXT PRIMARY KEY,
+      display_name TEXT,
+      timezone TEXT,
+      preferences_json TEXT,
+      memory_mode TEXT,
+      auto_summary INTEGER,
+      summary_json TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS assistant_projects (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT,
+      name TEXT,
+      description TEXT,
+      status TEXT,
+      metadata_json TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_projects_owner
+      ON assistant_projects (owner_id, status, created_at);
+
+    CREATE TABLE IF NOT EXISTS assistant_tasks (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT,
+      title TEXT,
+      prompt TEXT,
+      schedule_json TEXT,
+      status TEXT,
+      last_run_at TEXT,
+      next_run_at TEXT,
+      last_run_status TEXT,
+      last_run_output TEXT,
+      last_run_error TEXT,
+      notification_channels_json TEXT,
+      notification_targets_json TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_tasks_owner
+      ON assistant_tasks (owner_id, status, next_run_at);
+
+    CREATE TABLE IF NOT EXISTS assistant_change_proposals (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT,
+      title TEXT,
+      summary TEXT,
+      details_json TEXT,
+      status TEXT,
+      approval_id TEXT,
+      decided_at TEXT,
+      decided_by TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_proposals_owner
+      ON assistant_change_proposals (owner_id, status, created_at);
+    `
   }
 ];
 

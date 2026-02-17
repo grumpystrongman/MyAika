@@ -32,43 +32,52 @@ function getLastHash(db) {
 
 export function appendAuditEvent(event = {}) {
   const db = getDb();
-  const id = crypto.randomBytes(8).toString("hex");
   const ts = event.ts || nowIso();
   const prevHash = getLastHash(db);
-  const eventWithoutHash = {
-    id,
-    ts,
-    user: event.user || "",
-    session: event.session || "",
-    action_type: event.action_type || "",
-    decision: event.decision || "",
-    reason: event.reason || "",
-    risk_score: Number.isFinite(event.risk_score) ? event.risk_score : null,
-    resource_refs: JSON.stringify(redactPayload(event.resource_refs || [])),
-    redacted_payload: redactJsonString(event.redacted_payload || {}),
-    result_redacted: redactJsonString(event.result_redacted || {}),
-    prev_hash: prevHash || ""
-  };
-  const hash = computeHash(prevHash || "", eventWithoutHash);
-  db.prepare(
+  const stmt = db.prepare(
     `INSERT INTO audit_events (id, ts, user, session, action_type, decision, reason, risk_score, resource_refs, redacted_payload, result_redacted, prev_hash, hash)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    eventWithoutHash.id,
-    eventWithoutHash.ts,
-    eventWithoutHash.user,
-    eventWithoutHash.session,
-    eventWithoutHash.action_type,
-    eventWithoutHash.decision,
-    eventWithoutHash.reason,
-    eventWithoutHash.risk_score,
-    eventWithoutHash.resource_refs,
-    eventWithoutHash.redacted_payload,
-    eventWithoutHash.result_redacted,
-    eventWithoutHash.prev_hash,
-    hash
   );
-  return { ...eventWithoutHash, hash };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const id = crypto.randomBytes(8).toString("hex");
+    const eventWithoutHash = {
+      id,
+      ts,
+      user: event.user || "",
+      session: event.session || "",
+      action_type: event.action_type || "",
+      decision: event.decision || "",
+      reason: event.reason || "",
+      risk_score: Number.isFinite(event.risk_score) ? event.risk_score : null,
+      resource_refs: JSON.stringify(redactPayload(event.resource_refs || [])),
+      redacted_payload: redactJsonString(event.redacted_payload || {}),
+      result_redacted: redactJsonString(event.result_redacted || {}),
+      prev_hash: prevHash || ""
+    };
+    const hash = computeHash(prevHash || "", eventWithoutHash);
+    try {
+      stmt.run(
+        eventWithoutHash.id,
+        eventWithoutHash.ts,
+        eventWithoutHash.user,
+        eventWithoutHash.session,
+        eventWithoutHash.action_type,
+        eventWithoutHash.decision,
+        eventWithoutHash.reason,
+        eventWithoutHash.risk_score,
+        eventWithoutHash.resource_refs,
+        eventWithoutHash.redacted_payload,
+        eventWithoutHash.result_redacted,
+        eventWithoutHash.prev_hash,
+        hash
+      );
+      return { ...eventWithoutHash, hash };
+    } catch (err) {
+      const code = String(err?.code || "");
+      if (code !== "SQLITE_CONSTRAINT_PRIMARYKEY") throw err;
+    }
+  }
+  throw new Error("audit_event_insert_failed");
 }
 
 export function listAuditEvents({ limit = 100 } = {}) {
