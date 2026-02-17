@@ -23,8 +23,12 @@ import {
   getTradingSource,
   getTradingSourceByUrl,
   markTradingSourceCrawl,
-  deleteMeetingsBySourceGroup
+  deleteMeetingsBySourceGroup,
+  upsertKnowledgeDocument,
+  getKnowledgeDocumentByHash,
+  listKnowledgeDedupCandidates
 } from "../rag/vectorStore.js";
+import { hashContent, computeSimhash, hammingDistance, computeFreshnessScore } from "../signals/utils.js";
 
 const MAX_DOC_CHARS = Number(process.env.TRADING_RAG_MAX_DOC_CHARS || 50000);
 const MAX_FETCH_BYTES = Number(process.env.TRADING_RAG_MAX_BYTES || 2000000);
@@ -42,6 +46,10 @@ const OCR_DEFAULT = String(process.env.TRADING_RAG_OCR_DEFAULT || "1") !== "0";
 const OCR_MAX_PAGES = Number(process.env.TRADING_RAG_OCR_MAX_PAGES || 0);
 const OCR_SCALE = Number(process.env.TRADING_RAG_OCR_SCALE || 2.0);
 const TRADING_PREFIX = "trading";
+const DEDUP_LOOKBACK_HOURS = Number(process.env.TRADING_RAG_DEDUP_LOOKBACK_HOURS || 720);
+const SIMHASH_DISTANCE = Number(process.env.TRADING_RAG_SIMHASH_DISTANCE || 3);
+const FRESHNESS_HALFLIFE_HOURS = Number(process.env.TRADING_RAG_FRESHNESS_HALFLIFE_HOURS || 720);
+const EVERGREEN_HALFLIFE_HOURS = Number(process.env.TRADING_RAG_EVERGREEN_HALFLIFE_HOURS || 8760);
 
 const DEFAULT_TRADING_SOURCES = [
   { url: "https://www.investopedia.com", tags: ["education", "basics"] },
@@ -161,6 +169,57 @@ function normalizeTags(tags) {
       seen.add(tag);
       return true;
     });
+}
+
+const EVERGREEN_TAGS = new Set([
+  "book", "books", "course", "courses", "doc", "docs", "reference",
+  "reg", "regulation", "api", "developer", "dev", "guide", "manual"
+]);
+
+function isEvergreenTags(tags = []) {
+  return tags.some(tag => EVERGREEN_TAGS.has(String(tag || "").toLowerCase()));
+}
+
+function scoreReliability(sourceUrl = "", tags = []) {
+  let score = 0.7;
+  const lowerTags = tags.map(tag => String(tag || "").toLowerCase());
+  if (lowerTags.some(tag => ["reg", "regulation", "sec", "fed", "official"].includes(tag))) {
+    score = 0.85;
+  }
+  if (lowerTags.some(tag => ["blog", "social", "opinion"].includes(tag))) {
+    score = 0.55;
+  }
+  try {
+    const host = new URL(sourceUrl).hostname.toLowerCase();
+    if (host.endsWith(".gov")) score = Math.max(score, 0.9);
+    if (host.endsWith(".edu")) score = Math.max(score, 0.85);
+    if (host.includes("sec.gov") || host.includes("federalreserve.gov")) score = Math.max(score, 0.9);
+  } catch {
+    // ignore
+  }
+  return Math.min(0.95, Math.max(0.2, score));
+}
+
+const dedupCache = {
+  ts: 0,
+  collectionId: "",
+  items: []
+};
+
+function getDedupCandidates(collectionId) {
+  const now = Date.now();
+  if (dedupCache.collectionId === collectionId && now - dedupCache.ts < 5 * 60_000) {
+    return dedupCache.items;
+  }
+  const items = listKnowledgeDedupCandidates({
+    sinceHours: DEDUP_LOOKBACK_HOURS,
+    limit: 2000,
+    collectionId
+  });
+  dedupCache.ts = now;
+  dedupCache.collectionId = collectionId;
+  dedupCache.items = items || [];
+  return dedupCache.items;
 }
 
 function buildSourceKey(row = {}) {
@@ -474,16 +533,37 @@ export async function ingestTradingDocument({
   if (!normalizedText) {
     return { ok: false, error: "empty_text" };
   }
+  const resolvedCollection = collectionId || TRADING_PREFIX;
+  const normalizedTags = normalizeTags(tags);
+  const contentHash = hashContent(normalizedText);
+  const simhash = computeSimhash(normalizedText);
+
+  if (!force) {
+    const existingDoc = getKnowledgeDocumentByHash(contentHash, resolvedCollection);
+    if (existingDoc) {
+      return { ok: true, skipped: true, reason: "dedup_hash", meetingId: existingDoc.meeting_id || "" };
+    }
+    if (SIMHASH_DISTANCE > 0 && simhash) {
+      const candidates = getDedupCandidates(resolvedCollection);
+      const nearDup = candidates.find(item => item.simhash && hammingDistance(item.simhash, simhash) <= SIMHASH_DISTANCE);
+      if (nearDup) {
+        return { ok: true, skipped: true, reason: "dedup_simhash" };
+      }
+    }
+  }
   const idSeed = sourceUrl || `${title}:${normalizedText.slice(0, 120)}`;
-  const meetingId = buildTradingId(kind, idSeed, collectionId);
+  const meetingId = buildTradingId(kind, idSeed, resolvedCollection);
   const existing = getMeeting(meetingId);
   if (existing && !force && existing.raw_transcript === normalizedText) {
     return { ok: true, skipped: true, meetingId, chunks: 0 };
   }
   const occurred = occurredAt || nowIso();
-  const header = buildHeader({ title, sourceUrl, tags });
+  const header = buildHeader({ title, sourceUrl, tags: normalizedTags });
   const body = limitText(normalizedText);
   const raw = header ? `${header}\n\n${body}` : body;
+  const halfLife = isEvergreenTags(normalizedTags) ? EVERGREEN_HALFLIFE_HOURS : FRESHNESS_HALFLIFE_HOURS;
+  const freshness = computeFreshnessScore(occurred, halfLife);
+  const reliability = scoreReliability(sourceUrl || "", normalizedTags);
 
   upsertMeeting({
     id: meetingId,
@@ -508,6 +588,28 @@ export async function ingestTradingDocument({
   }
   await upsertVectors(chunks, embeddings);
   await persistHnsw();
+  upsertKnowledgeDocument({
+    doc_id: meetingId,
+    collection_id: resolvedCollection,
+    source_type: kind || "",
+    source_url: sourceUrl || "",
+    source_group: sourceGroup || "",
+    title: title || "",
+    content_hash: contentHash,
+    simhash,
+    published_at: occurred,
+    retrieved_at: nowIso(),
+    freshness_score: freshness,
+    reliability_score: reliability,
+    tags: normalizedTags,
+    metadata: { kind: kind || "", tags: normalizedTags },
+    meeting_id: meetingId,
+    created_at: occurred
+  });
+  if (!force && SIMHASH_DISTANCE > 0 && simhash) {
+    const candidates = getDedupCandidates(resolvedCollection);
+    candidates.unshift({ content_hash: contentHash, simhash, source_url: sourceUrl || "", collection_id: resolvedCollection });
+  }
   return { ok: true, meetingId, chunks: chunks.length };
 }
 

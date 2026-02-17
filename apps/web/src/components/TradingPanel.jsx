@@ -35,6 +35,16 @@ const GLOSSARY = [
   { term: "Take Profit", def: "Exit to lock gains." }
 ];
 
+const VALID_TRADING_TABS = new Set([
+  "terminal",
+  "paper",
+  "backtest",
+  "options",
+  "qa",
+  "knowledge",
+  "scenarios"
+]);
+
 function formatNumber(value, digits = 2) {
   if (value == null || Number.isNaN(value)) return "--";
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -1171,7 +1181,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [lessonQuery, setLessonQuery] = useState("");
   const [lessons, setLessons] = useState([]);
   const [lessonStatus, setLessonStatus] = useState("");
-  const [tradingTab, setTradingTab] = useState("terminal");
+  const [tradingTab, setTradingTab] = useState(() => {
+    if (typeof window === "undefined") return "terminal";
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tradingTab");
+    return tab && VALID_TRADING_TABS.has(tab) ? tab : "terminal";
+  });
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
   const [knowledgeText, setKnowledgeText] = useState("");
   const [knowledgeTags, setKnowledgeTags] = useState("");

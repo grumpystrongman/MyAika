@@ -280,6 +280,26 @@ function ensureSchema() {
       created_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_documents (
+      doc_id TEXT PRIMARY KEY,
+      collection_id TEXT,
+      source_type TEXT,
+      source_url TEXT,
+      source_group TEXT,
+      title TEXT,
+      content_hash TEXT,
+      simhash TEXT,
+      published_at TEXT,
+      retrieved_at TEXT,
+      freshness_score REAL,
+      reliability_score REAL,
+      tags_json TEXT,
+      metadata_json TEXT,
+      meeting_id TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chunks_meeting ON chunks(meeting_id);
     CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(occurred_at);
     CREATE INDEX IF NOT EXISTS idx_trading_sources_enabled ON trading_sources(enabled);
@@ -292,6 +312,9 @@ function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_signals_docs_hash ON signals_documents(content_hash);
     CREATE INDEX IF NOT EXISTS idx_signals_runs_started ON signals_runs(started_at);
     CREATE INDEX IF NOT EXISTS idx_signals_trends_run ON signals_trends(run_id);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_docs_hash ON knowledge_documents(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_docs_collection ON knowledge_documents(collection_id);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_docs_retrieved ON knowledge_documents(retrieved_at);
   `);
 }
 
@@ -1657,6 +1680,114 @@ export function listSignalDocuments({
     LIMIT ? OFFSET ?
   `).all(...params, Number(limit || 50), Number(offset || 0));
   return rows.map(normalizeSignalDocRow).filter(Boolean);
+}
+
+function normalizeKnowledgeDocRow(row) {
+  if (!row) return null;
+  return {
+    doc_id: row.doc_id,
+    collection_id: row.collection_id || "",
+    source_type: row.source_type || "",
+    source_url: row.source_url || "",
+    source_group: row.source_group || "",
+    title: row.title || "",
+    content_hash: row.content_hash || "",
+    simhash: row.simhash || "",
+    published_at: row.published_at || "",
+    retrieved_at: row.retrieved_at || "",
+    freshness_score: Number(row.freshness_score || 0),
+    reliability_score: Number(row.reliability_score || 0),
+    tags: row.tags_json ? JSON.parse(row.tags_json) : [],
+    metadata: row.metadata_json ? JSON.parse(row.metadata_json) : {},
+    meeting_id: row.meeting_id || "",
+    created_at: row.created_at || "",
+    updated_at: row.updated_at || ""
+  };
+}
+
+export function upsertKnowledgeDocument(doc) {
+  if (!doc?.doc_id) return null;
+  initRagStore();
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO knowledge_documents (
+      doc_id, collection_id, source_type, source_url, source_group, title,
+      content_hash, simhash, published_at, retrieved_at, freshness_score,
+      reliability_score, tags_json, metadata_json, meeting_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(doc_id) DO UPDATE SET
+      collection_id = excluded.collection_id,
+      source_type = excluded.source_type,
+      source_url = excluded.source_url,
+      source_group = excluded.source_group,
+      title = excluded.title,
+      content_hash = excluded.content_hash,
+      simhash = excluded.simhash,
+      published_at = excluded.published_at,
+      retrieved_at = excluded.retrieved_at,
+      freshness_score = excluded.freshness_score,
+      reliability_score = excluded.reliability_score,
+      tags_json = excluded.tags_json,
+      metadata_json = excluded.metadata_json,
+      meeting_id = excluded.meeting_id,
+      updated_at = excluded.updated_at
+  `).run(
+    doc.doc_id,
+    doc.collection_id || "",
+    doc.source_type || "",
+    doc.source_url || "",
+    doc.source_group || "",
+    doc.title || "",
+    doc.content_hash || "",
+    doc.simhash || "",
+    doc.published_at || "",
+    doc.retrieved_at || "",
+    Number(doc.freshness_score || 0),
+    Number(doc.reliability_score || 0),
+    JSON.stringify(doc.tags || []),
+    JSON.stringify(doc.metadata || {}),
+    doc.meeting_id || "",
+    doc.created_at || now,
+    now
+  );
+  return getKnowledgeDocument(doc.doc_id);
+}
+
+export function getKnowledgeDocument(docId) {
+  initRagStore();
+  const row = db.prepare("SELECT * FROM knowledge_documents WHERE doc_id = ?").get(docId);
+  return normalizeKnowledgeDocRow(row);
+}
+
+export function getKnowledgeDocumentByHash(hash, collectionId = "") {
+  if (!hash) return null;
+  initRagStore();
+  const params = [hash];
+  let sql = "SELECT * FROM knowledge_documents WHERE content_hash = ?";
+  if (collectionId) {
+    sql += " AND collection_id = ?";
+    params.push(collectionId);
+  }
+  const row = db.prepare(sql).get(...params);
+  return normalizeKnowledgeDocRow(row);
+}
+
+export function listKnowledgeDedupCandidates({ sinceHours = 720, limit = 1000, collectionId = "" } = {}) {
+  initRagStore();
+  const since = new Date(Date.now() - sinceHours * 3600000).toISOString();
+  const params = [since, since];
+  let sql = `
+    SELECT doc_id, content_hash, simhash, source_url, collection_id
+    FROM knowledge_documents
+    WHERE (retrieved_at >= ? OR published_at >= ?)
+  `;
+  if (collectionId) {
+    sql += " AND collection_id = ?";
+    params.push(collectionId);
+  }
+  sql += " ORDER BY retrieved_at DESC LIMIT ?";
+  params.push(Number(limit || 1000));
+  return db.prepare(sql).all(...params);
 }
 
 export function recordSignalsRun({ run_id, status, started_at, source_count, report_path } = {}) {

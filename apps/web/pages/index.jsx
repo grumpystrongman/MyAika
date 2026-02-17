@@ -10,6 +10,7 @@ import CanvasPanel from "../src/components/CanvasPanel";
 import FirefliesPanel from "../src/components/FirefliesPanel";
 import SafetyPanel from "../src/components/SafetyPanel";
 import TradingPanel from "../src/components/TradingPanel";
+import GuidePanel from "../src/components/GuidePanel";
 
 function resolveServerUrl() {
   if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
@@ -126,6 +127,26 @@ const AVATAR_BACKGROUNDS = [
     };
   })
 ];
+
+const VALID_TABS = new Set([
+  "chat",
+  "recordings",
+  "workbench",
+  "tools",
+  "actionRunner",
+  "teachMode",
+  "fireflies",
+  "trading",
+  "safety",
+  "canvas",
+  "features",
+  "settings",
+  "debug",
+  "guide"
+]);
+
+const VALID_SETTINGS_TABS = new Set(["integrations", "skills", "trading", "appearance", "voice"]);
+const VALID_FEATURES_VIEWS = new Set(["mcp", "connections"]);
 
 function pickThinkingCue() {
   return THINKING_CUES[Math.floor(Math.random() * THINKING_CUES.length)];
@@ -399,6 +420,16 @@ export default function Home() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState("integrations");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab && VALID_TABS.has(tab)) setActiveTab(tab);
+    const settings = params.get("settingsTab");
+    if (settings && VALID_SETTINGS_TABS.has(settings)) setSettingsTab(settings);
+    const features = params.get("featuresView");
+    if (features && VALID_FEATURES_VIEWS.has(features)) setFeaturesView(features);
+  }, []);
   const [themeId, setThemeId] = useState("light");
   const [appBackground, setAppBackground] = useState("");
   const [avatarBackground, setAvatarBackground] = useState("none");
@@ -4157,47 +4188,8 @@ export default function Home() {
         )}
 
         {activeTab === "guide" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-              Quickstart Guide + Demo Prompts
-            </div>
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white", fontSize: 13, color: "#374151" }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Voice chat</div>
-              <div>1) Click Mic On</div>
-              <div>2) Speak a prompt like: “Tell me a spooky story in 3 sentences.”</div>
-
-              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Live2D avatar</div>
-              <div>1) Miku loads by default when available.</div>
-              <div>2) Lip-sync uses the actual voice audio, so mouth moves to what you hear.</div>
-              <div>2) Use Avatar Model to switch.</div>
-              <div>3) Import a Live2D zip and then click Refresh Models.</div>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>If you see a Live2D core error, upload live2dcubismcore.js (and .wasm if provided) from the Cubism SDK.</div>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>If it doesn???t appear, hard reload (Ctrl+Shift+R).</div>
-              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Fireflies</div>
-              <div>“Summarize this Fireflies meeting: [paste Fireflies link]”</div>
-              <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Google Docs</div>
-              <div>“Create a Google Doc titled ‘Weekly Notes’ and add a short summary.”</div>
-                <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Plex</div>
-                <div>“Check Plex status and tell me if it’s up.”</div>
-                <div style={{ fontWeight: 600, marginTop: 10, marginBottom: 6 }}>Skills</div>
-                <div>“Note: call the dentist at 3pm.”</div>
-                <div>“List notes.”</div>
-                <div>“Add todo buy milk.”</div>
-                <div>“List todos.”</div>
-                <div>“Add milk to shopping list.”</div>
-                <div>“List shopping list.”</div>
-                <div>“Remind me at 3pm to call mom.”</div>
-                <div>“Remind me in 15 minutes to stretch.”</div>
-                <div>“Trigger lights_on.”</div>
-                <div>“What time is it?”</div>
-                <div>“System status.”</div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
-                  This guide will expand as new integrations are added.
-                </div>
-              </div>
-            </div>
+          <GuidePanel />
         )}
-
         {activeTab === "chat" && (
         <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--panel-border)", borderRadius: 14, padding: 12, background: "var(--panel-bg)", color: "var(--text-primary)" }}>
           {meetingLock && (
@@ -4955,3 +4947,4 @@ async function requestMicStream(constraints) {
   if (reason) throw new Error(reason);
   return navigator.mediaDevices.getUserMedia(constraints);
 }
+
