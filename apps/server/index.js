@@ -145,6 +145,18 @@ import {
   getSignalDoc
 } from "./src/signals/index.js";
 import {
+  startNotionSyncLoop,
+  startSlackSyncLoop,
+  startOutlookSyncLoop,
+  startJiraSyncLoop,
+  startConfluenceSyncLoop,
+  syncNotionConnector,
+  syncSlackConnector,
+  syncOutlookConnector,
+  syncJiraConnector,
+  syncConfluenceConnector
+} from "./src/connectors/index.js";
+import {
   startTradingYoutubeLoop,
   crawlTradingYoutubeSources,
   listTradingYoutubeSourcesUi,
@@ -215,6 +227,11 @@ try {
   console.warn("RAG init failed:", err?.message || err);
 }
 startFirefliesSyncLoop();
+startNotionSyncLoop();
+startSlackSyncLoop();
+startOutlookSyncLoop();
+startJiraSyncLoop();
+startConfluenceSyncLoop();
 startDailyPicksLoop();
 startTradingKnowledgeSyncLoop();
 startTradingKnowledgeHealthLoop();
@@ -411,6 +428,10 @@ function buildIntegrationsState(userId = "") {
     google_docs: { connected: false },
     google_drive: { connected: false },
     fireflies: { connected: false },
+    notion: { connected: false },
+    outlook: { connected: false },
+    jira: { connected: false },
+    confluence: { connected: false },
     amazon: { connected: false },
     walmart: { connected: false },
     facebook: { connected: false },
@@ -430,6 +451,24 @@ function buildIntegrationsState(userId = "") {
     state.google_drive.connected = true;
     state.google_docs.connectedAt = googleStored.connectedAt || new Date().toISOString();
     state.google_drive.connectedAt = googleStored.connectedAt || new Date().toISOString();
+  }
+  const notionStored = getProvider("notion", userId);
+  if (notionStored?.token || notionStored?.access_token || process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN) {
+    state.notion.connected = true;
+    state.notion.connectedAt = notionStored?.connectedAt || new Date().toISOString();
+  }
+  const outlookStored = getProvider("outlook", userId) || getProvider("microsoft", userId);
+  if (outlookStored?.access_token || outlookStored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN) {
+    state.outlook.connected = true;
+    state.outlook.connectedAt = outlookStored?.connectedAt || new Date().toISOString();
+  }
+  if (process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN) {
+    state.jira.connected = true;
+    state.jira.connectedAt = new Date().toISOString();
+  }
+  if (process.env.CONFLUENCE_BASE_URL && process.env.CONFLUENCE_EMAIL && process.env.CONFLUENCE_API_TOKEN) {
+    state.confluence.connected = true;
+    state.confluence.connectedAt = new Date().toISOString();
   }
   const slackStored = getProvider("slack", userId);
   if (slackStored?.access_token || slackStored?.bot_token) {
@@ -504,6 +543,64 @@ function buildConnections(userId = "") {
     connectUrl: "/api/integrations/google/connect?preset=core",
     connectLabel: "Connect Google",
     setupHint: "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in apps/server/.env"
+  });
+
+  const notionStored = getProvider("notion", userId);
+  connections.push({
+    id: "notion",
+    label: "Notion",
+    detail: "Pages and databases",
+    status: notionStored?.token || notionStored?.access_token || process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: notionStored?.lastUsedAt || null,
+    connectedAt: notionStored?.connectedAt || null,
+    configured: Boolean(process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN),
+    method: "api_key",
+    connectLabel: "Set API Token",
+    setupHint: "Set NOTION_TOKEN in apps/server/.env"
+  });
+
+  const outlookStored = getProvider("outlook", userId) || getProvider("microsoft", userId);
+  connections.push({
+    id: "outlook",
+    label: "Outlook / Microsoft 365",
+    detail: "Mail and calendar (Graph API)",
+    status: outlookStored?.access_token || outlookStored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: outlookStored?.lastUsedAt || null,
+    connectedAt: outlookStored?.connectedAt || null,
+    configured: Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN),
+    method: "token",
+    connectLabel: "Set Access Token",
+    setupHint: "Set OUTLOOK_ACCESS_TOKEN in apps/server/.env"
+  });
+
+  connections.push({
+    id: "jira",
+    label: "Jira",
+    detail: "Issues and projects",
+    status: process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: Boolean(process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN),
+    method: "api_key",
+    connectLabel: "Set API Token",
+    setupHint: "Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN"
+  });
+
+  connections.push({
+    id: "confluence",
+    label: "Confluence",
+    detail: "Pages and spaces",
+    status: process.env.CONFLUENCE_BASE_URL && process.env.CONFLUENCE_EMAIL && process.env.CONFLUENCE_API_TOKEN ? "connected" : "disconnected",
+    scopes: [],
+    lastUsedAt: null,
+    connectedAt: null,
+    configured: Boolean(process.env.CONFLUENCE_BASE_URL && process.env.CONFLUENCE_EMAIL && process.env.CONFLUENCE_API_TOKEN),
+    method: "api_key",
+    connectLabel: "Set API Token",
+    setupHint: "Set CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN"
   });
 
   const slackStored = getProvider("slack", userId);
@@ -3494,6 +3591,10 @@ app.get("/api/aika/config", (_req, res) => {
 app.get("/api/integrations", (req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const firefliesConfigured = Boolean(process.env.FIREFLIES_API_KEY);
+  const notionConfigured = Boolean(process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN);
+  const outlookConfigured = Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN);
+  const jiraConfigured = Boolean(process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN);
+  const confluenceConfigured = Boolean(process.env.CONFLUENCE_BASE_URL && process.env.CONFLUENCE_EMAIL && process.env.CONFLUENCE_API_TOKEN);
   const plexConfigured = Boolean(process.env.PLEX_URL && process.env.PLEX_TOKEN);
   const amazonConfigured = Boolean(process.env.AMAZON_ACCESS_KEY && process.env.AMAZON_SECRET_KEY);
   const walmartConfigured = Boolean(process.env.WALMART_CLIENT_ID && process.env.WALMART_CLIENT_SECRET);
@@ -3520,6 +3621,10 @@ app.get("/api/integrations", (req, res) => {
       google_docs: { ...integrationsState.google_docs, configured: googleConfigured },
       google_drive: { ...integrationsState.google_drive, configured: googleConfigured },
       fireflies: { ...integrationsState.fireflies, configured: firefliesConfigured },
+      notion: { ...integrationsState.notion, configured: notionConfigured },
+      outlook: { ...integrationsState.outlook, configured: outlookConfigured },
+      jira: { ...integrationsState.jira, configured: jiraConfigured },
+      confluence: { ...integrationsState.confluence, configured: confluenceConfigured },
       amazon: { ...integrationsState.amazon, configured: amazonConfigured },
       walmart: { ...integrationsState.walmart, configured: walmartConfigured },
       plex: { ...integrationsState.plex, configured: plexConfigured },
@@ -6446,6 +6551,56 @@ app.post("/api/integrations/fireflies/upload", async (req, res) => {
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message || "fireflies_upload_failed" });
+  }
+});
+
+app.post("/api/connectors/notion/sync", rateLimit, async (req, res) => {
+  try {
+    const limit = Number(req.body?.limit || 0) || undefined;
+    const result = await syncNotionConnector({ userId: getUserId(req), limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "notion_sync_failed" });
+  }
+});
+
+app.post("/api/connectors/slack/sync", rateLimit, async (req, res) => {
+  try {
+    const limit = Number(req.body?.limit || 0) || undefined;
+    const result = await syncSlackConnector({ userId: getUserId(req), limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "slack_sync_failed" });
+  }
+});
+
+app.post("/api/connectors/outlook/sync", rateLimit, async (req, res) => {
+  try {
+    const limit = Number(req.body?.limit || 0) || undefined;
+    const result = await syncOutlookConnector({ userId: getUserId(req), limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "outlook_sync_failed" });
+  }
+});
+
+app.post("/api/connectors/jira/sync", rateLimit, async (req, res) => {
+  try {
+    const limit = Number(req.body?.limit || 0) || undefined;
+    const result = await syncJiraConnector({ limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "jira_sync_failed" });
+  }
+});
+
+app.post("/api/connectors/confluence/sync", rateLimit, async (req, res) => {
+  try {
+    const limit = Number(req.body?.limit || 0) || undefined;
+    const result = await syncConfluenceConnector({ limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "confluence_sync_failed" });
   }
 });
 
