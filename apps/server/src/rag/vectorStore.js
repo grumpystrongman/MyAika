@@ -47,6 +47,17 @@ function bufferToFloat32(buffer) {
   return new Float32Array(buffer.buffer, buffer.byteOffset, Math.floor(buffer.byteLength / 4));
 }
 
+function toHnswVector(vec) {
+  if (!vec) return [];
+  if (Array.isArray(vec)) return vec;
+  if (vec instanceof Float32Array || ArrayBuffer.isView(vec)) return Array.from(vec);
+  try {
+    return Array.from(vec);
+  } catch {
+    return [];
+  }
+}
+
 function ensureSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS rag_meta (
@@ -939,7 +950,7 @@ async function rebuildHnswIndex(dim) {
     hnswMeta.chunkIdToLabel[row.chunk_id] = label;
     hnswMeta.labelToChunkId[label] = row.chunk_id;
     const vec = bufferToFloat32(row.embedding);
-    hnswIndex.addPoint(vec, label);
+    hnswIndex.addPoint(toHnswVector(vec), label);
   }
   ensureDir(hnswDir);
   hnswIndex.writeIndexSync(hnswIndexPath);
@@ -973,7 +984,7 @@ export async function upsertVectors(chunks, embeddings) {
       hnswMeta.chunkIdToLabel[item.chunk_id] = label;
       hnswMeta.labelToChunkId[label] = item.chunk_id;
       const vec = item.embedding instanceof Float32Array ? item.embedding : Float32Array.from(item.embedding);
-      hnswIndex.addPoint(vec, label);
+      hnswIndex.addPoint(toHnswVector(vec), label);
       hnswDirty = true;
     }
   }
@@ -1001,7 +1012,7 @@ export async function searchChunkIds(embedding, topK = 8) {
 
   await ensureHnswIndex(vec.length);
   if (!hnswIndex) return [];
-  const result = hnswIndex.searchKnn(vec, topK);
+  const result = hnswIndex.searchKnn(toHnswVector(vec), topK);
   const labels = result?.neighbors || [];
   const distances = result?.distances || [];
   return labels.map((label, idx) => ({

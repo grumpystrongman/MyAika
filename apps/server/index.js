@@ -195,6 +195,9 @@ startFirefliesSyncLoop();
 startDailyPicksLoop();
 startTradingKnowledgeSyncLoop();
 startTradingRssLoop();
+const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
+let monitorInterval = null;
+let monitorRunning = false;
 startTradingRecommendationMonitor();
 
 const rateMap = new Map();
@@ -942,10 +945,6 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
 
   return { picks, source, horizonDays: resolvedHorizon, warnings };
 }
-
-const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
-let monitorInterval = null;
-let monitorRunning = false;
 
 function getMonitorState() {
   const flags = getRuntimeFlags();
