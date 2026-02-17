@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { getEmbedding } from "./embeddings.js";
 import { searchChunkIds, getChunksByIds, listMeetingSummaries } from "./vectorStore.js";
+import { selectMetaRoutes } from "./metaRag.js";
 
 let openaiClient = null;
 
@@ -123,6 +124,9 @@ function resolveRoutes(question, ragModel = "auto") {
     if (model === "trading") return [{ id: "trading", filters: { meetingIdPrefix: "trading:" } }];
     if (model === "fireflies") return [{ id: "fireflies", filters: { meetingType: "fireflies" } }];
     if (model === "signals") return [{ id: "signals", filters: { meetingIdPrefix: "signals:" } }];
+    if (model === "memory") return [{ id: "memory", filters: { meetingIdPrefix: "memory:" } }];
+    if (model === "feedback") return [{ id: "feedback", filters: { meetingIdPrefix: "feedback:" } }];
+    if (model === "recordings" || model === "recording") return [{ id: "recordings", filters: { meetingIdPrefix: "recording:" } }];
     if (model === "all") return [{ id: "all", filters: {} }];
     return [{ id: model, filters: { meetingIdPrefix: `rag:${model}:` } }];
   }
@@ -137,6 +141,19 @@ function resolveRoutes(question, ragModel = "auto") {
   if (wantsSignals) routes.push({ id: "signals", filters: { meetingIdPrefix: "signals:" } });
   if (!routes.length) routes.push({ id: "all", filters: {} });
   return routes;
+}
+
+async function resolveRoutesAsync(question, ragModel = "auto") {
+  const normalized = String(ragModel || "").trim().toLowerCase();
+  if (normalized === "auto") {
+    try {
+      const metaRoutes = await selectMetaRoutes(question);
+      if (metaRoutes.length) return metaRoutes;
+    } catch {
+      // fall back to heuristics
+    }
+  }
+  return resolveRoutes(question, ragModel);
 }
 
 function deriveCollectionInfo(meetingId = "", chunkId = "") {
@@ -224,7 +241,7 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
   if (!baseFilters.dateFrom && autoRange?.dateFrom) baseFilters.dateFrom = autoRange.dateFrom;
   if (!baseFilters.dateTo && autoRange?.dateTo) baseFilters.dateTo = autoRange.dateTo;
 
-  const routes = resolveRoutes(query, ragModel);
+  const routes = await resolveRoutesAsync(query, ragModel);
   const effectiveTopK = Number(topK || process.env.RAG_TOP_K || 8);
   const minPerRoute = Math.min(3, Math.max(1, Math.floor(effectiveTopK / Math.max(1, routes.length))));
   const useSummaryMode = wantsSummary(query) && (baseFilters.dateFrom || baseFilters.dateTo);
@@ -269,7 +286,11 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
   const routeResults = [];
   for (const route of routes) {
     const routeFilters = { ...(route.filters || {}), ...baseFilters };
-    const rows = getChunksByIds(orderedIds, routeFilters);
+    const rows = getChunksByIds(orderedIds, routeFilters).filter(row => {
+      if (!row?.meeting_id) return false;
+      if (route.id === "meta") return true;
+      return !String(row.meeting_id).startsWith("rag:meta:");
+    });
     const byId = new Map(rows.map(row => [row.chunk_id, row]));
     const ordered = matches
       .map(match => {

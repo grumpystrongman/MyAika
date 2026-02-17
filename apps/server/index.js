@@ -97,6 +97,7 @@ import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus, getFire
 import { listRagModels, createRagModel } from "./src/rag/collections.js";
 import { syncFireflies, startFirefliesSyncLoop, getFirefliesSyncStatus, queueFirefliesSync } from "./src/rag/firefliesIngest.js";
 import { answerRagQuestionRouted } from "./src/rag/router.js";
+import { startMetaRagLoop, maybeCreateAutoRagProposal } from "./src/rag/metaRag.js";
 import { recordFeedback } from "./src/feedback/feedback.js";
 import { startDailyPicksLoop, runDailyPicksEmail, generateDailyPicks, rescheduleDailyPicksLoop } from "./src/trading/dailyPicks.js";
 import { createAlpacaTradeStream } from "./src/trading/alpacaStream.js";
@@ -182,6 +183,7 @@ import { listCanvasCards, upsertCanvasCard } from "./src/canvas/store.js";
 import { listSkillVault, getSkillVaultEntry, scanSkillWithVirusTotal } from "./src/skillVault/registry.js";
 import { startAssistantTasksLoop } from "./src/assistant/taskRunner.js";
 import { startAssistantOpsLoop } from "./src/assistant/opsLoop.js";
+import { startAssistantProposalLoop } from "./src/assistant/proposalRunner.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -241,6 +243,8 @@ startTradingYoutubeLoop();
 startSignalsScheduler();
 startAssistantTasksLoop();
 startAssistantOpsLoop();
+startAssistantProposalLoop();
+startMetaRagLoop();
 const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
 let monitorInterval = null;
 let monitorRunning = false;
@@ -2236,10 +2240,30 @@ app.post("/chat", async (req, res) => {
               );
             }
             if (ragResult?.gap && ragUnknown) {
+              let proposal = null;
+              try {
+                const autoProposal = await maybeCreateAutoRagProposal({
+                  topic: ragResult.gap.topic,
+                  question: queryText,
+                  userId: getUserId(req)
+                });
+                proposal = autoProposal?.proposal || null;
+              } catch {
+                proposal = null;
+              }
+              const responseText = proposal
+                ? `I don't have enough knowledge to answer that. I've drafted a new RAG proposal ("${proposal.title}") for your approval.`
+                : `I don't have enough knowledge to answer that. I can build a new RAG model on \"${ragResult.gap.topic}\" if you want me to.`;
               return sendAssistantReply(
-                `I don't have enough knowledge to answer that. I can build a new RAG model on \"${ragResult.gap.topic}\" if you want me to.`,
+                responseText,
                 makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
-                { ragGap: ragResult.gap, source: "rag", ragModel: ragSelection.id }
+                {
+                  ragGap: ragResult.gap,
+                  ragProposal: proposal,
+                  ragProposalApprovalId: proposal?.approvalId || null,
+                  source: "rag",
+                  ragModel: ragSelection.id
+                }
               );
             }
           }

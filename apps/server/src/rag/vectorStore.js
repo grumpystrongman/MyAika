@@ -2778,3 +2778,49 @@ export function getRagCounts() {
     signalsMeetings
   };
 }
+
+export function getMeetingStats({ type = "all", meetingIdPrefix = "" } = {}) {
+  initRagStore();
+  const where = [];
+  const params = [];
+  const normalizedType = String(type || "all").toLowerCase();
+
+  if (normalizedType === "memory") {
+    where.push("m.id LIKE 'memory:%'");
+  } else if (normalizedType === "feedback") {
+    where.push("m.id LIKE 'feedback:%'");
+  } else if (normalizedType === "recordings" || normalizedType === "recording") {
+    where.push("m.id LIKE 'recording:%'");
+  } else if (normalizedType === "trading") {
+    where.push("m.id LIKE 'trading:%'");
+  } else if (normalizedType === "signals") {
+    where.push("m.id LIKE 'signals:%'");
+  } else if (normalizedType === "fireflies") {
+    where.push("m.id NOT LIKE 'memory:%'");
+    where.push("m.id NOT LIKE 'feedback:%'");
+    where.push("m.id NOT LIKE 'recording:%'");
+    where.push("m.id NOT LIKE 'trading:%'");
+    where.push("m.id NOT LIKE 'signals:%'");
+    where.push("m.id NOT LIKE 'rag:%'");
+  } else if (normalizedType === "custom") {
+    where.push("m.id LIKE 'rag:%'");
+  }
+
+  if (meetingIdPrefix) {
+    where.push("m.id LIKE ?");
+    params.push(`${meetingIdPrefix}%`);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS count,
+      MAX(COALESCE(NULLIF(m.occurred_at, ''), NULLIF(m.created_at, ''))) AS latest
+    FROM meetings m
+    ${whereSql}
+  `).get(...params);
+  return {
+    count: row?.count || 0,
+    latest: row?.latest || ""
+  };
+}
