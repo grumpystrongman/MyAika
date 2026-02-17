@@ -1564,15 +1564,22 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   }, [tradingProfile]);
 
   async function loadRecommendations() {
-    if (!serverUrl) return;
+    if (!serverUrl) {
+      setRecommendationsLoading(false);
+      setRecommendationsError("Trading server URL not configured.");
+      return;
+    }
     setRecommendationsLoading(true);
     setRecommendationsError("");
     setRecommendationsWarnings([]);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
     try {
       const resp = await fetch(`${serverUrl}/api/trading/recommendations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetClass: "all", topN: 12, horizonDays: 180, includeSignals: true })
+        body: JSON.stringify({ assetClass: "all", topN: 12, horizonDays: 180, includeSignals: true }),
+        signal: controller.signal
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "recommendations_failed");
@@ -1590,8 +1597,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       setRecommendationsSource(data?.source || "llm");
       setRecommendationsWarnings(Array.isArray(data?.warnings) ? data.warnings : []);
     } catch (err) {
-      setRecommendationsError(err?.message || "recommendations_failed");
+      const message = err?.name === "AbortError"
+        ? "Recommendations request timed out."
+        : (err?.message || "recommendations_failed");
+      setRecommendationsError(message);
     } finally {
+      clearTimeout(timeout);
       setRecommendationsLoading(false);
     }
   }
@@ -2129,7 +2140,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   };
 
   const sendAssistant = async (overrideText = "") => {
-    const content = String(overrideText || assistantInput || "").trim();
+    const resolvedOverride = typeof overrideText === "string" ? overrideText : "";
+    const content = String(resolvedOverride || assistantInput || "").trim();
     if (!content) return;
     setAssistantInput("");
     setAssistantMessages(prev => [...prev, { role: "user", content }]);
@@ -3904,7 +3916,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 placeholder={`Ask about ${symbol}...`}
                 style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
               />
-              <button onClick={sendAssistant} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+              <button onClick={() => sendAssistant()} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
                 Ask
               </button>
             </div>
@@ -4753,11 +4765,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <span style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase" }}>{qaSource}</span>
                 )}
               </div>
-              {qaAnswer ? (
-                <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap" }}>{qaAnswer}</div>
-              ) : (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>Ask a question to see a response.</div>
-              )}
+                {qaAnswer ? (
+                  <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
+                    {qaAnswer}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>Ask a question to see a response.</div>
+                )}
             </div>
 
             <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
@@ -5119,7 +5133,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 </button>
               </div>
               {knowledgeAnswer && (
-                <div style={{ fontSize: 12, color: "#334155", marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: "#334155", marginBottom: 8, whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
                   {knowledgeAnswer}
                 </div>
               )}
