@@ -8,16 +8,33 @@
   },
   "queries": [
     {
-      "id": "sample-decisions",
-      "question": "What decisions were made about the Q3 roadmap?",
+      "id": "trading-recs-nvda",
+      "question": "In the Feb 17 recommendation run, what was the NVDA buy signal?",
       "filters": {
-        "meetingType": "fireflies"
+        "meetingIdPrefix": "trading:recommendations",
+        "titleContains": "2/17/2026"
       },
       "expected": {
-        "terms": ["decision", "roadmap"]
+        "chunkIds": ["trading:recommendations:510a1861dfb9ea9e:0"],
+        "terms": ["NVDA", "BUY"]
       },
-      "required": false,
-      "notes": "Replace with real chunk IDs or terms and set required=true for regression enforcement."
+      "required": true,
+      "topK": 5,
+      "notes": "Anchored to the 2/17/2026 recommendation run chunk containing the NVDA signal."
+    },
+    {
+      "id": "memory-voice-sample",
+      "question": "What voice sample does Aika prefer?",
+      "filters": {
+        "meetingIdPrefix": "memory:",
+        "titleContains": "voice sample"
+      },
+      "expected": {
+        "terms": ["fem_aika.wav"]
+      },
+      "required": true,
+      "topK": 6,
+      "notes": "Ensures memory retrieval returns the preferred voice sample."
     }
   ]
 }
