@@ -21,7 +21,7 @@ async function capture() {
       if (value) url.searchParams.set(key, value);
     });
     await page.goto(url.toString(), { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
     await page.evaluate(() => window.scrollTo(0, 0));
   };
 
@@ -44,6 +44,12 @@ async function capture() {
 
   await gotoTab("actionRunner");
   await shot("action_runner");
+  const desktopButton = page.locator("button", { hasText: "Desktop" }).first();
+  if (await desktopButton.count()) {
+    await desktopButton.click();
+    await page.waitForTimeout(1200);
+    await shot("action_runner_desktop");
+  }
 
   await gotoTab("teachMode");
   await shot("teach_mode");

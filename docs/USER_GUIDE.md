@@ -137,6 +137,7 @@ Direct access to MCP-lite tools, approvals, and execution history.
 
 ## Action Runner Tab
 ![Action Runner tab](user-guide/screenshots/action_runner.png)
+![Action Runner desktop mode](user-guide/screenshots/action_runner_desktop.png)
 
 ### What it is
 Browser automation plus a Desktop mode for local Windows control (mouse, keyboard, screenshots).
@@ -159,6 +160,7 @@ Browser automation plus a Desktop mode for local Windows control (mouse, keyboar
 3. Click `Preview Plan` and review the JSON (or load the Desktop sample).
 4. Click `Run` and approve if prompted.
 5. Review the timeline and artifacts.
+6. Desktop sample: click `Load Sample` to run the Notepad demo (approval required).
 
 ## Teach Mode Tab
 ![Teach Mode tab](user-guide/screenshots/teach_mode.png)
