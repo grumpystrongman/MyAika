@@ -29,6 +29,13 @@ async function capture() {
     const filePath = path.join(outDir, `${name}.png`);
     await page.screenshot({ path: filePath, fullPage: true });
   };
+  const scrollToText = async (text) => {
+    const locator = page.getByText(text).first();
+    if (await locator.count()) {
+      await locator.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(600);
+    }
+  };
 
   await gotoTab("chat");
   await shot("chat");
@@ -49,6 +56,8 @@ async function capture() {
     await desktopButton.click();
     await page.waitForTimeout(1200);
     await shot("action_runner_desktop");
+    await scrollToText("Desktop Macro Recorder");
+    await shot("action_runner_macro_recorder");
   }
 
   await gotoTab("teachMode");

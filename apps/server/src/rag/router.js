@@ -239,7 +239,7 @@ function extractTopic(question) {
   return tokens.slice(0, 6).join(" ").trim();
 }
 
-export async function answerRagQuestionRouted(question, { topK = 8, filters = {}, ragModel = "auto", conversationContext = "" } = {}) {
+export async function answerRagQuestionRouted(question, { topK = 8, filters = {}, ragModel = "auto", conversationContext = "", skipAnswer = false } = {}) {
   const query = String(question || "").trim();
   const convoPrefix = conversationContext ? `Conversation context:\n${conversationContext}\n\n` : "";
   if (!query) {
@@ -340,7 +340,7 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
   let answer = "I don't know based on the provided context.";
   const combinedContext = [summaryContext, context].filter(Boolean).join("\n\n");
   const client = getOpenAIClient();
-  if (client && combinedContext) {
+  if (!skipAnswer && client && combinedContext) {
     const system = "Answer using ONLY the provided context. If the answer is not in the context, say you don't know.";
     const user = `${convoPrefix}Question: ${query}\n\nContext:\n${combinedContext}`;
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -355,7 +355,9 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
     answer = response?.output_text || answer;
   } else if (combinedContext) {
     const totalCitations = mergedChunks.length + summaryCitations.length;
-    answer = `Context retrieved (${totalCitations} citations). Configure OPENAI_API_KEY for natural-language answers.`;
+    answer = skipAnswer
+      ? `Context retrieved (${totalCitations} citations).`
+      : `Context retrieved (${totalCitations} citations). Configure OPENAI_API_KEY for natural-language answers.`;
   }
 
   const citations = [
@@ -404,7 +406,8 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
         lexicalQuery,
         lexicalCount: lexicalMatches.length,
         vectorCount: vectorMatches.length
-      }
+      },
+      skipAnswer
     }
   };
 }

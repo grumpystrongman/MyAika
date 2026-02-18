@@ -25,6 +25,18 @@ This document summarizes the OpenClaw / Rabbit R1-inspired features implemented 
 - **Approvals:** Always required.
 - **Notes:** Requires an active, unlocked Windows desktop session.
 
+## Desktop Macro Recorder
+- **What it is:** Capture live mouse/keyboard input into reusable desktop macros.
+- **Where:** UI tab **Action Runner** → **Desktop** mode → **Macro Recorder**.
+- **Data:** `data/desktop_macros/*.json`
+- **Endpoints:**
+  - `POST /api/desktop/record` `{ options?, save?, name?, description?, tags?, safety? }`
+  - `GET /api/desktop/macros`
+  - `POST /api/desktop/macros`
+  - `POST /api/desktop/macros/:id/run`
+  - `DELETE /api/desktop/macros/:id`
+- **Notes:** Recording stops on the configured stop key (default `F8`).
+
 ## Action Planner
 - **What it is:** LLM planner that converts natural language to an action plan JSON.
 - **Where:** Action Runner tab → “Preview Plan”.
@@ -64,6 +76,7 @@ This document summarizes the OpenClaw / Rabbit R1-inspired features implemented 
 ## UI Notes (Click-through)
 - Action Runner: open main UI → **Action Runner** tab.
 - Desktop Runner: open main UI → **Action Runner** tab → **Desktop** mode.
+- Desktop Macro Recorder: open **Action Runner** → **Desktop** mode → **Macro Recorder**.
 - Teach Mode: main UI → **Teach Mode** tab → create/save a macro.
 - Connections: main UI → **Features** → **Connections**.
 - Canvas: main UI → **Canvas** tab to view cards.
@@ -77,4 +90,5 @@ This document summarizes the OpenClaw / Rabbit R1-inspired features implemented 
 1) Open **Action Runner** and generate a plan that goes to a public site and extracts text.
 2) Run it; confirm screenshots appear in the timeline.
 3) In **Teach Mode**, save the plan as a macro and re-run with a parameter.
-4) Open **Canvas** and verify cards render after updates via `/api/canvas/update`.
+4) In **Action Runner → Desktop**, record a short macro and save it.
+5) Open **Canvas** and verify cards render after updates via `/api/canvas/update`.

@@ -138,6 +138,7 @@ Direct access to MCP-lite tools, approvals, and execution history.
 ## Action Runner Tab
 ![Action Runner tab](user-guide/screenshots/action_runner.png)
 ![Action Runner desktop mode](user-guide/screenshots/action_runner_desktop.png)
+![Action Runner macro recorder](user-guide/screenshots/action_runner_macro_recorder.png)
 
 ### What it is
 Browser automation plus a Desktop mode for local Windows control (mouse, keyboard, screenshots).
@@ -148,11 +149,14 @@ Browser automation plus a Desktop mode for local Windows control (mouse, keyboar
 - `Run`: Executes the plan with approval gates.
 - `Approvals`: Required for risky steps, new domains, and all desktop runs.
 - `Artifacts`: Screenshots and extracted text saved to `data/action_runs/` or `data/desktop_runs/`.
+- `Macro Recorder` (Desktop): Capture live mouse/keyboard into a reusable macro.
+- `Saved Macros` (Desktop): Load, run, or delete recorded macros.
 
 ### When to use
 - Web tasks like scraping, form filling, or data extraction.
 - Local tasks like opening apps, typing, or taking screenshots.
 - Desktop mode requires an active Windows session (screen unlocked).
+- Record repeatable desktop flows and replay them on demand.
 
 ### How to use
 1. Choose `Browser` or `Desktop` mode.
@@ -161,6 +165,8 @@ Browser automation plus a Desktop mode for local Windows control (mouse, keyboar
 4. Click `Run` and approve if prompted.
 5. Review the timeline and artifacts.
 6. Desktop sample: click `Load Sample` to run the Notepad demo (approval required).
+7. Desktop macro recorder: enter a name, click `Start Recording`, perform the steps, then press `F8` to stop.
+8. Click `Save Macro` and use the Saved Macros list to `Load` or `Run` it later.
 
 ## Teach Mode Tab
 ![Teach Mode tab](user-guide/screenshots/teach_mode.png)
@@ -197,6 +203,15 @@ Local Fireflies meeting sync and RAG Q&A with knowledge graph.
 ### When to use
 - Ask questions across past meetings.
 - Surface meeting insights and decisions quickly.
+
+## RAG Eval Harness
+### What it is
+A regression harness to measure RAG retrieval quality with golden queries and thresholds.
+
+### How to use
+1. Edit `apps/server/evals/rag_golden.json` with your golden queries and expected chunk IDs or terms.
+2. Run `npm run rag:eval` to produce a report.
+3. Add `-- --strict` to fail CI or local checks if thresholds regress.
 
 ## Trading Tab
 ![Trading terminal](user-guide/screenshots/trading_terminal.png)
@@ -438,14 +453,18 @@ This tab renders the full guide inside the UI and links to the Markdown file.
 ## Data Storage Map
 - `data/action_runs/` : Action Runner artifacts (screenshots, HTML, run.json).
 - `data/desktop_runs/` : Desktop Runner artifacts (screenshots, run.json).
+- `data/desktop_macros/` : Recorded desktop macros.
 - `data/skills/` : Teach Mode macros and skill vault entries.
 - `apps/server/data/` : RAG databases and local storage.
+- `apps/server/evals/` : RAG golden queries and evaluation fixtures.
 - `logs/` : Server logs and activity traces.
 
 ## CLI Samples
 - `npm run rag:sample` : Run a hybrid RAG query sample.
+- `npm run rag:eval` : Run the RAG golden query harness (add `-- --strict` to enforce thresholds).
 - `npm run rag:fts` : Rebuild the lexical FTS index.
 - `npm run desktop:sample` : Desktop sample (set `DESKTOP_SAMPLE_RUN=1` to execute).
+- `npm run desktop:record` : Desktop recorder sample (press `F8` to stop, set `DESKTOP_RECORD_SAMPLE_RUN=1`).
 
 ## Troubleshooting
 - Mic not working on iOS: use HTTPS and grant permissions.
@@ -453,6 +472,7 @@ This tab renders the full guide inside the UI and links to the Markdown file.
 - GPT-SoVITS or Piper offline: check TTS Diagnostics in Debug.
 - Integrations show missing config: update `apps/server/.env` and restart the server.
 - RAG lexical search not returning results: run `npm run rag:fts` to rebuild the FTS index.
+- Desktop recorder not stopping: make sure the stop key (default `F8`) is not blocked and the session is active/unlocked.
 
 ## Sources (Educational References)
 - https://www.sec.gov/about/reports-publications/investor-publications/day-trading-your-dollars-at-risk

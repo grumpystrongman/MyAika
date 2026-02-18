@@ -19,6 +19,12 @@
 - [ ] Confirm approval is required before execution.
 - [ ] Verify artifacts appear in `data/desktop_runs/<runId>/`.
 
+## Desktop Macro Recorder
+- [ ] Open **Action Runner → Desktop** and start a recording.
+- [ ] Press the stop key (default `F8`) to finish recording.
+- [ ] Save the macro and confirm it appears in the Saved Macros list.
+- [ ] Run the macro and confirm approvals and artifacts work as expected.
+
 ## Teach Mode
 - [ ] Create a macro with a parameter placeholder like `{{email}}`.
 - [ ] Save and re-run the macro with a parameter value.

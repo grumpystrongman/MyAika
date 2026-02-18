@@ -126,7 +126,7 @@ function buildSummaryContext(summaries = []) {
     .join("\n\n");
 }
 
-export async function answerRagQuestion(question, { topK = 8, filters = {}, conversationContext = "" } = {}) {
+export async function answerRagQuestion(question, { topK = 8, filters = {}, conversationContext = "", skipAnswer = false } = {}) {
   const query = String(question || "").trim();
   const convoPrefix = conversationContext ? `Conversation context:\n${conversationContext}\n\n` : "";
   if (!query) {
@@ -153,7 +153,7 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
       const context = buildSummaryContext(summaryRows);
       let answer = "I don't know based on the provided context.";
       const client = getOpenAIClient();
-      if (client && context) {
+      if (!skipAnswer && client && context) {
         const system = "Answer using ONLY the provided context. If the answer is not in the context, say you don't know.";
         const user = `${convoPrefix}Question: ${query}\n\nContext:\n${context}`;
         const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -167,7 +167,9 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
         });
         answer = response?.output_text || answer;
       } else if (context) {
-        answer = `Context retrieved (${summaryRows.length} meeting summaries). Configure OPENAI_API_KEY for natural-language answers.`;
+        answer = skipAnswer
+          ? `Context retrieved (${summaryRows.length} meeting summaries).`
+          : `Context retrieved (${summaryRows.length} meeting summaries). Configure OPENAI_API_KEY for natural-language answers.`;
       }
       const citations = summaryRows.map(row => {
         const summary = row.summary_json ? JSON.parse(row.summary_json) : null;
@@ -232,7 +234,7 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
   let answer = "I don't know based on the provided context.";
   const context = buildContext(top);
   const client = getOpenAIClient();
-  if (client && context) {
+  if (!skipAnswer && client && context) {
     const system = "Answer using ONLY the provided context. If the answer is not in the context, say you don't know.";
     const user = `${convoPrefix}Question: ${query}\n\nContext:\n${context}`;
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -246,7 +248,9 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
     });
     answer = response?.output_text || answer;
   } else if (context) {
-    answer = `Context retrieved (${top.length} chunks). Configure OPENAI_API_KEY for natural-language answers.`;
+    answer = skipAnswer
+      ? `Context retrieved (${top.length} chunks).`
+      : `Context retrieved (${top.length} chunks). Configure OPENAI_API_KEY for natural-language answers.`;
   }
 
   const citations = top.map(chunk => ({
@@ -270,7 +274,8 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
         lexicalQuery,
         lexicalCount: lexicalMatches.length,
         vectorCount: vectorMatches.length
-      }
+      },
+      skipAnswer
     }
   };
 }

@@ -181,6 +181,15 @@ import { getActionRun } from "./src/actionRunner/runner.js";
 import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
 import { planDesktopAction } from "./src/desktopRunner/planner.js";
 import { getDesktopRun } from "./src/desktopRunner/runner.js";
+import { recordDesktopMacro } from "./src/desktopRunner/recorder.js";
+import {
+  listDesktopMacros,
+  getDesktopMacro,
+  saveDesktopMacro,
+  deleteDesktopMacro,
+  buildDesktopMacroPlan,
+  applyDesktopMacroParams
+} from "./src/desktopRunner/macros.js";
 import { getRunDir as getDesktopRunDir, getRunFilePath as getDesktopRunFilePath } from "./src/desktopRunner/runStore.js";
 import { listMacros, saveMacro, deleteMacro, getMacro, applyMacroParams, extractMacroParams } from "./src/actionRunner/macros.js";
 import { listCanvasCards, upsertCanvasCard } from "./src/canvas/store.js";
@@ -3899,6 +3908,43 @@ const desktopRunSchema = z.object({
   async: z.boolean().optional()
 });
 
+const desktopMacroSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  safety: z.object({
+    requireApprovalFor: z.array(z.string()).optional(),
+    maxActions: z.number().int().optional()
+  }).optional(),
+  actions: z.array(z.object({ type: z.string() }).passthrough()).min(1)
+});
+
+const desktopMacroRunSchema = z.object({
+  params: z.record(z.any()).optional(),
+  async: z.boolean().optional()
+});
+
+const desktopRecordSchema = z.object({
+  name: z.string().optional(),
+  description: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  safety: z.object({
+    requireApprovalFor: z.array(z.string()).optional(),
+    maxActions: z.number().int().optional()
+  }).optional(),
+  save: z.boolean().optional(),
+  options: z.object({
+    stopKey: z.string().optional(),
+    sampleMs: z.number().int().optional(),
+    maxSeconds: z.number().int().optional(),
+    includeMoves: z.boolean().optional(),
+    mergeWindowMs: z.number().int().optional(),
+    maxWaitMs: z.number().int().optional(),
+    maxActions: z.number().int().optional()
+  }).optional()
+});
+
 const macroSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
@@ -5184,6 +5230,89 @@ app.post("/api/desktop/run", rateLimit, async (req, res) => {
     }
     const status = err.status || 500;
     res.status(status).json({ error: err?.message || "desktop_run_failed" });
+  }
+});
+
+app.post("/api/desktop/record", rateLimit, async (req, res) => {
+  try {
+    const parsed = desktopRecordSchema.parse(req.body || {});
+    const recording = recordDesktopMacro(parsed.options || {});
+    const shouldSave = parsed.save || Boolean(parsed.name);
+    if (shouldSave) {
+      if (!parsed.name) {
+        return res.status(400).json({ error: "macro_name_required" });
+      }
+      const macro = saveDesktopMacro({
+        name: parsed.name,
+        description: parsed.description || "",
+        tags: parsed.tags || [],
+        safety: parsed.safety,
+        actions: recording.actions,
+        recording: recording.recording
+      });
+      return res.json({ ok: true, macro, summary: recording.summary, actions: recording.actions });
+    }
+    res.json(recording);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "desktop_record_failed" });
+  }
+});
+
+app.get("/api/desktop/macros", rateLimit, (_req, res) => {
+  res.json({ macros: listDesktopMacros() });
+});
+
+app.get("/api/desktop/macros/:id", rateLimit, (req, res) => {
+  const macro = getDesktopMacro(req.params.id);
+  if (!macro) return res.status(404).json({ error: "macro_not_found" });
+  res.json({ macro });
+});
+
+app.post("/api/desktop/macros", rateLimit, (req, res) => {
+  try {
+    const parsed = desktopMacroSchema.parse(req.body || {});
+    const macro = saveDesktopMacro(parsed);
+    res.json({ macro });
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "desktop_macro_save_failed" });
+  }
+});
+
+app.delete("/api/desktop/macros/:id", rateLimit, (req, res) => {
+  const ok = deleteDesktopMacro(req.params.id);
+  res.json({ ok });
+});
+
+app.post("/api/desktop/macros/:id/run", rateLimit, async (req, res) => {
+  try {
+    const parsed = desktopMacroRunSchema.parse(req.body || {});
+    const macro = getDesktopMacro(req.params.id);
+    if (!macro) return res.status(404).json({ error: "macro_not_found" });
+    const resolved = parsed.params ? applyDesktopMacroParams(macro, parsed.params) : macro;
+    const plan = buildDesktopMacroPlan(resolved);
+    const result = await executor.callTool({
+      name: "desktop.run",
+      params: { ...plan, async: parsed.async },
+      context: {
+        userId: getUserId(req),
+        workspaceId: getWorkspaceId(req),
+        correlationId: req.headers["x-correlation-id"] || ""
+      }
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "desktop_macro_run_failed" });
   }
 });
 

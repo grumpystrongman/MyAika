@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "thresholds": {
+    "minRecall": 0.6,
+    "minPrecision": 0.2,
+    "minTermCoverage": 0.5,
+    "maxMissing": 1
+  },
+  "queries": [
+    {
+      "id": "sample-decisions",
+      "question": "What decisions were made about the Q3 roadmap?",
+      "filters": {
+        "meetingType": "fireflies"
+      },
+      "expected": {
+        "terms": ["decision", "roadmap"]
+      },
+      "required": false,
+      "notes": "Replace with real chunk IDs or terms and set required=true for regression enforcement."
+    }
+  ]
+}
