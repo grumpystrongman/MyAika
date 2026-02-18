@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { getEmbedding } from "./embeddings.js";
-import { searchChunkIds, getChunksByIds, listMeetingSummaries } from "./vectorStore.js";
+import { searchChunkIds, searchChunkIdsLexical, getChunksByIds, listMeetingSummaries } from "./vectorStore.js";
+import { buildFtsQuery, mergeHybridMatches } from "./hybrid.js";
 import { selectMetaRoutes } from "./metaRag.js";
 
 let openaiClient = null;
@@ -88,6 +89,15 @@ function parseRelativeDateRange(question) {
 function wantsSummary(question) {
   const text = String(question || "").toLowerCase();
   return /\b(summary|summarize|recap|overview)\b/.test(text);
+}
+
+function getHybridSettings() {
+  return {
+    enabled: String(process.env.RAG_HYBRID_ENABLED || "1") === "1",
+    alpha: Number(process.env.RAG_HYBRID_ALPHA || 0.65),
+    lexicalTopK: Number(process.env.RAG_LEXICAL_TOP_K || 24),
+    rrfK: Number(process.env.RAG_HYBRID_RRF_K || 60)
+  };
 }
 
 function buildSummaryContext(summaries = []) {
@@ -280,9 +290,23 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
 
   const embedding = await getEmbedding(query);
   const searchLimit = Math.max(effectiveTopK * 4, effectiveTopK, 24);
-  const matches = await searchChunkIds(embedding, searchLimit);
-  const orderedIds = matches.map(m => m.chunk_id).filter(Boolean);
+  const vectorMatches = await searchChunkIds(embedding, searchLimit);
+  const hybrid = getHybridSettings();
+  const lexicalQuery = hybrid.enabled ? buildFtsQuery(query) : "";
+  const lexicalMatches = hybrid.enabled && lexicalQuery
+    ? searchChunkIdsLexical(lexicalQuery, Math.max(hybrid.lexicalTopK, searchLimit))
+    : [];
+  const merged = (hybrid.enabled && lexicalMatches.length)
+    ? mergeHybridMatches({ vectorMatches, lexicalMatches, alpha: hybrid.alpha, rrfK: hybrid.rrfK })
+    : vectorMatches.map((item, idx) => ({
+        chunk_id: item.chunk_id,
+        score: 1 / (1 + idx),
+        vectorRank: idx + 1,
+        lexicalRank: null
+      }));
+  const orderedIds = merged.map(m => m.chunk_id).filter(Boolean);
 
+  const vectorById = new Map(vectorMatches.map(match => [match.chunk_id, match]));
   const routeResults = [];
   for (const route of routes) {
     const routeFilters = { ...(route.filters || {}), ...baseFilters };
@@ -292,11 +316,19 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
       return !String(row.meeting_id).startsWith("rag:meta:");
     });
     const byId = new Map(rows.map(row => [row.chunk_id, row]));
-    const ordered = matches
+    const ordered = merged
       .map(match => {
         const row = byId.get(match.chunk_id);
         if (!row || !row.text) return null;
-        return { ...row, distance: match.distance, routeId: route.id };
+        const vector = vectorById.get(match.chunk_id);
+        return {
+          ...row,
+          distance: vector?.distance ?? (1 - match.score),
+          hybrid_score: match.score,
+          vector_rank: match.vectorRank,
+          lexical_rank: match.lexicalRank,
+          routeId: route.id
+        };
       })
       .filter(Boolean);
     routeResults.push({ id: route.id, filters: routeFilters, items: ordered });
@@ -364,7 +396,15 @@ export async function answerRagQuestionRouted(question, { topK = 8, filters = {}
       summaryCount: summaryCitations.length,
       filters: baseFilters,
       routes: routes.map(route => route.id),
-      autoDateRange: autoRange?.label || null
+      autoDateRange: autoRange?.label || null,
+      hybrid: {
+        enabled: hybrid.enabled,
+        alpha: hybrid.alpha,
+        rrfK: hybrid.rrfK,
+        lexicalQuery,
+        lexicalCount: lexicalMatches.length,
+        vectorCount: vectorMatches.length
+      }
     }
   };
 }

@@ -5,6 +5,7 @@ import * as sqliteVec from "sqlite-vec";
 
 let db = null;
 let vecEnabled = false;
+let ftsEnabled = false;
 let cachedDim = null;
 let hnswIndex = null;
 let hnswMeta = { nextLabel: 0, chunkIdToLabel: {}, labelToChunkId: {} };
@@ -321,6 +322,101 @@ function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_knowledge_docs_retrieved ON knowledge_documents(retrieved_at);
     CREATE INDEX IF NOT EXISTS idx_knowledge_docs_reviewed ON knowledge_documents(reviewed_at);
   `);
+}
+
+function ensureFts() {
+  if (ftsEnabled) return;
+  try {
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+      chunk_id UNINDEXED,
+      meeting_id UNINDEXED,
+      speaker UNINDEXED,
+      text,
+      tokenize='porter'
+    );`);
+    ftsEnabled = true;
+  } catch (err) {
+    ftsEnabled = false;
+    console.warn("fts5 unavailable, lexical search disabled:", err?.message || err);
+  }
+}
+
+function countRows(table) {
+  try {
+    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get();
+    return row?.count || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function rebuildChunksFtsCore({ batchSize = 500 } = {}) {
+  if (!ftsEnabled) return { ok: false, reason: "fts_disabled" };
+  const total = countRows("chunks");
+  if (!total) return { ok: true, indexed: 0 };
+
+  db.exec("DELETE FROM chunks_fts");
+  const selectStmt = db.prepare("SELECT chunk_id, meeting_id, speaker, text FROM chunks ORDER BY rowid LIMIT ? OFFSET ?");
+  const insertStmt = db.prepare("INSERT INTO chunks_fts (chunk_id, meeting_id, speaker, text) VALUES (?, ?, ?, ?)");
+  const tx = db.transaction(rows => {
+    for (const row of rows) {
+      insertStmt.run(row.chunk_id, row.meeting_id, row.speaker || "", row.text || "");
+    }
+  });
+
+  let indexed = 0;
+  let offset = 0;
+  while (true) {
+    const rows = selectStmt.all(batchSize, offset);
+    if (!rows.length) break;
+    tx(rows);
+    indexed += rows.length;
+    offset += rows.length;
+  }
+  setMeta("fts_last_rebuild", nowIso());
+  return { ok: true, indexed };
+}
+
+function maybeRebuildChunksFts() {
+  if (!ftsEnabled) return;
+  const total = countRows("chunks");
+  if (!total) return;
+  const indexed = countRows("chunks_fts");
+  const diff = total - indexed;
+  if (diff <= 0) return;
+
+  const last = getMeta("fts_last_rebuild");
+  if (last) {
+    const elapsed = Date.now() - Date.parse(last);
+    if (Number.isFinite(elapsed) && elapsed < 15 * 60_000) return;
+  }
+
+  const threshold = Math.max(200, Math.floor(total * 0.1));
+  if (indexed === 0 || diff > threshold) {
+    rebuildChunksFtsCore({ batchSize: 500 });
+  }
+}
+
+function upsertChunksFts(chunks) {
+  if (!ftsEnabled || !chunks?.length) return;
+  const deleteStmt = db.prepare("DELETE FROM chunks_fts WHERE chunk_id = ?");
+  const insertStmt = db.prepare("INSERT INTO chunks_fts (chunk_id, meeting_id, speaker, text) VALUES (?, ?, ?, ?)");
+  const tx = db.transaction(items => {
+    for (const chunk of items) {
+      deleteStmt.run(chunk.chunk_id);
+      insertStmt.run(chunk.chunk_id, chunk.meeting_id, chunk.speaker || "", chunk.text || "");
+    }
+  });
+  tx(chunks);
+}
+
+function deleteChunksFts(chunkIds = []) {
+  if (!ftsEnabled || !chunkIds.length) return;
+  const stmt = db.prepare("DELETE FROM chunks_fts WHERE chunk_id = ?");
+  const tx = db.transaction(ids => {
+    for (const id of ids) stmt.run(id);
+  });
+  tx(chunkIds);
 }
 
 function getTableColumns(table) {
@@ -802,6 +898,10 @@ export function initRagStore() {
   db.pragma("foreign_keys = ON");
   ensureSchema();
   ensureMigrations();
+  ensureFts();
+  if (String(process.env.RAG_FTS_REBUILD_ON_STARTUP || "1") === "1") {
+    maybeRebuildChunksFts();
+  }
   try {
     sqliteVec.load(db);
     vecEnabled = true;
@@ -814,7 +914,28 @@ export function initRagStore() {
 
 export function getVectorStoreStatus() {
   initRagStore();
-  return { vecEnabled, dbPath };
+  const totalChunks = countRows("chunks");
+  const indexedChunks = ftsEnabled ? countRows("chunks_fts") : 0;
+  return {
+    vecEnabled,
+    ftsEnabled,
+    dbPath,
+    chunks: {
+      total: totalChunks,
+      ftsIndexed: indexedChunks,
+      ftsLastRebuild: getMeta("fts_last_rebuild") || ""
+    }
+  };
+}
+
+export function getFtsStatus() {
+  initRagStore();
+  return {
+    enabled: ftsEnabled,
+    totalChunks: countRows("chunks"),
+    indexedChunks: ftsEnabled ? countRows("chunks_fts") : 0,
+    lastRebuild: getMeta("fts_last_rebuild") || ""
+  };
 }
 
 export function getMeeting(meetingId) {
@@ -865,6 +986,7 @@ export function deleteMeetingChunks(meetingId) {
     db.prepare(`DELETE FROM chunk_embeddings WHERE chunk_id IN (${placeholders})`).run(...chunkIds);
     hnswDirty = true;
   }
+  deleteChunksFts(chunkIds);
   return chunkIds.length;
 }
 
@@ -2184,6 +2306,7 @@ export function upsertChunks(chunks) {
     }
   });
   tx(chunks);
+  upsertChunksFts(chunks);
   return chunks.length;
 }
 
@@ -2386,6 +2509,31 @@ export async function persistHnsw() {
   hnswIndex.writeIndexSync(hnswIndexPath);
   fs.writeFileSync(hnswMetaPath, JSON.stringify(hnswMeta, null, 2));
   hnswDirty = false;
+}
+
+export function searchChunkIdsLexical(query, topK = 20) {
+  initRagStore();
+  if (!ftsEnabled) return [];
+  const q = String(query || "").trim();
+  if (!q) return [];
+  try {
+    const limit = Math.max(1, Number(topK) || 20);
+    const stmt = db.prepare(
+      "SELECT chunk_id, bm25(chunks_fts) AS score FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY score LIMIT ?"
+    );
+    return stmt.all(q, limit).map(row => ({
+      chunk_id: row.chunk_id,
+      score: Number.isFinite(row.score) ? row.score : 0
+    }));
+  } catch (err) {
+    console.warn("lexical search failed:", err?.message || err);
+    return [];
+  }
+}
+
+export function rebuildChunksFts({ batchSize = 500 } = {}) {
+  initRagStore();
+  return rebuildChunksFtsCore({ batchSize });
 }
 
 export async function searchChunkIds(embedding, topK = 8) {

@@ -1,6 +1,6 @@
 # MyAika User Guide
 
-Last updated: February 17, 2026
+Last updated: February 18, 2026
 
 ## Purpose
 This guide is a complete, tab-by-tab walkthrough of MyAika. It explains what each feature does, why you would use it, and how to use it safely and effectively. It also includes step-by-step scenarios for the trading stack.
@@ -20,7 +20,7 @@ If you are on iPad/Safari, microphone access requires HTTPS. Use `npm run dev:ip
 - `Recordings`: Meeting Copilot for recording, transcription, and meeting notes.
 - `Aika Tools`: Structured tools for notes, todos, calendar, email, memory, and messaging.
 - `Tools`: MCP-lite tool browser, direct tool execution, approvals, and history.
-- `Action Runner`: Headless browser automation with approval gates and artifacts.
+- `Action Runner`: Browser automation plus Desktop mode (local control) with approvals and artifacts.
 - `Teach Mode`: Record and run reusable browser macros.
 - `Fireflies`: Fireflies meeting sync, RAG Q&A, and knowledge graph.
 - `Trading`: Full trading terminal with paper, backtest, options, knowledge RAG, and scenarios.
@@ -35,6 +35,7 @@ If you are on iPad/Safari, microphone access requires HTTPS. Use `npm run dev:ip
 - Local-first: Most state (memory, recordings, RAG, audit logs) stays in `data/` locally.
 - Safety-first: Risky actions are deny-by-default and require approvals.
 - RAG: Retrieval-augmented generation is used for Fireflies and Trading knowledge.
+- Hybrid RAG: Semantic embeddings + lexical FTS to improve recall.
 - Approvals: High-risk actions route through approvals before execution.
 
 ## Chat Tab
@@ -138,22 +139,26 @@ Direct access to MCP-lite tools, approvals, and execution history.
 ![Action Runner tab](user-guide/screenshots/action_runner.png)
 
 ### What it is
-Headless browser automation that turns natural language into a safe, auditable plan.
+Browser automation plus a Desktop mode for local Windows control (mouse, keyboard, screenshots).
 
 ### Key functions
+- Mode switch: `Browser` or `Desktop`.
 - `Preview Plan`: Generates an action plan from a prompt.
 - `Run`: Executes the plan with approval gates.
-- `Approvals`: Required for risky steps or new domains.
-- `Artifacts`: Screenshots and extracted text saved to `data/action_runs/`.
+- `Approvals`: Required for risky steps, new domains, and all desktop runs.
+- `Artifacts`: Screenshots and extracted text saved to `data/action_runs/` or `data/desktop_runs/`.
 
 ### When to use
 - Web tasks like scraping, form filling, or data extraction.
+- Local tasks like opening apps, typing, or taking screenshots.
+- Desktop mode requires an active Windows session (screen unlocked).
 
 ### How to use
-1. Enter an instruction and optional start URL.
-2. Click `Preview Plan` and review the JSON.
-3. Click `Run` and approve if prompted.
-4. Review the timeline and artifacts.
+1. Choose `Browser` or `Desktop` mode.
+2. Enter an instruction (and optional start URL for Browser).
+3. Click `Preview Plan` and review the JSON (or load the Desktop sample).
+4. Click `Run` and approve if prompted.
+5. Review the timeline and artifacts.
 
 ## Teach Mode Tab
 ![Teach Mode tab](user-guide/screenshots/teach_mode.png)
@@ -430,15 +435,22 @@ This tab renders the full guide inside the UI and links to the Markdown file.
 
 ## Data Storage Map
 - `data/action_runs/` : Action Runner artifacts (screenshots, HTML, run.json).
+- `data/desktop_runs/` : Desktop Runner artifacts (screenshots, run.json).
 - `data/skills/` : Teach Mode macros and skill vault entries.
 - `apps/server/data/` : RAG databases and local storage.
 - `logs/` : Server logs and activity traces.
+
+## CLI Samples
+- `npm run rag:sample` : Run a hybrid RAG query sample.
+- `npm run rag:fts` : Rebuild the lexical FTS index.
+- `npm run desktop:sample` : Desktop sample (set `DESKTOP_SAMPLE_RUN=1` to execute).
 
 ## Troubleshooting
 - Mic not working on iOS: use HTTPS and grant permissions.
 - Audio locked: click `Enable Audio` once.
 - GPT-SoVITS or Piper offline: check TTS Diagnostics in Debug.
 - Integrations show missing config: update `apps/server/.env` and restart the server.
+- RAG lexical search not returning results: run `npm run rag:fts` to rebuild the FTS index.
 
 ## Sources (Educational References)
 - https://www.sec.gov/about/reports-publications/investor-publications/day-trading-your-dollars-at-risk

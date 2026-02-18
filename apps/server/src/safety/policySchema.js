@@ -84,6 +84,7 @@ export const defaultPolicy = policySchema.parse({
     "messaging.discordSend",
     "messaging.whatsapp.send",
     "messaging.sms.send",
+    "desktop.run",
     "action.run",
     "skill.vault.run",
     "browser.navigate",
@@ -109,6 +110,7 @@ export const defaultPolicy = policySchema.parse({
     "messaging.discordSend",
     "messaging.whatsapp.send",
     "messaging.sms.send",
+    "desktop.run",
     "finance.transfer",
     "finance.trade",
     "kill_switch.disable"

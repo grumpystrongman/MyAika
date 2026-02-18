@@ -18,6 +18,7 @@ const BASE_RISK = {
   "browser.navigate": 40,
   "api.external_post": 75,
   "action.run": 70,
+  "desktop.run": 90,
   "messaging.slackPost": 70,
   "messaging.telegramSend": 40,
   "messaging.discordSend": 70,

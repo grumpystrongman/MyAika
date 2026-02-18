@@ -13,6 +13,18 @@ This document summarizes the OpenClaw / Rabbit R1-inspired features implemented 
   - `GET /api/action/runs/:id/artifacts/:file`
 - **Approvals:** Required for risky steps or new domains (see approvals tab).
 
+## Desktop Runner
+- **What it is:** Local Windows desktop control runner (mouse/keyboard/screenshot).
+- **Where:** UI tab **Action Runner** → **Desktop** mode.
+- **Data:** `data/desktop_runs/<runId>/` (screenshots + run.json)
+- **Endpoints:**
+  - `POST /api/desktop/plan` `{ instruction }`
+  - `POST /api/desktop/run` `{ taskName?, actions[], safety?, async? }`
+  - `GET /api/desktop/runs/:id`
+  - `GET /api/desktop/runs/:id/artifacts/:file`
+- **Approvals:** Always required.
+- **Notes:** Requires an active, unlocked Windows desktop session.
+
 ## Action Planner
 - **What it is:** LLM planner that converts natural language to an action plan JSON.
 - **Where:** Action Runner tab → “Preview Plan”.
@@ -51,6 +63,7 @@ This document summarizes the OpenClaw / Rabbit R1-inspired features implemented 
 
 ## UI Notes (Click-through)
 - Action Runner: open main UI → **Action Runner** tab.
+- Desktop Runner: open main UI → **Action Runner** tab → **Desktop** mode.
 - Teach Mode: main UI → **Teach Mode** tab → create/save a macro.
 - Connections: main UI → **Features** → **Connections**.
 - Canvas: main UI → **Canvas** tab to view cards.

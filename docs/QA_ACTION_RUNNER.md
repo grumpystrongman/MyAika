@@ -13,6 +13,12 @@
 - [ ] Verify artifacts appear in `data/action_runs/<runId>/`.
 - [ ] Verify the UI shows timeline updates and images.
 
+## Desktop Runner
+- [ ] Switch to **Desktop** mode in Action Runner.
+- [ ] Load the sample plan or create a simple plan.
+- [ ] Confirm approval is required before execution.
+- [ ] Verify artifacts appear in `data/desktop_runs/<runId>/`.
+
 ## Teach Mode
 - [ ] Create a macro with a parameter placeholder like `{{email}}`.
 - [ ] Save and re-run the macro with a parameter value.

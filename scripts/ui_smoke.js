@@ -48,6 +48,9 @@ async function run() {
     await page.getByRole("button", { name: "Tools", exact: true }).click();
     await page.getByText("MCP-lite Tools").waitFor();
 
+    await page.getByRole("button", { name: "Action Runner", exact: true }).click();
+    await page.getByText("Browser automation and desktop control with approvals.").waitFor();
+
     await page.getByRole("button", { name: "Features", exact: true }).click();
     await page.getByText("MCP Features").waitFor();
 

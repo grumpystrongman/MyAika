@@ -83,7 +83,8 @@ async function run() {
     "shopping.amazonAddToCart",
     "messaging.slackPost",
     "messaging.telegramSend",
-    "messaging.discordSend"
+    "messaging.discordSend",
+    "desktop.run"
   ];
   const missing = requiredTools.filter(name => !toolNames.has(name));
   if (missing.length) {

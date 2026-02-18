@@ -538,6 +538,7 @@ export default function FirefliesPanel({ serverUrl }) {
           <div style={{ fontSize: 12, color: "#6b7280" }}>
             Meetings: {status.firefliesMeetings} · Recordings: {status.recordingMeetings || 0} · Memory: {status.memoryMeetings} · Feedback: {status.feedbackMeetings} · Chunks: {status.totalChunks}
             {status.vectorStore?.vecEnabled === false ? " · sqlite-vec: fallback" : " · sqlite-vec: on"}
+            {status.vectorStore?.ftsEnabled ? " · fts: on" : " · fts: off"}
             {syncInfo?.running ? ` · Sync: running${syncInfo.startedAt ? ` (since ${syncInfo.startedAt})` : ""}` : ""}
           </div>
         ) : (

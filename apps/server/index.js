@@ -179,6 +179,9 @@ import { createSafetyApproval, listSafetyApprovals, approveSafetyApproval, rejec
 import { planAction } from "./src/actionRunner/planner.js";
 import { getActionRun } from "./src/actionRunner/runner.js";
 import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
+import { planDesktopAction } from "./src/desktopRunner/planner.js";
+import { getDesktopRun } from "./src/desktopRunner/runner.js";
+import { getRunDir as getDesktopRunDir, getRunFilePath as getDesktopRunFilePath } from "./src/desktopRunner/runStore.js";
 import { listMacros, saveMacro, deleteMacro, getMacro, applyMacroParams, extractMacroParams } from "./src/actionRunner/macros.js";
 import { listCanvasCards, upsertCanvasCard } from "./src/canvas/store.js";
 import { listSkillVault, getSkillVaultEntry, scanSkillWithVirusTotal } from "./src/skillVault/registry.js";
@@ -3882,6 +3885,20 @@ const actionRunSchema = z.object({
   async: z.boolean().optional()
 });
 
+const desktopPlanSchema = z.object({
+  instruction: z.string().min(3)
+});
+
+const desktopRunSchema = z.object({
+  taskName: z.string().optional(),
+  actions: z.array(z.object({ type: z.string() }).passthrough()).min(1),
+  safety: z.object({
+    requireApprovalFor: z.array(z.string()).optional(),
+    maxActions: z.number().int().optional()
+  }).optional(),
+  async: z.boolean().optional()
+});
+
 const macroSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
@@ -5124,6 +5141,63 @@ app.get("/api/action/runs/:id/artifacts/:file", rateLimit, (req, res) => {
   const file = req.params.file;
   const dir = getRunDir(runId);
   const filePath = getRunFilePath(runId, file);
+  const resolvedDir = path.resolve(dir);
+  const resolvedFile = path.resolve(filePath);
+  if (!resolvedFile.startsWith(resolvedDir)) {
+    return res.status(403).json({ error: "invalid_artifact_path" });
+  }
+  if (!fs.existsSync(resolvedFile)) {
+    return res.status(404).json({ error: "artifact_not_found" });
+  }
+  res.sendFile(resolvedFile);
+});
+
+app.post("/api/desktop/plan", rateLimit, async (req, res) => {
+  try {
+    const parsed = desktopPlanSchema.parse(req.body || {});
+    const result = await planDesktopAction({ instruction: parsed.instruction });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "desktop_plan_failed" });
+  }
+});
+
+app.post("/api/desktop/run", rateLimit, async (req, res) => {
+  try {
+    const parsed = desktopRunSchema.parse(req.body || {});
+    const result = await executor.callTool({
+      name: "desktop.run",
+      params: parsed,
+      context: {
+        userId: getUserId(req),
+        workspaceId: getWorkspaceId(req),
+        correlationId: req.headers["x-correlation-id"] || ""
+      }
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "desktop_run_failed" });
+  }
+});
+
+app.get("/api/desktop/runs/:id", rateLimit, (req, res) => {
+  const run = getDesktopRun(req.params.id);
+  if (!run) return res.status(404).json({ error: "run_not_found" });
+  res.json(run);
+});
+
+app.get("/api/desktop/runs/:id/artifacts/:file", rateLimit, (req, res) => {
+  const runId = req.params.id;
+  const file = req.params.file;
+  const dir = getDesktopRunDir(runId);
+  const filePath = getDesktopRunFilePath(runId, file);
   const resolvedDir = path.resolve(dir);
   const resolvedFile = path.resolve(filePath);
   if (!resolvedFile.startsWith(resolvedDir)) {

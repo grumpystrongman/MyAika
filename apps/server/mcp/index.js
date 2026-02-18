@@ -9,6 +9,8 @@ import { applyChanges } from "./tools/spreadsheet.js";
 import { writeMemoryTool, searchMemoryTool, rotateKeyTool } from "./tools/memory.js";
 import { actionRun } from "./tools/actionRunner.js";
 import { assessActionPlan, extractDomainsFromPlan } from "../src/actionRunner/runner.js";
+import { desktopRun } from "./tools/desktopRunner.js";
+import { assessDesktopPlan } from "../src/desktopRunner/runner.js";
 import { skillVaultRun } from "./tools/skillVault.js";
 import { assessSkillPermissions } from "../src/skillVault/registry.js";
 import { systemModify } from "./tools/system.js";
@@ -302,6 +304,40 @@ registry.register(
     }
   },
   actionRun
+);
+
+registry.register(
+  {
+    name: "desktop.run",
+    description: "Run a desktop action plan (local, Windows).",
+    paramsSchema: {
+      taskName: "string",
+      actions: "object[]",
+      safety: "object",
+      async: "boolean"
+    },
+    riskLevel: "high",
+    requiresApproval: (params = {}, context = {}) => {
+      const assessment = assessDesktopPlan({
+        taskName: params.taskName,
+        actions: params.actions,
+        safety: params.safety,
+        workspaceId: context.workspaceId || "default"
+      });
+      return assessment.requiresApproval;
+    },
+    humanSummary: params => {
+      const assessment = assessDesktopPlan({
+        taskName: params?.taskName,
+        actions: params?.actions,
+        safety: params?.safety,
+        workspaceId: "default"
+      });
+      const risks = assessment.riskTags?.length ? ` Risks: ${assessment.riskTags.join(", ")}` : "";
+      return `Run desktop plan: ${assessment.taskName || "Desktop Run"}.${risks}`;
+    }
+  },
+  desktopRun
 );
 
 registry.register(
