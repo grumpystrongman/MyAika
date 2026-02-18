@@ -1,6 +1,50 @@
-# MyAika User Guide
+# MyAika User Guide (Training Manual)
 
 Last updated: February 18, 2026
+
+## Sidebar Navigation (Quick Links)
+Use these links as a sidebar jump list inside the guide.
+
+### Core
+- [Purpose](#purpose)
+- [Quickstart](#quickstart)
+- [Navigation Map (Top Tabs)](#navigation-map-top-tabs)
+- [Global Concepts](#global-concepts)
+- [Chat Tab](#chat-tab)
+- [Recordings Tab (Meeting Copilot)](#recordings-tab-meeting-copilot)
+- [Aika Tools Tab (Aika Tools Workbench)](#aika-tools-tab-aika-tools-workbench)
+- [Tools Tab (MCP-lite Tools)](#tools-tab-mcp-lite-tools)
+- [Action Runner Tab](#action-runner-tab)
+- [Teach Mode Tab](#teach-mode-tab)
+- [Fireflies Tab](#fireflies-tab)
+- [RAG Eval Harness](#rag-eval-harness)
+- [Trading Tab](#trading-tab)
+- [Safety Tab](#safety-tab)
+- [Canvas Tab](#canvas-tab)
+- [Features Tab](#features-tab)
+- [Settings Tab](#settings-tab)
+- [Debug Tab](#debug-tab)
+- [Guide Tab](#guide-tab)
+- [Standalone Pages](#standalone-pages)
+- [Data Storage Map](#data-storage-map)
+- [CLI Samples](#cli-samples)
+- [Troubleshooting](#troubleshooting)
+- [Sources (Educational References)](#sources-educational-references)
+
+### Trading Subtabs
+- [Terminal (Live Analysis + Order Ticket)](#terminal-live-analysis--order-ticket)
+- [Paper (Synthetic Strategy Runs)](#paper-synthetic-strategy-runs)
+- [Backtest (Strategy Evaluation)](#backtest-strategy-evaluation)
+- [Options (Chain, Strategy, Scanner)](#options-chain-strategy-scanner)
+- [Q&A (Trading Knowledge)](#qa-trading-knowledge)
+- [Knowledge (RAG + Sources)](#knowledge-rag--sources)
+- [Scenarios (Market Context Sweeps)](#scenarios-market-context-sweeps)
+- [Trading Scenarios (Walkthroughs)](#trading-scenarios-walkthroughs)
+
+### Standalone Pages
+- [Signals Monitor](#signals-monitor)
+- [Fireflies RAG](#fireflies-rag)
+- [Trading Full Screen](#trading-full-screen)
 
 ## Purpose
 This guide is a complete, tab-by-tab walkthrough of MyAika. It explains what each feature does, why you would use it, and how to use it safely and effectively. It also includes step-by-step scenarios for the trading stack.
@@ -135,6 +179,13 @@ Direct access to MCP-lite tools, approvals, and execution history.
 - You want full control over tool invocation.
 - You need to run a tool with custom JSON parameters.
 
+### How to use
+1. Open the `Tools` tab and scan the tool list.
+2. Click a tool name to view its schema and description.
+3. Fill in the JSON payload and click `Run`.
+4. If an approval is required, approve it in the Approvals panel.
+5. Review the tool output and copy any artifacts or IDs you need.
+
 ## Action Runner Tab
 ![Action Runner tab](user-guide/screenshots/action_runner.png)
 ![Action Runner desktop mode](user-guide/screenshots/action_runner_desktop.png)
@@ -204,14 +255,22 @@ Local Fireflies meeting sync and RAG Q&A with knowledge graph.
 - Ask questions across past meetings.
 - Surface meeting insights and decisions quickly.
 
+### How to use
+1. Click `Sync Fireflies` to pull transcripts.
+2. Use `Ask` to query across meetings.
+3. Open `Knowledge Graph` for participant/topic relationships.
+4. Review `Recent Meetings` for summaries and follow-ups.
+
 ## RAG Eval Harness
 ### What it is
 A regression harness to measure RAG retrieval quality with golden queries and thresholds.
 
 ### How to use
-1. Edit `apps/server/evals/rag_golden.json` with your golden queries and expected chunk IDs or terms.
-2. Run `npm run rag:eval` to produce a report.
-3. Add `-- --strict` to fail CI or local checks if thresholds regress.
+1. Edit `apps/server/evals/rag_golden.json` with golden queries.
+2. Add expected `chunkIds` or `terms` for each query you care about.
+3. Run `npm run rag:eval` to produce a report.
+4. Run `npm run rag:eval -- --strict` to fail if required thresholds regress.
+5. Commit updated golden data whenever your source data changes.
 
 ## Trading Tab
 ![Trading terminal](user-guide/screenshots/trading_terminal.png)
@@ -239,6 +298,13 @@ When to use
 - Fast context on a ticker before you trade.
 - Structured review of chart, signal, and risk before proposing a trade.
 
+How to use
+1. Enter a symbol and choose an interval.
+2. Review chart overlays and signals.
+3. Use `Order Ticket` to propose a trade.
+4. Approve the trade if required.
+5. Record outcomes and lessons learned.
+
 ### Paper (Synthetic Strategy Runs)
 ![Trading paper](user-guide/screenshots/trading_paper.png)
 
@@ -249,6 +315,12 @@ Key functions
 
 When to use
 - Test behavior without financial risk.
+
+How to use
+1. Pick a synthetic strategy or preset.
+2. Run the paper simulation.
+3. Review fills, fees, and metrics.
+4. Iterate on parameters until results stabilize.
 
 ### Backtest (Strategy Evaluation)
 ![Trading backtest](user-guide/screenshots/trading_backtest.png)
@@ -262,6 +334,12 @@ Key functions
 When to use
 - Validate strategy logic before paper or live trading.
 
+How to use
+1. Open the Backtest Wizard.
+2. Select the ticker, timeframe, and strategy.
+3. Run the backtest and inspect the equity curve.
+4. Export artifacts and compare parameter sets.
+
 ### Options (Chain, Strategy, Scanner)
 ![Trading options](user-guide/screenshots/trading_options.png)
 
@@ -274,6 +352,12 @@ Key functions
 When to use
 - Evaluate options trades with risk-aware filters and payoff charts.
 
+How to use
+1. Load the options chain for your symbol.
+2. Choose a strategy template.
+3. Compare payoffs and adjust strikes.
+4. Run the options scanner for filtered setups.
+
 ### Q&A (Trading Knowledge)
 ![Trading Q&A](user-guide/screenshots/trading_qa.png)
 
@@ -284,6 +368,11 @@ Key functions
 
 When to use
 - Rapid learning about indicators, risk, and market structure.
+
+How to use
+1. Ask a question in the Q&A box.
+2. Review citations and follow-up suggestions.
+3. Use the answer to refine your trading thesis.
 
 ### Knowledge (RAG + Sources)
 ![Trading knowledge](user-guide/screenshots/trading_knowledge.png)
@@ -298,6 +387,12 @@ Key functions
 When to use
 - Build your own knowledge base and reuse it across Q&A and recommendations.
 
+How to use
+1. Pick the active RAG model.
+2. Add new sources or RSS feeds.
+3. Ingest URLs or files.
+4. Query the knowledge base in Q&A.
+
 ### Scenarios (Market Context Sweeps)
 ![Trading scenarios](user-guide/screenshots/trading_scenarios.png)
 
@@ -308,6 +403,11 @@ Key functions
 
 When to use
 - Weekly or monthly review of your watchlists.
+
+How to use
+1. Select a watchlist and time window.
+2. Run the scenario scan.
+3. Open a candidate to review detailed metrics.
 
 ## Trading Scenarios (Walkthroughs)
 
@@ -351,6 +451,12 @@ Central guardrails for autonomy, approvals, and auditability.
 - Before enabling automation or live trading.
 - During security reviews.
 
+### How to use
+1. Set autonomy level and risk threshold.
+2. Review the `Requires approval` list.
+3. Enable or disable the kill switch as needed.
+4. Approve or deny pending actions.
+
 ## Canvas Tab
 ![Canvas tab](user-guide/screenshots/canvas.png)
 
@@ -359,6 +465,11 @@ A live board of server-pushed cards (notes, summaries, todos).
 
 ### When to use
 - A quick operational dashboard of recent events and summaries.
+
+### How to use
+1. Open `Canvas`.
+2. Watch for incoming cards from running automations.
+3. Click a card to jump to its source.
 
 ## Features Tab
 ![Features tab](user-guide/screenshots/features_mcp.png)
@@ -375,6 +486,11 @@ A live board of server-pushed cards (notes, summaries, todos).
 - Panic switch for outbound tools.
 - Pairing approvals for chat channels.
 
+### How to use
+1. Open `Features`.
+2. Switch between MCP and Connections views.
+3. Connect or disconnect providers as needed.
+
 ## Settings Tab
 
 ### Integrations
@@ -384,6 +500,11 @@ Key functions
 - Connect or disconnect services.
 - Amazon product analysis popup.
 - Facebook profile/posts fetch.
+
+How to use
+1. Open `Settings → Integrations`.
+2. Click `Connect` and complete OAuth.
+3. Verify the status badge turns green.
 
 ### Skills
 ![Settings skills](user-guide/screenshots/settings_skills.png)
@@ -396,12 +517,21 @@ Key functions
 - Webhooks and scenes for automation.
 - Meeting recorder tools.
 
+How to use
+1. Enable the skills you want.
+2. Use the export buttons to generate outputs.
+3. Configure webhooks or scenes if needed.
+
 ### Trading
 ![Settings trading](user-guide/screenshots/settings_trading.png)
 
 Key functions
 - Daily picks email schedule and recipients.
 - Watchlist preferences for email output.
+
+How to use
+1. Configure email recipients and schedule.
+2. Save the settings.
 
 ### Appearance
 ![Settings appearance](user-guide/screenshots/settings_appearance.png)
@@ -412,12 +542,20 @@ Key functions
 - Avatar model and background selection.
 - Voice command listening toggle.
 
+How to use
+1. Pick a theme and upload a background if desired.
+2. Select the avatar and background model.
+
 ### Voice
 ![Settings voice](user-guide/screenshots/settings_voice.png)
 
 Key functions
 - Open the voice settings panel.
 - Adjust `Send after silence` threshold.
+
+How to use
+1. Toggle voice controls on.
+2. Adjust thresholds and test the mic.
 
 ## Debug Tab
 ![Debug tab](user-guide/screenshots/debug.png)
@@ -428,10 +566,19 @@ Key functions
 - Voice pipeline full test.
 - Client logs with filters.
 
+### How to use
+1. Check the status cards for errors.
+2. Run the full voice test.
+3. Use logs for troubleshooting.
+
 ## Guide Tab
 ![Guide tab](user-guide/screenshots/guide.png)
 
 This tab renders the full guide inside the UI and links to the Markdown file.
+
+### How to use
+1. Open `Guide`.
+2. Use the sidebar links at the top of this document to navigate.
 
 ## Standalone Pages
 
@@ -440,15 +587,27 @@ This tab renders the full guide inside the UI and links to the Markdown file.
 
 - `http://localhost:3000/signals` shows macro, energy, weather, and supply chain signals.
 
+How to use
+1. Open the URL.
+2. Review the live signal cards and trend list.
+
 ### Fireflies RAG
 ![Fireflies RAG page](user-guide/screenshots/fireflies_rag_page.png)
 
 - `http://localhost:3000/fireflies-rag` lets you sync and query Fireflies directly.
 
+How to use
+1. Open the URL.
+2. Sync Fireflies and ask questions.
+
 ### Trading Full Screen
 ![Trading full page](user-guide/screenshots/trading_full_page.png)
 
 - `http://localhost:3000/trading` opens a full-screen trading terminal.
+
+How to use
+1. Open the URL.
+2. Use the terminal as in the Trading tab.
 
 ## Data Storage Map
 - `data/action_runs/` : Action Runner artifacts (screenshots, HTML, run.json).
