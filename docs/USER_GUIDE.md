@@ -503,6 +503,7 @@ Central guardrails for autonomy, approvals, and auditability.
 - `Kill switch`: Pause automation instantly.
 - `Approvals`: Review and approve pending actions.
 - `Audit log`: Tamper-evident audit history.
+- `Admin token`: Required for approvals unless you are on localhost with no token set.
 
 ### When to use
 - Before enabling automation or live trading.
