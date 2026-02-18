@@ -41,7 +41,9 @@ export function createRunRecord({ taskName, actions, safety, workspaceId, create
     createdAt: nowIso(),
     updatedAt: nowIso(),
     timeline: [],
-    artifacts: []
+    artifacts: [],
+    pendingApproval: null,
+    stopRequested: false
   };
   ensureDir(runPath(id));
   fs.writeFileSync(runFilePath(id), JSON.stringify(record, null, 2));
@@ -87,6 +89,20 @@ export function setRunStatus(runId, status, extra = {}) {
     ...record,
     status,
     ...extra
+  }));
+}
+
+export function setRunPendingApproval(runId, pendingApproval) {
+  return updateRunRecord(runId, record => ({
+    ...record,
+    pendingApproval: pendingApproval || null
+  }));
+}
+
+export function setRunStopRequested(runId, stopRequested = true) {
+  return updateRunRecord(runId, record => ({
+    ...record,
+    stopRequested: Boolean(stopRequested)
   }));
 }
 

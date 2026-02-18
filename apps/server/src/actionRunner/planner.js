@@ -1,4 +1,5 @@
 ﻿import OpenAI from "openai";
+import { planWithAgents } from "../agent/multiAgent.js";
 
 let openaiClient = null;
 
@@ -26,6 +27,14 @@ export async function planAction({ instruction, startUrl } = {}) {
   const cleanInstruction = String(instruction || "").trim();
   if (!cleanInstruction) {
     throw new Error("instruction_required");
+  }
+
+  if (String(process.env.AGENT_MULTI_PASS || "0") === "1") {
+    try {
+      return await planWithAgents({ instruction: cleanInstruction, startUrl, mode: "browser" });
+    } catch {
+      // Fall back to single-pass planner below.
+    }
   }
 
   const client = getClient();

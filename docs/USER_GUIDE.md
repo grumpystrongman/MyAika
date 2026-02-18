@@ -16,6 +16,9 @@ Use these links as a sidebar jump list inside the guide.
 - [Tools Tab (MCP-lite Tools)](#tools-tab-mcp-lite-tools)
 - [Action Runner Tab](#action-runner-tab)
 - [Teach Mode Tab](#teach-mode-tab)
+- [Agent Platform (Multi-Agent + Routing)](#agent-platform-multi-agent--routing)
+- [Memory Lifecycle + Knowledge Graph](#memory-lifecycle--knowledge-graph)
+- [Worker Queue + Plugins](#worker-queue--plugins)
 - [Fireflies Tab](#fireflies-tab)
 - [RAG Eval Harness](#rag-eval-harness)
 - [Trading Tab](#trading-tab)
@@ -199,7 +202,11 @@ Browser automation plus a Desktop mode for local Windows control (mouse, keyboar
 - `Preview Plan`: Generates an action plan from a prompt.
 - `Run`: Executes the plan with approval gates.
 - `Approvals`: Required for risky steps, new domains, and all desktop runs.
+- `Approval mode` (Desktop): Per-run or per-step approvals.
+- `Panic Stop` (Desktop): Stop a running automation immediately.
 - `Artifacts`: Screenshots and extracted text saved to `data/action_runs/` or `data/desktop_runs/`.
+- `Vision OCR` (Desktop): Capture screen text into OCR artifacts.
+- `UI Automation` (Desktop): Target controls via `uiaClick` and `uiaSetValue`.
 - `Macro Recorder` (Desktop): Capture live mouse/keyboard into a reusable macro.
 - `Saved Macros` (Desktop): Load, run, or delete recorded macros.
 
@@ -218,15 +225,19 @@ Browser automation plus a Desktop mode for local Windows control (mouse, keyboar
 6. Desktop sample: click `Load Sample` to run the Notepad demo (approval required).
 7. Desktop macro recorder: enter a name, click `Start Recording`, perform the steps, then press `F8` to stop.
 8. Click `Save Macro` and use the Saved Macros list to `Load` or `Run` it later.
+9. For per-step approvals, set `Approval mode` to `Per step` and approve each risky action.
+10. Use `Panic Stop` if the desktop run must halt immediately.
 
 ## Teach Mode Tab
 ![Teach Mode tab](user-guide/screenshots/teach_mode.png)
 
 ### What it is
-Create reusable browser macros with parameters.
+Create reusable browser or desktop macros with parameters.
 
 ### Key functions
-- Step types: `goto`, `click`, `type`, `press`, `waitFor`, `extractText`, `screenshot`.
+- Mode selector: `Browser` or `Desktop`.
+- Browser steps: `goto`, `click`, `type`, `press`, `waitFor`, `extractText`, `screenshot`.
+- Desktop steps: `launch`, `wait`, `type`, `key`, `mouseMove`, `mouseClick`, `clipboardSet`, `screenshot`, `visionOcr`, `uiaClick`, `uiaSetValue`.
 - `Save Macro`: Stores in `data/skills/macros/`.
 - `Run Macro`: Execute with optional parameters.
 
@@ -234,9 +245,53 @@ Create reusable browser macros with parameters.
 - Repeatable web workflows you want to run safely on demand.
 
 ### How to use
-1. Fill out macro name, description, tags, and start URL.
-2. Add steps and save.
-3. Select the macro and run it.
+1. Choose `Browser` or `Desktop` mode.
+2. Fill out macro name, description, tags (and start URL for browser).
+3. Add steps and save.
+4. Select the macro and run it.
+
+## Agent Platform (Multi-Agent + Routing)
+### What it is
+An agent architecture that uses a planner, executor, and critic to produce safer plans and route model calls between local and cloud providers.
+
+### Key functions
+- Multi-pass planning and critique when `AGENT_MULTI_PASS=1`.
+- Dynamic model routing with `MODEL_ROUTER_MODE` (`auto`, `local`, `cloud`).
+- Local LLM support via `LOCAL_LLM_BASE_URL` + `LOCAL_LLM_MODEL`.
+
+### How to use
+1. Set `AGENT_MULTI_PASS=1` in `apps/server/.env`.
+2. Optionally set `LOCAL_LLM_BASE_URL` and `LOCAL_LLM_MODEL` to use a local model.
+3. Restart the server.
+4. Use Action Runner or Teach Mode and review the plan explanation.
+
+## Memory Lifecycle + Knowledge Graph
+### What it is
+Retention policies for long-term memory tiers plus a knowledge graph generated from memory entities.
+
+### Key functions
+- Retention windows per tier: `MEMORY_RETENTION_DAYS_TIER1/2/3`.
+- Admin trigger: `POST /api/memory/retention/run` (supports `dryRun`).
+- Graph endpoint: `GET /api/knowledge-graph` (nodes + edges).
+
+### How to use
+1. Set retention day values in `apps/server/.env`.
+2. Run a dry-run: `POST /api/memory/retention/run` with `{ "dryRun": true }`.
+3. Fetch the graph from `GET /api/knowledge-graph` and visualize in your UI.
+
+## Worker Queue + Plugins
+### What it is
+A lightweight queue for distributed ingestion/execution and a plugin registry for marketplace-style skills.
+
+### Key functions
+- Enqueue work with `POST /api/workers/enqueue`.
+- External workers claim via `POST /api/workers/claim` and complete via `POST /api/workers/:id/complete`.
+- Plugin manifests stored in `data/plugins/` and listed with `GET /api/plugins`.
+
+### How to use
+1. Set `WORKER_EXECUTION_MODE=inline` for local execution or `distributed` for external workers.
+2. Enqueue a job such as `{ "type": "ingest.fireflies.sync", "payload": { "limit": 10 } }`.
+3. Register a plugin manifest via `POST /api/plugins` (admin token required).
 
 ## Fireflies Tab
 ![Fireflies tab](user-guide/screenshots/fireflies.png)
@@ -614,6 +669,8 @@ How to use
 - `data/desktop_runs/` : Desktop Runner artifacts (screenshots, run.json).
 - `data/desktop_macros/` : Recorded desktop macros.
 - `data/skills/` : Teach Mode macros and skill vault entries.
+- `data/workers/` : Worker queue state for distributed jobs.
+- `data/plugins/` : Plugin manifests for marketplace-style skills.
 - `apps/server/data/` : RAG databases and local storage.
 - `apps/server/evals/` : RAG golden queries and evaluation fixtures.
 - `logs/` : Server logs and activity traces.
@@ -624,6 +681,9 @@ How to use
 - `npm run rag:fts` : Rebuild the lexical FTS index.
 - `npm run desktop:sample` : Desktop sample (set `DESKTOP_SAMPLE_RUN=1` to execute).
 - `npm run desktop:record` : Desktop recorder sample (press `F8` to stop, set `DESKTOP_RECORD_SAMPLE_RUN=1`).
+- `npm run memory:retention -- --dry-run` : Preview memory retention deletions.
+- `curl -X GET http://localhost:8787/api/knowledge-graph` : Fetch the memory knowledge graph.
+- `curl -X POST http://localhost:8787/api/memory/retention/run -H "x-admin-token: <admin>" -d "{\"dryRun\":true}"` : Dry-run memory retention.
 
 ## Troubleshooting
 - Mic not working on iOS: use HTTPS and grant permissions.
@@ -632,6 +692,8 @@ How to use
 - Integrations show missing config: update `apps/server/.env` and restart the server.
 - RAG lexical search not returning results: run `npm run rag:fts` to rebuild the FTS index.
 - Desktop recorder not stopping: make sure the stop key (default `F8`) is not blocked and the session is active/unlocked.
+- Desktop UI Automation not finding elements: ensure the target app is visible and use `automationId` or `className`.
+- Vision OCR artifacts missing: confirm screenshots are captured and check `data/desktop_runs/<runId>/`.
 
 ## Sources (Educational References)
 - https://www.sec.gov/about/reports-publications/investor-publications/day-trading-your-dollars-at-risk

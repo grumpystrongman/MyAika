@@ -57,6 +57,7 @@ export function saveMacro(payload) {
   ensureDir();
   const id = payload.id || crypto.randomUUID();
   const existing = payload.id ? getMacro(id) : null;
+  const mode = payload.mode || existing?.mode || "browser";
   const record = {
     id,
     name: payload.name || existing?.name || "Untitled Macro",
@@ -65,6 +66,8 @@ export function saveMacro(payload) {
     version: Number(existing?.version || 0) + 1,
     startUrl: payload.startUrl || existing?.startUrl || "",
     actions: Array.isArray(payload.actions) ? payload.actions : existing?.actions || [],
+    mode,
+    safety: payload.safety || existing?.safety || null,
     createdAt: existing?.createdAt || nowIso(),
     updatedAt: nowIso()
   };
@@ -98,9 +101,11 @@ export function applyMacroParams(macro, params = {}) {
     }
     return next;
   });
+  const mode = macro?.mode || "browser";
   return {
+    mode,
     taskName: macro?.name || "Macro",
-    startUrl: renderTemplate(macro?.startUrl || "", params),
+    startUrl: mode === "browser" ? renderTemplate(macro?.startUrl || "", params) : "",
     actions: renderedActions,
     safety: macro?.safety || { requireApprovalFor: ["purchase", "send", "delete", "auth", "download", "upload"], maxActions: 60 }
   };

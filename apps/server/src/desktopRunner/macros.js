@@ -11,7 +11,11 @@ function resolveRepoRoot() {
 
 const repoRoot = resolveRepoRoot();
 const macrosDir = path.join(repoRoot, "data", "desktop_macros");
-const DEFAULT_SAFETY = { requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app"], maxActions: 60 };
+const DEFAULT_SAFETY = {
+  requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app", "vision", "uia"],
+  maxActions: 60,
+  approvalMode: "per_run"
+};
 
 function ensureDir() {
   if (!fs.existsSync(macrosDir)) fs.mkdirSync(macrosDir, { recursive: true });

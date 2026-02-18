@@ -39,6 +39,13 @@ export function searchMemoryEntities({ workspaceId = "default", query = "", limi
   ).all(workspaceId, `%${query}%`, `%${query}%`, limit);
 }
 
+export function listMemoryEntities({ workspaceId = "default", limit = 2000 } = {}) {
+  const db = getDb();
+  return db.prepare(
+    `SELECT * FROM memory_entities WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?`
+  ).all(workspaceId, limit);
+}
+
 export function deleteMemoryEntitiesForRecording(recordingId) {
   const db = getDb();
   db.prepare(`DELETE FROM memory_entities WHERE recording_id = ?`).run(recordingId);

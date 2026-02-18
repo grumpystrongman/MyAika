@@ -180,7 +180,7 @@ import { planAction } from "./src/actionRunner/planner.js";
 import { getActionRun } from "./src/actionRunner/runner.js";
 import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
 import { planDesktopAction } from "./src/desktopRunner/planner.js";
-import { getDesktopRun } from "./src/desktopRunner/runner.js";
+import { getDesktopRun, continueDesktopRun, requestDesktopStop } from "./src/desktopRunner/runner.js";
 import { recordDesktopMacro } from "./src/desktopRunner/recorder.js";
 import {
   listDesktopMacros,
@@ -197,6 +197,11 @@ import { listSkillVault, getSkillVaultEntry, scanSkillWithVirusTotal } from "./s
 import { startAssistantTasksLoop } from "./src/assistant/taskRunner.js";
 import { startAssistantOpsLoop } from "./src/assistant/opsLoop.js";
 import { startAssistantProposalLoop } from "./src/assistant/proposalRunner.js";
+import { startMemoryRetentionLoop, runMemoryRetention } from "./src/assistant/memoryRetention.js";
+import { buildMemoryGraph } from "./src/knowledgeGraph/memoryGraph.js";
+import { enqueueWork, listWork, claimWork, completeWork } from "./src/workers/queue.js";
+import { startWorkerLoop } from "./src/workers/runner.js";
+import { listPlugins, getPlugin, savePlugin } from "./src/plugins/registry.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -257,6 +262,8 @@ startSignalsScheduler();
 startAssistantTasksLoop();
 startAssistantOpsLoop();
 startAssistantProposalLoop();
+startMemoryRetentionLoop();
+startWorkerLoop();
 startMetaRagLoop();
 const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
 let monitorInterval = null;
@@ -3903,7 +3910,8 @@ const desktopRunSchema = z.object({
   actions: z.array(z.object({ type: z.string() }).passthrough()).min(1),
   safety: z.object({
     requireApprovalFor: z.array(z.string()).optional(),
-    maxActions: z.number().int().optional()
+    maxActions: z.number().int().optional(),
+    approvalMode: z.enum(["per_run", "per_step"]).optional()
   }).optional(),
   async: z.boolean().optional()
 });
@@ -3915,7 +3923,8 @@ const desktopMacroSchema = z.object({
   tags: z.array(z.string()).optional(),
   safety: z.object({
     requireApprovalFor: z.array(z.string()).optional(),
-    maxActions: z.number().int().optional()
+    maxActions: z.number().int().optional(),
+    approvalMode: z.enum(["per_run", "per_step"]).optional()
   }).optional(),
   actions: z.array(z.object({ type: z.string() }).passthrough()).min(1)
 });
@@ -3931,7 +3940,8 @@ const desktopRecordSchema = z.object({
   tags: z.array(z.string()).optional(),
   safety: z.object({
     requireApprovalFor: z.array(z.string()).optional(),
-    maxActions: z.number().int().optional()
+    maxActions: z.number().int().optional(),
+    approvalMode: z.enum(["per_run", "per_step"]).optional()
   }).optional(),
   save: z.boolean().optional(),
   options: z.object({
@@ -3951,6 +3961,12 @@ const macroSchema = z.object({
   description: z.string().optional(),
   tags: z.array(z.string()).optional(),
   startUrl: z.string().optional(),
+  mode: z.enum(["browser", "desktop"]).optional(),
+  safety: z.object({
+    requireApprovalFor: z.array(z.string()).optional(),
+    maxActions: z.number().int().optional(),
+    approvalMode: z.enum(["per_run", "per_step"]).optional()
+  }).optional(),
   actions: z.array(z.object({ type: z.string() }).passthrough()).min(1)
 });
 
@@ -5044,6 +5060,25 @@ app.get("/api/fireflies/graph", (req, res) => {
   }
 });
 
+app.get("/api/knowledge-graph", (req, res) => {
+  try {
+    const limitNodes = Number(req.query.limitNodes || 40);
+    const limitEdges = Number(req.query.limitEdges || 80);
+    const maxEntities = Number(req.query.maxEntities || 2000);
+    const minCount = Number(req.query.minCount || 1);
+    const graph = buildMemoryGraph({
+      workspaceId: getWorkspaceId(req),
+      limitNodes,
+      limitEdges,
+      maxEntities,
+      minCount
+    });
+    res.json(graph);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "knowledge_graph_failed" });
+  }
+});
+
 function buildNodeSummaryFallback(detail) {
   if (!detail) return "";
   const meetingCount = detail.meetings?.length || 0;
@@ -5322,6 +5357,25 @@ app.get("/api/desktop/runs/:id", rateLimit, (req, res) => {
   res.json(run);
 });
 
+app.post("/api/desktop/runs/:id/continue", rateLimit, async (req, res) => {
+  try {
+    const result = await continueDesktopRun(req.params.id, {
+      userId: getUserId(req),
+      workspaceId: getWorkspaceId(req)
+    });
+    res.json(result);
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ error: err?.message || "desktop_run_continue_failed" });
+  }
+});
+
+app.post("/api/desktop/runs/:id/stop", rateLimit, (req, res) => {
+  const updated = requestDesktopStop(req.params.id);
+  if (!updated) return res.status(404).json({ error: "run_not_found" });
+  res.json({ ok: true, run: updated });
+});
+
 app.get("/api/desktop/runs/:id/artifacts/:file", rateLimit, (req, res) => {
   const runId = req.params.id;
   const file = req.params.file;
@@ -5377,9 +5431,13 @@ app.post("/api/teach/macros/:id/run", rateLimit, async (req, res) => {
     if (!macro) return res.status(404).json({ error: "macro_not_found" });
     const parsed = macroRunSchema.parse(req.body || {});
     const plan = applyMacroParams(macro, parsed.params || {});
+    const toolName = plan.mode === "desktop" ? "desktop.run" : "action.run";
+    const payload = plan.mode === "desktop"
+      ? { taskName: plan.taskName, actions: plan.actions, safety: plan.safety, async: parsed.async !== false }
+      : { ...plan, async: parsed.async !== false };
     const result = await executor.callTool({
-      name: "action.run",
-      params: { ...plan, async: parsed.async !== false },
+      name: toolName,
+      params: payload,
       context: {
         userId: getUserId(req),
         workspaceId: getWorkspaceId(req),
@@ -6142,6 +6200,91 @@ app.post("/api/safety/kill-switch", rateLimit, (req, res) => {
     activatedBy: getUserId(req)
   });
   res.json({ ok: true, killSwitch: state });
+});
+
+app.post("/api/memory/retention/run", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  try {
+    const dryRun = Boolean(req.body?.dryRun);
+    const result = runMemoryRetention({ userId: getUserId(req), dryRun });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "memory_retention_failed" });
+  }
+});
+
+app.post("/api/workers/enqueue", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  try {
+    const job = enqueueWork(req.body || {});
+    res.json({ job });
+  } catch (err) {
+    res.status(400).json({ error: err?.message || "work_enqueue_failed" });
+  }
+});
+
+app.get("/api/workers/queue", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  const status = req.query.status ? String(req.query.status) : "";
+  const limit = Number(req.query.limit || 50);
+  const jobs = listWork({ status: status || undefined, limit });
+  res.json({ jobs });
+});
+
+app.post("/api/workers/claim", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  const { workerId, types, limit } = req.body || {};
+  const jobs = claimWork({
+    workerId: workerId || req.headers["x-worker-id"] || req.ip,
+    types: Array.isArray(types) ? types : [],
+    limit: Number(limit || 1)
+  });
+  res.json({ jobs });
+});
+
+app.post("/api/workers/:id/complete", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  const job = completeWork({
+    id: req.params.id,
+    status: req.body?.status || "completed",
+    result: req.body?.result || null,
+    error: req.body?.error || null
+  });
+  if (!job) return res.status(404).json({ error: "work_not_found" });
+  res.json({ job });
+});
+
+app.get("/api/plugins", rateLimit, (_req, res) => {
+  res.json({ plugins: listPlugins() });
+});
+
+app.get("/api/plugins/:id", rateLimit, (req, res) => {
+  const plugin = getPlugin(req.params.id);
+  if (!plugin) return res.status(404).json({ error: "plugin_not_found" });
+  res.json(plugin);
+});
+
+app.post("/api/plugins", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  try {
+    const { id, manifest } = req.body || {};
+    const saved = savePlugin({ id, manifest });
+    res.json(saved);
+  } catch (err) {
+    res.status(400).json({ error: err?.message || "plugin_save_failed" });
+  }
 });
 
 app.get("/api/audit", rateLimit, (req, res) => {

@@ -24,3 +24,14 @@ test("assessDesktopPlan enforces max actions", () => {
   assert.equal(assessment.maxActions, 3);
   assert.equal(assessment.totalActions, 5);
 });
+
+test("assessDesktopPlan tags vision and uia actions", () => {
+  const assessment = assessDesktopPlan({
+    taskName: "Vision UIA",
+    actions: [{ type: "visionOcr" }, { type: "uiaClick", name: "Save" }],
+    safety: { requireApprovalFor: ["vision", "uia"] },
+    workspaceId: "test"
+  });
+  assert.ok(assessment.riskTags.includes("vision"));
+  assert.ok(assessment.riskTags.includes("uia"));
+});

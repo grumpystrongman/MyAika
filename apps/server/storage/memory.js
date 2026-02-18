@@ -103,3 +103,43 @@ export function searchMemory({ tier, query, tags = [], limit = 20, userId = "loc
   if (tags?.length) list = list.filter(r => tags.some(t => r.tags.includes(t)));
   return list;
 }
+
+export function pruneMemoryEntries({ retentionDaysByTier = {}, userId = "local", dryRun = false } = {}) {
+  const db = getDb();
+  const results = {
+    checked: 0,
+    deleted: 0,
+    tiers: {}
+  };
+  const tiers = Object.entries(retentionDaysByTier || {});
+  if (!tiers.length) return results;
+
+  const now = Date.now();
+  for (const [tierKey, daysValue] of tiers) {
+    const tier = Number(tierKey);
+    const days = Number(daysValue);
+    if (!Number.isFinite(tier) || !Number.isFinite(days) || days <= 0) continue;
+    const cutoff = new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+    const rows = db.prepare(
+      `SELECT id, cache_path FROM memory_entries WHERE tier = ? AND user_id = ? AND created_at < ?`
+    ).all(tier, userId, cutoff);
+    results.checked += rows.length;
+    results.tiers[tier] = { candidates: rows.length, deleted: 0 };
+    if (dryRun) continue;
+
+    for (const row of rows) {
+      db.prepare(`DELETE FROM memory_entries WHERE id = ?`).run(row.id);
+      db.prepare(`DELETE FROM memory_fts WHERE id = ?`).run(row.id);
+      if (row.cache_path && fs.existsSync(row.cache_path)) {
+        try {
+          fs.unlinkSync(row.cache_path);
+        } catch {
+          // ignore cache deletion errors
+        }
+      }
+      results.deleted += 1;
+      results.tiers[tier].deleted += 1;
+    }
+  }
+  return results;
+}

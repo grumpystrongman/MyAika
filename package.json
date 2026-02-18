@@ -22,6 +22,7 @@
     "rag:eval": "node apps/server/scripts/rag_eval.js",
     "desktop:sample": "node apps/server/scripts/desktop_sample.js",
     "desktop:record": "node apps/server/scripts/desktop_record_sample.js",
+    "memory:retention": "node apps/server/scripts/memory_retention.js",
     "test": "node --test apps/server/tests/*.test.js",
     "smoke": "node scripts/full_smoke_test.js",
     "ui:smoke": "node scripts/ui_smoke.js",

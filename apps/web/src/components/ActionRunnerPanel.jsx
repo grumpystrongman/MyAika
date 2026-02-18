@@ -28,10 +28,14 @@ const SAMPLE_DESKTOP_PLAN = {
     { type: "wait", ms: 300 },
     { type: "screenshot", name: "notepad_hello" }
   ],
-  safety: { requireApprovalFor: ["launch", "input", "screenshot"], maxActions: 20 }
+  safety: { requireApprovalFor: ["launch", "input", "screenshot"], maxActions: 20, approvalMode: "per_run" }
 };
 
-const DEFAULT_DESKTOP_SAFETY = { requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app"], maxActions: 60 };
+const DEFAULT_DESKTOP_SAFETY = {
+  requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app", "vision", "uia"],
+  maxActions: 60,
+  approvalMode: "per_run"
+};
 const DEFAULT_RECORD_OPTIONS = { stopKey: "F8", maxSeconds: 180, includeMoves: false };
 
 export default function ActionRunnerPanel({ serverUrl }) {
@@ -58,6 +62,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
       runData: null,
       error: "",
       approval: null,
+      approvalMode: "per_run",
       loadingPlan: false,
       running: false
     }
@@ -220,6 +225,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
   function loadMacroPlan(macro) {
     if (!macro) return;
     setMode("desktop");
+    const approvalMode = macro?.safety?.approvalMode || DEFAULT_DESKTOP_SAFETY.approvalMode;
     setStateByMode((prev) => ({
       ...prev,
       desktop: {
@@ -230,7 +236,8 @@ export default function ActionRunnerPanel({ serverUrl }) {
           safety: macro.safety || DEFAULT_DESKTOP_SAFETY
         },
         planExplanation: `Loaded macro: ${macro.name || macro.id}`,
-        error: ""
+        error: "",
+        approvalMode
       }
     }));
   }
@@ -248,7 +255,19 @@ export default function ActionRunnerPanel({ serverUrl }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "plan_failed");
-      updateModeState({ plan: data?.plan || null, planExplanation: data?.explanation || "" });
+      let nextPlan = data?.plan || null;
+      if (mode === "desktop" && nextPlan) {
+        const approvalMode = activeState.approvalMode || DEFAULT_DESKTOP_SAFETY.approvalMode;
+        nextPlan = {
+          ...nextPlan,
+          safety: {
+            ...DEFAULT_DESKTOP_SAFETY,
+            ...(nextPlan.safety || {}),
+            approvalMode
+          }
+        };
+      }
+      updateModeState({ plan: nextPlan, planExplanation: data?.explanation || "" });
     } catch (err) {
       updateModeState({ error: err?.message || "plan_failed" });
     } finally {
@@ -278,6 +297,12 @@ export default function ActionRunnerPanel({ serverUrl }) {
         if (!Array.isArray(payload.actions) || payload.actions.length === 0) {
           throw new Error("No actions to run. Preview a plan or load the sample.");
         }
+        const approvalMode = activeState.approvalMode || payload.safety?.approvalMode || DEFAULT_DESKTOP_SAFETY.approvalMode;
+        payload.safety = {
+          ...DEFAULT_DESKTOP_SAFETY,
+          ...(payload.safety || {}),
+          approvalMode
+        };
       }
 
       const resp = await fetch(`${serverUrl}${config.runEndpoint}`, {
@@ -339,6 +364,53 @@ export default function ActionRunnerPanel({ serverUrl }) {
     }
   }
 
+  async function approveStepAndContinue() {
+    if (!activeState.runId || !activeState.runData?.pendingApproval?.id) return;
+    updateModeState({ error: "", running: true });
+    try {
+      let adminToken = "";
+      try {
+        adminToken = window.localStorage.getItem("aika_admin_token") || "";
+      } catch {
+        adminToken = "";
+      }
+      const approvalId = activeState.runData.pendingApproval.id;
+      const approveResp = await fetch(`${serverUrl}/api/approvals/${approvalId}/approve`, {
+        method: "POST",
+        headers: adminToken ? { "x-admin-token": adminToken } : undefined
+      });
+      const approved = await approveResp.json();
+      if (!approveResp.ok) throw new Error(approved?.error || "approval_failed");
+      const continueResp = await fetch(`${serverUrl}/api/desktop/runs/${activeState.runId}/continue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const continueData = await continueResp.json();
+      if (!continueResp.ok) throw new Error(continueData?.error || "continue_failed");
+      updateModeState({ runData: continueData });
+    } catch (err) {
+      updateModeState({ error: err?.message || "approval_failed" });
+    } finally {
+      updateModeState({ running: false });
+    }
+  }
+
+  async function requestPanicStop() {
+    if (!activeState.runId) return;
+    updateModeState({ error: "" });
+    try {
+      const resp = await fetch(`${serverUrl}/api/desktop/runs/${activeState.runId}/stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "stop_failed");
+      updateModeState({ runData: data.run || activeState.runData });
+    } catch (err) {
+      updateModeState({ error: err?.message || "stop_failed" });
+    }
+  }
+
   function loadDesktopSample() {
     setMode("desktop");
     setStateByMode((prev) => ({
@@ -347,7 +419,8 @@ export default function ActionRunnerPanel({ serverUrl }) {
         ...prev.desktop,
         plan: SAMPLE_DESKTOP_PLAN,
         planExplanation: "Loaded the safe Notepad sample plan.",
-        error: ""
+        error: "",
+        approvalMode: SAMPLE_DESKTOP_PLAN.safety?.approvalMode || DEFAULT_DESKTOP_SAFETY.approvalMode
       }
     }));
   }
@@ -496,6 +569,20 @@ export default function ActionRunnerPanel({ serverUrl }) {
           </label>
         )}
 
+        {mode === "desktop" && (
+          <label style={{ fontSize: 12, marginTop: 8, display: "block" }}>
+            Approval mode
+            <select
+              value={activeState.approvalMode || "per_run"}
+              onChange={(e) => updateModeState({ approvalMode: e.target.value })}
+              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+            >
+              <option value="per_run">Per run (one approval for the plan)</option>
+              <option value="per_step">Per step (approval at each risky action)</option>
+            </select>
+          </label>
+        )}
+
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
           <button onClick={previewPlan} disabled={activeState.loadingPlan} style={{ padding: "6px 10px", borderRadius: 8 }}>
             {activeState.loadingPlan ? "Planning..." : "Preview Plan"}
@@ -521,6 +608,21 @@ export default function ActionRunnerPanel({ serverUrl }) {
           <div style={{ marginTop: 6 }}>{activeState.approval.humanSummary}</div>
           <button onClick={approveAndRun} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
             Approve & Run
+          </button>
+        </div>
+      )}
+
+      {mode === "desktop" && runData?.pendingApproval && (
+        <div style={{ marginTop: 10, padding: 10, border: "1px solid #f59e0b", borderRadius: 10, background: "#fff7ed", fontSize: 12 }}>
+          <div style={{ fontWeight: 600 }}>Step approval required</div>
+          <div>Step {runData.pendingApproval.step}</div>
+          {Array.isArray(runData.pendingApproval.reasons) && runData.pendingApproval.reasons.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              Reasons: {runData.pendingApproval.reasons.join("; ")}
+            </div>
+          )}
+          <button onClick={approveStepAndContinue} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+            Approve & Continue
           </button>
         </div>
       )}
@@ -673,6 +775,23 @@ export default function ActionRunnerPanel({ serverUrl }) {
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Run Status</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Run ID: {activeState.runId}</div>
           <div style={{ fontSize: 12, marginBottom: 8 }}>Status: {runData?.status || "running"}</div>
+          {mode === "desktop" && (
+            <button
+              onClick={requestPanicStop}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: "#fee2e2",
+                border: "1px solid #fecaca",
+                color: "#b91c1c",
+                fontSize: 12,
+                fontWeight: 600,
+                marginBottom: 10
+              }}
+            >
+              Panic Stop
+            </button>
+          )}
 
           <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Timeline</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
@@ -708,6 +827,10 @@ export default function ActionRunnerPanel({ serverUrl }) {
                 <div key={`${artifact.file}-${idx}`} style={{ width: 140 }}>
                   {artifact.type === "screenshot" ? (
                     <img src={url} alt={artifact.file} style={{ width: "100%", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                  ) : artifact.type === "ocr" ? (
+                    <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>
+                      OCR: {artifact.file}
+                    </a>
                   ) : (
                     <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>
                       {artifact.file}

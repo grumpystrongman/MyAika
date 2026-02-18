@@ -58,6 +58,9 @@ Run from repo root:
 - `node apps/server/cli/aika.js approvals list`
 - `node apps/server/cli/aika.js approvals approve <approvalId>`
 - `node apps/server/cli/aika.js approvals deny <approvalId>`
+- `npm run memory:retention -- --dry-run`
+- `curl -X GET http://localhost:8787/api/knowledge-graph`
+- `curl -X POST http://localhost:8787/api/memory/retention/run -H \"x-admin-token: <admin-token>\" -d \"{\\\"dryRun\\\":true}\"`
 
 ## Expected
 - Approvals required for email.send and messaging tools

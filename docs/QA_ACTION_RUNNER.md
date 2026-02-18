@@ -17,7 +17,12 @@
 - [ ] Switch to **Desktop** mode in Action Runner.
 - [ ] Load the sample plan or create a simple plan.
 - [ ] Confirm approval is required before execution.
+- [ ] Toggle **Approval mode = Per step** and confirm a step-level approval appears.
+- [ ] Approve the step and confirm the run continues.
+- [ ] Click **Panic Stop** and confirm the run status becomes `stopping`/`stopped`.
 - [ ] Verify artifacts appear in `data/desktop_runs/<runId>/`.
+- [ ] Run a plan with `visionOcr` and confirm an OCR text artifact is created.
+- [ ] Run a plan with `uiaClick` and confirm UI Automation steps execute.
 
 ## Desktop Macro Recorder
 - [ ] Open **Action Runner → Desktop** and start a recording.
@@ -28,6 +33,8 @@
 ## Teach Mode
 - [ ] Create a macro with a parameter placeholder like `{{email}}`.
 - [ ] Save and re-run the macro with a parameter value.
+- [ ] Create a **Desktop** macro with `launch` + `type` + `screenshot`.
+- [ ] Run the desktop macro and confirm approvals + artifacts.
 
 ## Pairing + Messaging
 - [ ] Send a message from an unknown Telegram/Slack/Discord sender.

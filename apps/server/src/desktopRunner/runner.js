@@ -8,11 +8,16 @@ import {
   appendArtifact,
   setRunStatus,
   getRunRecord,
-  getRunDir
+  getRunDir,
+  setRunPendingApproval,
+  setRunStopRequested
 } from "./runStore.js";
+import { createSafetyApproval, getSafetyApproval } from "../safety/approvals.js";
+import { isKillSwitchEnabled } from "../safety/killSwitch.js";
 
-const DEFAULT_REQUIRE_APPROVAL = ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app"];
+const DEFAULT_REQUIRE_APPROVAL = ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app", "vision", "uia"];
 const DEFAULT_MAX_ACTIONS = 40;
+const DEFAULT_APPROVAL_MODE = "per_run";
 
 function resolveRepoRoot() {
   const cwd = process.cwd();
@@ -55,8 +60,31 @@ function detectRiskTags(action) {
   if (type === "mousemove" || type === "mouseclick") tags.add("mouse");
   if (type === "clipboardset") tags.add("clipboard");
   if (type === "screenshot") tags.add("screenshot");
+  if (type === "visionocr") tags.add("vision");
+  if (type === "uiaclick" || type === "uiasetvalue") tags.add("uia");
   if (!type) tags.add("unknown");
   return tags;
+}
+
+function assessDesktopStep({ action, safety, workspaceId } = {}) {
+  const requireList = new Set(
+    (safety?.requireApprovalFor || DEFAULT_REQUIRE_APPROVAL).map(item => String(item).toLowerCase())
+  );
+  const tags = detectRiskTags(action);
+  const reasons = [];
+  const type = String(action?.type || "").toLowerCase();
+  let newApp = null;
+  if (type === "launch") {
+    const target = normalizeTarget(action?.target || action?.app || action?.path || "");
+    const allowed = listAllowedApps(workspaceId || "default").map(item => normalizeTargetKey(item));
+    if (target && !allowed.includes(normalizeTargetKey(target))) {
+      tags.add("new_app");
+      newApp = target;
+      reasons.push(`New app: ${target}`);
+    }
+  }
+  const requiresApproval = Array.from(tags).some(tag => requireList.has(tag));
+  return { requiresApproval, tags: Array.from(tags), reasons, newApp };
 }
 
 export function assessDesktopPlan({ taskName, actions, safety, workspaceId } = {}) {
@@ -127,6 +155,28 @@ function normalizeAction(action) {
   if (lower === "screenshot") {
     return { type: "screenshot", name: String(action?.name || "desktop") };
   }
+  if (lower === "visionocr" || lower === "ocr") {
+    return { type: "visionOcr", name: String(action?.name || "vision"), lang: String(action?.lang || "eng") };
+  }
+  if (lower === "uiaclick") {
+    return {
+      type: "uiaClick",
+      name: String(action?.name || ""),
+      automationId: String(action?.automationId || ""),
+      className: String(action?.className || ""),
+      controlType: String(action?.controlType || "")
+    };
+  }
+  if (lower === "uiasetvalue") {
+    return {
+      type: "uiaSetValue",
+      name: String(action?.name || ""),
+      automationId: String(action?.automationId || ""),
+      className: String(action?.className || ""),
+      controlType: String(action?.controlType || ""),
+      value: String(action?.value || action?.text || "")
+    };
+  }
   if (lower === "clipboardset") {
     return { type: "clipboardSet", text: String(action?.text || "") };
   }
@@ -165,7 +215,30 @@ function runDesktopAction(action, runDir) {
   }
 }
 
-async function runSteps(runId, plan, context = {}) {
+async function runVisionOcr(action, runDir, stepIndex) {
+  const screenshotResult = runDesktopAction({ type: "screenshot", name: action?.name || "vision" }, runDir);
+  const fileName = screenshotResult?.artifact;
+  if (!fileName) return { ok: false, error: "vision_screenshot_failed" };
+  const filePath = path.join(runDir, fileName);
+  let text = "";
+  try {
+    const mod = await import("tesseract.js");
+    const createWorker = mod.createWorker || mod.default?.createWorker || mod.default;
+    const worker = await createWorker(action?.lang || "eng");
+    const result = await worker.recognize(filePath);
+    text = String(result?.data?.text || "");
+    await worker.terminate();
+  } catch (err) {
+    return { ok: false, error: err?.message || "vision_ocr_failed", screenshot: fileName };
+  }
+
+  const textFile = `vision_${stepIndex + 1}_${action?.name || "ocr"}.txt`;
+  const textPath = path.join(runDir, textFile);
+  fs.writeFileSync(textPath, text);
+  return { ok: true, artifact: textFile, artifactType: "ocr", screenshot: fileName, text };
+}
+
+async function runSteps(runId, plan, context = {}, options = {}) {
   const { taskName, actions, safety } = plan;
   const workspaceId = context.workspaceId || "default";
   const envMax = Number(process.env.DESKTOP_RUNNER_MAX_ACTIONS || DEFAULT_MAX_ACTIONS);
@@ -176,27 +249,96 @@ async function runSteps(runId, plan, context = {}) {
   }
 
   const runDir = getRunDir(runId);
-  const launchTargets = extractTargetsFromPlan({ actions: initialActions });
-  if (launchTargets.length) {
-    recordApps(launchTargets, workspaceId);
+  const approvalMode = String(safety?.approvalMode || DEFAULT_APPROVAL_MODE).toLowerCase();
+  if (approvalMode !== "per_step") {
+    const launchTargets = extractTargetsFromPlan({ actions: initialActions });
+    if (launchTargets.length) {
+      recordApps(launchTargets, workspaceId);
+    }
   }
 
-  for (let index = 0; index < initialActions.length; index += 1) {
+  const startIndex = Number.isFinite(options?.startIndex) ? options.startIndex : 0;
+  for (let index = startIndex; index < initialActions.length; index += 1) {
     const rawAction = initialActions[index];
     const action = normalizeAction(rawAction);
     const startedAt = nowIso();
     let status = "ok";
     let error = "";
     try {
+      if (isKillSwitchEnabled()) {
+        setRunStatus(runId, "stopped", { error: "kill_switch_active", finishedAt: nowIso() });
+        return getRunRecord(runId);
+      }
+      const current = getRunRecord(runId);
+      if (current?.stopRequested) {
+        setRunStatus(runId, "stopped", { error: "stop_requested", finishedAt: nowIso() });
+        return getRunRecord(runId);
+      }
+
+      if (approvalMode === "per_step") {
+        const decision = assessDesktopStep({ action, safety, workspaceId });
+        if (decision.requiresApproval) {
+          const summary = `Approve desktop step ${index + 1}: ${action?.type || "action"}`;
+          const approval = createSafetyApproval({
+            actionType: "desktop.step",
+            summary,
+            payloadRedacted: { action, step: index + 1, reasons: decision.reasons }
+          });
+          setRunPendingApproval(runId, {
+            id: approval.id,
+            step: index + 1,
+            stepIndex: index,
+            action,
+            reasons: decision.reasons
+          });
+          appendTimeline(runId, {
+            step: index + 1,
+            type: action?.type || "unknown",
+            status: "approval_required",
+            startedAt,
+            finishedAt: nowIso(),
+            error: "",
+            action: rawAction
+          });
+          setRunStatus(runId, "approval_required", { error: "approval_required" });
+          return getRunRecord(runId);
+        }
+      }
       if (!action) throw new Error("desktop_action_invalid");
-      const result = runDesktopAction(action, runDir);
-      if (result?.artifact) {
-        appendArtifact(runId, {
-          type: result.artifactType || (action.type === "screenshot" ? "screenshot" : "artifact"),
-          file: result.artifact,
-          step: index + 1,
-          createdAt: nowIso()
-        });
+      if (action.type === "visionOcr") {
+        const result = await runVisionOcr(action, runDir, index);
+        if (result?.artifact) {
+          appendArtifact(runId, {
+            type: result.artifactType || "ocr",
+            file: result.artifact,
+            step: index + 1,
+            createdAt: nowIso()
+          });
+        }
+        if (result?.screenshot) {
+          appendArtifact(runId, {
+            type: "screenshot",
+            file: result.screenshot,
+            step: index + 1,
+            createdAt: nowIso()
+          });
+        }
+        if (!result?.ok) {
+          throw new Error(result?.error || "vision_ocr_failed");
+        }
+      } else {
+        const result = runDesktopAction(action, runDir);
+        if (result?.artifact) {
+          appendArtifact(runId, {
+            type: result.artifactType || (action.type === "screenshot" ? "screenshot" : "artifact"),
+            file: result.artifact,
+            step: index + 1,
+            createdAt: nowIso()
+          });
+        }
+        if (action.type === "launch") {
+          recordApps([action.target], workspaceId);
+        }
       }
     } catch (err) {
       status = "error";
@@ -263,5 +405,43 @@ export function startDesktopRun(plan, context = {}) {
 }
 
 export function getDesktopRun(runId) {
+  return getRunRecord(runId);
+}
+
+export async function continueDesktopRun(runId, context = {}) {
+  const run = getRunRecord(runId);
+  if (!run) {
+    const err = new Error("run_not_found");
+    err.status = 404;
+    throw err;
+  }
+  const pending = run.pendingApproval;
+  if (!pending?.id) {
+    const err = new Error("no_pending_approval");
+    err.status = 400;
+    throw err;
+  }
+  const approval = getSafetyApproval(pending.id);
+  if (!approval || approval.status !== "approved") {
+    const err = new Error("approval_not_approved");
+    err.status = 403;
+    throw err;
+  }
+  setRunPendingApproval(runId, null);
+  setRunStatus(runId, "running", { startedAt: nowIso() });
+  return await runSteps(runId, {
+    taskName: run.taskName,
+    actions: run.actions,
+    safety: run.safety
+  }, context, { startIndex: pending.stepIndex ?? 0 });
+}
+
+export function requestDesktopStop(runId) {
+  const run = getRunRecord(runId);
+  if (!run) return null;
+  setRunStopRequested(runId, true);
+  if (["running", "approval_required"].includes(run.status)) {
+    setRunStatus(runId, "stopping", { error: "stop_requested" });
+  }
   return getRunRecord(runId);
 }

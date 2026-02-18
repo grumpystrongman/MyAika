@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+﻿import OpenAI from "openai";
+import { planWithAgents } from "../agent/multiAgent.js";
 
 let openaiClient = null;
 
@@ -28,13 +29,25 @@ export async function planDesktopAction({ instruction } = {}) {
     throw new Error("instruction_required");
   }
 
+  if (String(process.env.AGENT_MULTI_PASS || "0") === "1") {
+    try {
+      return await planWithAgents({ instruction: cleanInstruction, mode: "desktop" });
+    } catch {
+      // Fall back to single-pass planner below.
+    }
+  }
+
   const client = getClient();
   if (!client) {
     return {
       plan: {
         taskName: cleanInstruction.slice(0, 80) || "Desktop Plan",
         actions: [],
-        safety: { requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app"], maxActions: 40 }
+        safety: {
+          requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app", "vision", "uia"],
+          maxActions: 40,
+          approvalMode: "per_run"
+        }
       },
       explanation: "OPENAI_API_KEY is not configured; returning an empty plan."
     };
@@ -53,11 +66,15 @@ export async function planDesktopAction({ instruction } = {}) {
     "    {\"type\":\"mouseMove\",\"x\":200,\"y\":120},",
     "    {\"type\":\"mouseClick\",\"x\":200,\"y\":120,\"button\":\"left\",\"count\":1},",
     "    {\"type\":\"screenshot\",\"name\":\"step\"},",
-    "    {\"type\":\"clipboardSet\",\"text\":\"...\"}",
+    "    {\"type\":\"clipboardSet\",\"text\":\"...\"},",
+    "    {\"type\":\"visionOcr\",\"name\":\"screen\",\"lang\":\"eng\"},",
+    "    {\"type\":\"uiaClick\",\"name\":\"Save\",\"automationId\":\"FileSave\"},",
+    "    {\"type\":\"uiaSetValue\",\"name\":\"Title\",\"automationId\":\"TitleInput\",\"value\":\"Hello\"}",
     "  ],",
     "  \"safety\": {",
-    "    \"requireApprovalFor\": [\"launch\",\"input\",\"key\",\"mouse\",\"clipboard\",\"screenshot\",\"new_app\"],",
-    "    \"maxActions\": 40",
+    "    \"requireApprovalFor\": [\"launch\",\"input\",\"key\",\"mouse\",\"clipboard\",\"screenshot\",\"new_app\",\"vision\",\"uia\"],",
+    "    \"maxActions\": 40,",
+    "    \"approvalMode\": \"per_run\"",
     "  }",
     "}",
     "Safety rules:",
@@ -86,7 +103,11 @@ export async function planDesktopAction({ instruction } = {}) {
       plan: {
         taskName: cleanInstruction.slice(0, 80) || "Desktop Plan",
         actions: [],
-        safety: { requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app"], maxActions: 40 }
+        safety: {
+          requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app", "vision", "uia"],
+          maxActions: 40,
+          approvalMode: "per_run"
+        }
       },
       explanation: "Planner returned non-JSON output; returning an empty plan."
     };
@@ -96,7 +117,11 @@ export async function planDesktopAction({ instruction } = {}) {
     plan: {
       taskName: plan.taskName || cleanInstruction.slice(0, 80) || "Desktop Plan",
       actions: Array.isArray(plan.actions) ? plan.actions : [],
-      safety: plan.safety || { requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app"], maxActions: 40 }
+      safety: plan.safety || {
+        requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app", "vision", "uia"],
+        maxActions: 40,
+        approvalMode: "per_run"
+      }
     },
     explanation: "Plan generated from instruction."
   };
