@@ -193,6 +193,7 @@ Direct access to MCP-lite tools, approvals, and execution history.
 ![Action Runner tab](user-guide/screenshots/action_runner.png)
 ![Action Runner desktop mode](user-guide/screenshots/action_runner_desktop.png)
 ![Action Runner macro recorder](user-guide/screenshots/action_runner_macro_recorder.png)
+![Action Runner per-step approvals](user-guide/screenshots/action_runner_desktop_approval.png)
 
 ### What it is
 Browser automation plus a Desktop mode for local Windows control (mouse, keyboard, screenshots).
@@ -230,6 +231,7 @@ Browser automation plus a Desktop mode for local Windows control (mouse, keyboar
 
 ## Teach Mode Tab
 ![Teach Mode tab](user-guide/screenshots/teach_mode.png)
+![Teach Mode desktop](user-guide/screenshots/teach_mode_desktop.png)
 
 ### What it is
 Create reusable browser or desktop macros with parameters.
