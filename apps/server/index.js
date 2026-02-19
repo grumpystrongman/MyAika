@@ -37,6 +37,13 @@ import {
   sendGmailMessage
 } from "./integrations/google.js";
 import {
+  connectMicrosoft,
+  exchangeMicrosoftCode,
+  resolveMicrosoftAccount,
+  getMicrosoftStatus,
+  disconnectMicrosoft
+} from "./integrations/microsoft.js";
+import {
   fetchFirefliesTranscripts,
   fetchFirefliesTranscript,
   uploadFirefliesAudio,
@@ -158,14 +165,17 @@ import {
   startNotionSyncLoop,
   startSlackSyncLoop,
   startOutlookSyncLoop,
+  startGmailSyncLoop,
   startJiraSyncLoop,
   startConfluenceSyncLoop,
   syncNotionConnector,
   syncSlackConnector,
   syncOutlookConnector,
+  syncGmailConnector,
   syncJiraConnector,
   syncConfluenceConnector
 } from "./src/connectors/index.js";
+import { getEmailInbox } from "./src/connectors/emailInbox.js";
 import {
   startTradingYoutubeLoop,
   crawlTradingYoutubeSources,
@@ -261,6 +271,7 @@ startFirefliesSyncLoop();
 startNotionSyncLoop();
 startSlackSyncLoop();
 startOutlookSyncLoop();
+startGmailSyncLoop();
 startJiraSyncLoop();
 startConfluenceSyncLoop();
 startDailyPicksLoop();
@@ -465,9 +476,11 @@ function buildIntegrationsState(userId = "") {
   const state = {
     google_docs: { connected: false },
     google_drive: { connected: false },
+    gmail: { connected: false },
     fireflies: { connected: false },
     notion: { connected: false },
     outlook: { connected: false },
+    microsoft: { connected: false },
     jira: { connected: false },
     confluence: { connected: false },
     amazon: { connected: false },
@@ -489,6 +502,10 @@ function buildIntegrationsState(userId = "") {
     state.google_drive.connected = true;
     state.google_docs.connectedAt = googleStored.connectedAt || new Date().toISOString();
     state.google_drive.connectedAt = googleStored.connectedAt || new Date().toISOString();
+    if (String(googleStored.scope || "").includes("gmail")) {
+      state.gmail.connected = true;
+      state.gmail.connectedAt = googleStored.connectedAt || new Date().toISOString();
+    }
   }
   const notionStored = getProvider("notion", userId);
   if (notionStored?.token || notionStored?.access_token || process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN) {
@@ -499,6 +516,8 @@ function buildIntegrationsState(userId = "") {
   if (outlookStored?.access_token || outlookStored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN) {
     state.outlook.connected = true;
     state.outlook.connectedAt = outlookStored?.connectedAt || new Date().toISOString();
+    state.microsoft.connected = true;
+    state.microsoft.connectedAt = outlookStored?.connectedAt || new Date().toISOString();
   }
   if (process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN) {
     state.jira.connected = true;
@@ -583,6 +602,21 @@ function buildConnections(userId = "") {
     setupHint: "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in apps/server/.env"
   });
 
+  connections.push({
+    id: "gmail",
+    label: "Gmail (Read-only)",
+    detail: "Inbox preview + RAG ingestion",
+    status: googleStatus?.scopes?.some(s => s.includes("gmail")) ? "connected" : "disconnected",
+    scopes: googleStatus?.scopes || [],
+    lastUsedAt: googleStored?.lastUsedAt || null,
+    connectedAt: googleStored?.connectedAt || null,
+    configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    method: "oauth",
+    connectUrl: "/api/integrations/google/connect?preset=gmail_readonly",
+    connectLabel: "Connect Gmail",
+    setupHint: "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in apps/server/.env"
+  });
+
   const notionStored = getProvider("notion", userId);
   connections.push({
     id: "notion",
@@ -599,18 +633,22 @@ function buildConnections(userId = "") {
   });
 
   const outlookStored = getProvider("outlook", userId) || getProvider("microsoft", userId);
+  const microsoftConfigured = Boolean(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
   connections.push({
     id: "outlook",
     label: "Outlook / Microsoft 365",
     detail: "Mail and calendar (Graph API)",
     status: outlookStored?.access_token || outlookStored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN ? "connected" : "disconnected",
-    scopes: [],
+    scopes: outlookStored?.scope ? String(outlookStored.scope).split(" ") : [],
     lastUsedAt: outlookStored?.lastUsedAt || null,
     connectedAt: outlookStored?.connectedAt || null,
-    configured: Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN),
-    method: "token",
-    connectLabel: "Set Access Token",
-    setupHint: "Set OUTLOOK_ACCESS_TOKEN in apps/server/.env"
+    configured: microsoftConfigured || Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN),
+    method: microsoftConfigured ? "oauth" : "token",
+    connectUrl: "/api/integrations/microsoft/connect?preset=mail_read",
+    connectLabel: microsoftConfigured ? "Connect Microsoft" : "Set Access Token",
+    setupHint: microsoftConfigured
+      ? "Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_REDIRECT_URI(S) in apps/server/.env"
+      : "Set OUTLOOK_ACCESS_TOKEN in apps/server/.env"
   });
 
   connections.push({
@@ -3700,7 +3738,9 @@ app.get("/api/integrations", (req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const firefliesConfigured = Boolean(process.env.FIREFLIES_API_KEY);
   const notionConfigured = Boolean(process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN);
-  const outlookConfigured = Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN);
+  const outlookConfigured = Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN || (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET));
+  const gmailConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  const microsoftConfigured = Boolean(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
   const jiraConfigured = Boolean(process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN);
   const confluenceConfigured = Boolean(process.env.CONFLUENCE_BASE_URL && process.env.CONFLUENCE_EMAIL && process.env.CONFLUENCE_API_TOKEN);
   const plexConfigured = Boolean(process.env.PLEX_URL && process.env.PLEX_TOKEN);
@@ -3731,6 +3771,8 @@ app.get("/api/integrations", (req, res) => {
       fireflies: { ...integrationsState.fireflies, configured: firefliesConfigured },
       notion: { ...integrationsState.notion, configured: notionConfigured },
       outlook: { ...integrationsState.outlook, configured: outlookConfigured },
+      gmail: { ...integrationsState.gmail, configured: gmailConfigured },
+      microsoft: { ...integrationsState.microsoft, configured: microsoftConfigured },
       jira: { ...integrationsState.jira, configured: jiraConfigured },
       confluence: { ...integrationsState.confluence, configured: confluenceConfigured },
       amazon: { ...integrationsState.amazon, configured: amazonConfigured },
@@ -6976,12 +7018,30 @@ app.get("/api/integrations/google/status", async (req, res) => {
   }
 });
 
+app.get("/api/integrations/microsoft/status", async (req, res) => {
+  try {
+    const status = getMicrosoftStatus(getUserId(req));
+    res.json({ ok: status.connected, ...status });
+  } catch (err) {
+    res.status(200).json({ ok: false, error: err.message || "microsoft_not_connected" });
+  }
+});
+
 app.post("/api/integrations/google/disconnect", async (req, res) => {
   try {
     const result = await disconnectGoogle(getUserId(req));
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message || "google_disconnect_failed" });
+  }
+});
+
+app.post("/api/integrations/microsoft/disconnect", async (req, res) => {
+  try {
+    const result = await disconnectMicrosoft(getUserId(req));
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "microsoft_disconnect_failed" });
   }
 });
 
@@ -7159,6 +7219,64 @@ app.post("/api/integrations/fireflies/upload", async (req, res) => {
   }
 });
 
+app.get("/api/integrations/microsoft/callback", async (req, res) => {
+  try {
+    const code = req.query.code;
+    const state = req.query.state;
+    if (!code || !state) return res.status(400).send("missing_code_or_state");
+    const token = await exchangeMicrosoftCode(String(code), String(state));
+    const account = await resolveMicrosoftAccount({ accessToken: token.access_token, idToken: token.id_token });
+    const userId = account?.email || `microsoft_${Date.now()}`;
+    setProvider("microsoft", {
+      ...token,
+      email: account?.email || null,
+      name: account?.name || null,
+      tenantId: account?.tenantId || null,
+      organization: account?.organization || null,
+      connectedAt: new Date().toISOString()
+    }, userId);
+    writeAudit({
+      type: "connection_token_stored",
+      at: new Date().toISOString(),
+      provider: "microsoft",
+      userId
+    });
+    const sessionId = createSession({
+      id: userId,
+      email: account?.email || null,
+      name: account?.name || null,
+      picture: null,
+      workspaceId: userId
+    });
+    setSessionCookie(res, sessionId);
+    const uiBase = token?.meta?.uiBase || process.env.WEB_UI_URL || "http://localhost:3000";
+    const redirectTo = token?.meta?.redirectTo || "/";
+    res.redirect(`${uiBase}${redirectTo}?integration=microsoft&status=success`);
+  } catch (err) {
+    const uiBase = process.env.WEB_UI_URL || "http://localhost:3000";
+    res.redirect(`${uiBase}/?integration=microsoft&status=error`);
+  }
+});
+
+app.get("/api/integrations/microsoft/connect", (req, res) => {
+  try {
+    if (!process.env.MICROSOFT_CLIENT_ID || !process.env.MICROSOFT_CLIENT_SECRET) {
+      return res.status(400).send("microsoft_oauth_not_configured");
+    }
+    const preset = String(req.query.preset || "mail_read");
+    const redirectTo = String(req.query.redirect || "/");
+    const uiBase = String(req.query.ui_base || req.query.uiBase || "") || getRequestOrigin(req) || getUiBaseUrl();
+    const tenantId = String(req.query.tenantId || req.query.tenant || "");
+    const prompt = String(req.query.prompt || "");
+    const domainHint = String(req.query.domainHint || "");
+    const loginHint = String(req.query.loginHint || "");
+    const url = connectMicrosoft(preset, { redirectTo, uiBase, tenantId, prompt, domainHint, loginHint });
+    res.redirect(url);
+  } catch (err) {
+    res.status(500).send(err.message || "microsoft_auth_failed");
+  }
+});
+
 app.post("/api/connectors/notion/sync", rateLimit, async (req, res) => {
   try {
     const limit = Number(req.body?.limit || 0) || undefined;
@@ -7186,6 +7304,29 @@ app.post("/api/connectors/outlook/sync", rateLimit, async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err?.message || "outlook_sync_failed" });
+  }
+});
+
+app.post("/api/connectors/gmail/sync", rateLimit, async (req, res) => {
+  try {
+    const limit = Number(req.body?.limit || 0) || undefined;
+    const result = await syncGmailConnector({ userId: getUserId(req), limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_sync_failed" });
+  }
+});
+
+app.get("/api/email/inbox", rateLimit, async (req, res) => {
+  try {
+    const provider = String(req.query.provider || "all").toLowerCase();
+    const limit = Number(req.query.limit || 30);
+    const lookbackDays = Number(req.query.lookbackDays || 14);
+    const providers = provider === "all" ? ["gmail", "outlook"] : [provider];
+    const items = await getEmailInbox({ userId: getUserId(req), providers, limit, lookbackDays });
+    res.json({ ok: true, items });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_inbox_failed" });
   }
 });
 

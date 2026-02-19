@@ -1,12 +1,14 @@
 import { syncNotion, isNotionConfigured } from "./notion.js";
 import { syncSlack, isSlackConfigured } from "./slack.js";
 import { syncOutlook, isOutlookConfigured } from "./outlook.js";
+import { syncGmail, isGmailConfigured } from "./gmail.js";
 import { syncJira, isJiraConfigured } from "./jira.js";
 import { syncConfluence, isConfluenceConfigured } from "./confluence.js";
 
 let notionRunning = false;
 let slackRunning = false;
 let outlookRunning = false;
+let gmailRunning = false;
 let jiraRunning = false;
 let confluenceRunning = false;
 
@@ -58,6 +60,16 @@ export async function syncOutlookConnector(opts = {}) {
   }
 }
 
+export async function syncGmailConnector(opts = {}) {
+  if (gmailRunning) return { ok: false, error: "sync_in_progress" };
+  gmailRunning = true;
+  try {
+    return await syncGmail(opts);
+  } finally {
+    gmailRunning = false;
+  }
+}
+
 export async function syncJiraConnector(opts = {}) {
   if (jiraRunning) return { ok: false, error: "sync_in_progress" };
   jiraRunning = true;
@@ -81,6 +93,7 @@ export async function syncConfluenceConnector(opts = {}) {
 let notionTimer = null;
 let slackTimer = null;
 let outlookTimer = null;
+let gmailTimer = null;
 let jiraTimer = null;
 let confluenceTimer = null;
 
@@ -114,6 +127,17 @@ export function startOutlookSyncLoop() {
     runOnStartup: String(process.env.OUTLOOK_SYNC_ON_STARTUP || "0") === "1",
     runner: () => syncOutlookConnector(),
     isConfigured: () => isOutlookConfigured()
+  });
+}
+
+export function startGmailSyncLoop() {
+  if (gmailTimer) return;
+  gmailTimer = scheduleLoop({
+    name: "gmail",
+    intervalMinutes: process.env.GMAIL_SYNC_INTERVAL_MINUTES,
+    runOnStartup: String(process.env.GMAIL_SYNC_ON_STARTUP || "0") === "1",
+    runner: () => syncGmailConnector(),
+    isConfigured: () => isGmailConfigured()
   });
 }
 

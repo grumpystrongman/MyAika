@@ -1,11 +1,20 @@
 import { getProvider } from "../../integrations/store.js";
+import { getMicrosoftAccessToken } from "../../integrations/microsoft.js";
 import { ingestConnectorDocument } from "./ingest.js";
 import { fetchJson, parseList, normalizeText, stripHtml } from "./utils.js";
 import { setRagMeta } from "../rag/vectorStore.js";
 
 const GRAPH_API = "https://graph.microsoft.com/v1.0";
 
-function getOutlookToken(userId = "local") {
+async function getOutlookToken(userId = "local", requiredScopes = []) {
+  try {
+    return await getMicrosoftAccessToken(requiredScopes.length ? requiredScopes : [
+      "https://graph.microsoft.com/User.Read",
+      "https://graph.microsoft.com/Mail.Read"
+    ], userId);
+  } catch {
+    // fallback to stored/env tokens
+  }
   const stored = getProvider("outlook", userId) || getProvider("microsoft", userId);
   return stored?.access_token || stored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN || "";
 }
@@ -30,7 +39,7 @@ async function listMessages(token, { folderId = "", limit = 50, lookbackDays } =
     : "/me/mailFolders/inbox/messages";
   const url = new URL(`${GRAPH_API}${path}`);
   url.searchParams.set("$top", String(limit));
-  url.searchParams.set("$select", "id,subject,bodyPreview,receivedDateTime,webLink,from");
+  url.searchParams.set("$select", "id,subject,bodyPreview,receivedDateTime,webLink,from,toRecipients,ccRecipients,importance");
   const filter = buildFilter(lookbackDays, "receivedDateTime");
   if (filter) url.searchParams.set("$filter", filter);
   const data = await fetchJson(url.toString(), { headers: buildHeaders(token) });
@@ -48,12 +57,19 @@ async function listEvents(token, { limit = 25, lookbackDays } = {}) {
 }
 
 export async function syncOutlook({ userId = "local", limit } = {}) {
-  const token = getOutlookToken(userId);
+  const includeEvents = String(process.env.OUTLOOK_SYNC_EVENTS || "0") === "1";
+  const token = await getOutlookToken(userId, includeEvents ? [
+    "https://graph.microsoft.com/User.Read",
+    "https://graph.microsoft.com/Mail.Read",
+    "https://graph.microsoft.com/Calendars.Read"
+  ] : [
+    "https://graph.microsoft.com/User.Read",
+    "https://graph.microsoft.com/Mail.Read"
+  ]);
   if (!token) return { ok: false, error: "outlook_token_missing" };
 
   const maxItems = Number(limit || process.env.OUTLOOK_SYNC_LIMIT || 50);
   const lookbackDays = Number(process.env.OUTLOOK_LOOKBACK_DAYS || 14);
-  const includeEvents = String(process.env.OUTLOOK_SYNC_EVENTS || "0") === "1";
   const folderIds = parseList(process.env.OUTLOOK_FOLDER_IDS);
 
   const summary = { ok: true, ingested: 0, skipped: 0, errors: [] };
@@ -125,5 +141,24 @@ export async function syncOutlook({ userId = "local", limit } = {}) {
 }
 
 export function isOutlookConfigured(userId = "local") {
-  return Boolean(getOutlookToken(userId));
+  const stored = getProvider("outlook", userId) || getProvider("microsoft", userId);
+  return Boolean(stored?.access_token || stored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN);
+}
+
+export async function listOutlookPreview({ userId = "local", limit = 20, lookbackDays } = {}) {
+  const token = await getOutlookToken(userId);
+  if (!token) return [];
+  const messages = await listMessages(token, { limit, lookbackDays });
+  return messages.map(msg => ({
+    provider: "outlook",
+    id: msg?.id || "",
+    subject: msg?.subject || "(no subject)",
+    from: msg?.from?.emailAddress?.address || msg?.from?.emailAddress?.name || "",
+    to: Array.isArray(msg?.toRecipients)
+      ? msg.toRecipients.map(r => r?.emailAddress?.address || r?.emailAddress?.name || "").filter(Boolean).join(", ")
+      : "",
+    receivedAt: msg?.receivedDateTime || "",
+    snippet: normalizeText(stripHtml(msg?.bodyPreview || "")),
+    webLink: msg?.webLink || ""
+  }));
 }

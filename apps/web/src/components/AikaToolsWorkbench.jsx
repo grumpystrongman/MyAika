@@ -43,6 +43,11 @@ const TOOL_HELP = {
     why: "Generate a clean draft without sending so you can review first.",
     how: "Fill the fields and click Draft Email. You can edit before sending."
   },
+  emailInbox: {
+    title: "Inbox Preview",
+    why: "Pull in recent emails without storing full mailboxes locally.",
+    how: "Pick a provider, refresh the list, and open a message to see RAG context."
+  },
   emailSend: {
     title: "Send Email",
     why: "Send a vetted draft after review and approval.",
@@ -169,6 +174,15 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailDraftResult, setEmailDraftResult] = useState(null);
   const [emailSendForm, setEmailSendForm] = useState({ draftId: "", sendTo: "", cc: "", bcc: "" });
   const [emailSendResult, setEmailSendResult] = useState(null);
+  const [emailProvider, setEmailProvider] = useState("all");
+  const [emailLookbackDays, setEmailLookbackDays] = useState(14);
+  const [emailInbox, setEmailInbox] = useState([]);
+  const [emailInboxLoading, setEmailInboxLoading] = useState(false);
+  const [emailSelected, setEmailSelected] = useState(null);
+  const [emailContextResult, setEmailContextResult] = useState(null);
+  const [emailContextLoading, setEmailContextLoading] = useState(false);
+  const [emailSyncResult, setEmailSyncResult] = useState(null);
+  const [emailSyncing, setEmailSyncing] = useState(false);
   const [sheetForm, setSheetForm] = useState({ type: "localFile", pathOrId: "", changes: "[]" });
   const [sheetResult, setSheetResult] = useState(null);
   const [memoryForm, setMemoryForm] = useState({ tier: 1, title: "", content: "", tags: "", containsPHI: false });
@@ -181,6 +195,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [configStatus, setConfigStatus] = useState(null);
   const [integrationsStatus, setIntegrationsStatus] = useState(null);
   const [googleStatus, setGoogleStatus] = useState(null);
+  const [microsoftStatus, setMicrosoftStatus] = useState(null);
   const [vaultScope, setVaultScope] = useState("vault");
   const [vaultQuery, setVaultQuery] = useState("");
   const [vaultResult, setVaultResult] = useState(null);
@@ -359,8 +374,80 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     }
   }
 
+  async function loadEmailInbox() {
+    setEmailInboxLoading(true);
+    try {
+      const params = new URLSearchParams({
+        provider: emailProvider,
+        limit: "30",
+        lookbackDays: String(emailLookbackDays || 14)
+      });
+      const resp = await fetch(`${serverUrl}/api/email/inbox?${params.toString()}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_inbox_failed");
+      setEmailInbox(data.items || []);
+    } catch (err) {
+      setEmailInbox([]);
+    } finally {
+      setEmailInboxLoading(false);
+    }
+  }
+
+  async function askEmailContext(message) {
+    if (!message) return;
+    setEmailContextLoading(true);
+    try {
+      const prompt = `Find any relevant notes or todos related to this email.\nSubject: ${message.subject}\nFrom: ${message.from}\nSnippet: ${message.snippet}`;
+      const resp = await fetch(`${serverUrl}/api/rag/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: prompt,
+          topK: 6,
+          ragModel: "all",
+          filters: { meetingIdPrefix: "rag:" }
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rag_query_failed");
+      setEmailContextResult(data);
+    } catch {
+      setEmailContextResult(null);
+    } finally {
+      setEmailContextLoading(false);
+    }
+  }
+
+  async function syncEmailConnector(provider) {
+    const targets = provider === "all" ? ["gmail", "outlook"] : [provider];
+    if (!targets.length) return;
+    setEmailSyncing(true);
+    setEmailSyncResult(null);
+    const results = {};
+    try {
+      for (const target of targets) {
+        try {
+          const resp = await fetch(`${serverUrl}/api/connectors/${target}/sync`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({})
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || "sync_failed");
+          results[target] = data;
+        } catch (err) {
+          results[target] = { ok: false, error: err?.message || "sync_failed" };
+        }
+      }
+      setEmailSyncResult({ ok: true, results });
+      await loadEmailInbox();
+    } finally {
+      setEmailSyncing(false);
+    }
+  }
+
   useEffect(() => {
-    if (active !== "integrations") return;
+    if (active !== "integrations" && active !== "email") return;
     let cancelled = false;
     async function loadStatus() {
       try {
@@ -372,16 +459,25 @@ export default function AikaToolsWorkbench({ serverUrl }) {
         const statusData = await statusResp.json();
         const integrationsData = await integrationsResp.json();
         const googleData = await googleResp.json();
+        let microsoftData = null;
+        try {
+          const microsoftResp = await fetch(`${serverUrl}/api/integrations/microsoft/status`);
+          microsoftData = await microsoftResp.json();
+        } catch {
+          microsoftData = null;
+        }
         if (!cancelled) {
           setConfigStatus(statusData);
           setIntegrationsStatus(integrationsData.integrations || {});
           setGoogleStatus(googleData);
+          setMicrosoftStatus(microsoftData);
         }
       } catch (err) {
         if (!cancelled) {
           setConfigStatus(null);
           setIntegrationsStatus(null);
           setGoogleStatus(null);
+          setMicrosoftStatus(null);
         }
       }
     }
@@ -390,6 +486,40 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       cancelled = true;
     };
   }, [active, serverUrl]);
+
+  useEffect(() => {
+    if (active !== "email") return;
+    let cancelled = false;
+    async function load() {
+      await loadEmailInbox();
+      if (!cancelled) {
+        // keep selection if possible
+        if (emailSelected) {
+          const match = emailInbox.find(item => item.id === emailSelected.id);
+          if (match) setEmailSelected(match);
+        }
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
+
+  useEffect(() => {
+    if (active !== "email") return;
+    loadEmailInbox();
+  }, [active, emailProvider, emailLookbackDays]);
+
+  useEffect(() => {
+    if (active !== "email") return;
+    if (!emailSelected) {
+      setEmailContextResult(null);
+      return;
+    }
+    setEmailContextResult(null);
+    askEmailContext(emailSelected);
+  }, [active, emailSelected?.id]);
 
   useEffect(() => {
     if (active !== "todos") return;
@@ -965,105 +1095,255 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       )}
 
       {active === "email" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
-            <SectionHeader title="Draft Reply" helpKey="emailDraft" />
-            <label style={{ fontSize: 12 }}>
-              From
-              <input value={emailDraftForm.from} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, from: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              To (comma)
-              <input value={emailDraftForm.to} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, to: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Subject
-              <input value={emailDraftForm.subject} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, subject: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Body
-              <textarea value={emailDraftForm.body} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, body: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Tone
-              <select value={emailDraftForm.tone} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, tone: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
-                <option value="friendly">friendly</option>
-                <option value="direct">direct</option>
-                <option value="executive">executive</option>
-              </select>
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Context
-              <input value={emailDraftForm.context} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, context: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Sign off name
-              <input value={emailDraftForm.signOffName} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, signOffName: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <button
-              onClick={async () => {
-                const resp = await runTool("email.draftReply", {
-                  originalEmail: {
-                    from: emailDraftForm.from,
-                    to: parseTagList(emailDraftForm.to),
-                    subject: emailDraftForm.subject,
-                    body: emailDraftForm.body
-                  },
-                  tone: emailDraftForm.tone,
-                  context: emailDraftForm.context,
-                  signOffName: emailDraftForm.signOffName
-                });
-                setEmailDraftResult(resp);
-                if (resp?.data?.id) setEmailSendForm({ ...emailSendForm, draftId: resp.data.id });
-              }}
-              style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
-            >
-              Create Draft
-            </button>
-            {emailDraftResult && (
-              <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
-{JSON.stringify(emailDraftResult, null, 2)}
-              </pre>
-            )}
+        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <SectionHeader title="Inbox Preview" helpKey="emailInbox" />
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+                Gmail: {googleStatus?.scopes?.some(scope => String(scope).includes("gmail")) ? "connected" : "not connected"} | Microsoft: {microsoftStatus?.connected ? "connected" : "not connected"}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <label style={{ fontSize: 12 }}>
+                  Provider
+                  <select value={emailProvider} onChange={(e) => setEmailProvider(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                    <option value="all">all</option>
+                    <option value="gmail">gmail</option>
+                    <option value="outlook">outlook</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  Lookback days
+                  <input value={emailLookbackDays} onChange={(e) => setEmailLookbackDays(Number(e.target.value || 0))} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <button
+                  onClick={() => window.open(`${serverUrl}/api/integrations/google/connect?preset=gmail_readonly&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Connect Gmail
+                </button>
+                <button
+                  onClick={() => window.open(`${serverUrl}/api/integrations/microsoft/connect?preset=mail_read&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Connect Microsoft
+                </button>
+                <button
+                  onClick={loadEmailInbox}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Refresh Inbox
+                </button>
+                <button
+                  onClick={() => syncEmailConnector(emailProvider)}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                  disabled={emailSyncing}
+                >
+                  {emailSyncing
+                    ? "Syncing..."
+                    : emailProvider === "all"
+                      ? "Sync Gmail + Outlook"
+                      : `Sync ${emailProvider}`}
+                </button>
+              </div>
+              {emailSyncResult && (
+                <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+{JSON.stringify(emailSyncResult, null, 2)}
+                </pre>
+              )}
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
+                {emailInboxLoading && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading inbox...</div>}
+                {!emailInboxLoading && emailInbox.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No emails found for the selected window.</div>
+                )}
+                {emailInbox.map(item => (
+                  <div
+                    key={`${item.provider}-${item.id}`}
+                    onClick={() => setEmailSelected(item)}
+                    style={{
+                      border: "1px solid var(--panel-border-subtle)",
+                      borderRadius: 10,
+                      padding: 8,
+                      background: emailSelected?.id === item.id && emailSelected?.provider === item.provider ? "var(--panel-bg-soft)" : "transparent",
+                      cursor: "pointer"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                      <div style={{ fontWeight: 600, fontSize: 12 }}>{item.subject || "(no subject)"}</div>
+                      <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)" }}>{item.provider}</div>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.from}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.receivedAt ? new Date(item.receivedAt).toLocaleString() : ""}</div>
+                    <div style={{ fontSize: 12, marginTop: 4 }}>{item.snippet}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <SectionHeader title="Message Context" helpKey="emailInbox" />
+              {emailSelected ? (
+                <>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{emailSelected.subject || "(no subject)"}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>From: {emailSelected.from}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>To: {emailSelected.to}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Received: {emailSelected.receivedAt ? new Date(emailSelected.receivedAt).toLocaleString() : "unknown"}</div>
+                  <div style={{ fontSize: 12, marginTop: 6 }}>{emailSelected.snippet}</div>
+                  {emailSelected.webLink && (
+                    <div style={{ marginTop: 6 }}>
+                      <a href={emailSelected.webLink} target="_blank" rel="noreferrer">Open in provider</a>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                    <button onClick={() => askEmailContext(emailSelected)} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                      Find Context
+                    </button>
+                    <button
+                      onClick={() => {
+                        const subject = String(emailSelected.subject || "").trim();
+                        setEmailDraftForm(prev => ({
+                          ...prev,
+                          to: emailSelected.from || prev.to,
+                          subject: subject ? (subject.toLowerCase().startsWith("re:") ? subject : `Re: ${subject}`) : prev.subject,
+                          context: emailSelected.snippet || prev.context
+                        }));
+                      }}
+                      style={{ padding: "6px 10px", borderRadius: 8 }}
+                    >
+                      Use in Draft
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Select an email to preview details and context.</div>
+              )}
+              <div style={{ marginTop: 10, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>RAG Context</div>
+                {emailContextLoading && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Looking for related notes and todos...</div>}
+                {!emailContextLoading && !emailContextResult?.answer && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No context yet. Select an email and click Find Context.</div>
+                )}
+                {emailContextResult?.answer && (
+                  <div style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{emailContextResult.answer}</div>
+                )}
+                {emailContextResult?.citations?.length > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                    Sources: {emailContextResult.citations.map(c => c?.title || c?.id).filter(Boolean).join(", ")}
+                  </div>
+                )}
+                {emailContextResult?.answer && (
+                  <button
+                    onClick={() => setEmailDraftForm(prev => ({ ...prev, context: emailContextResult.answer }))}
+                    style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    Use Context in Draft
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
-          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
-            <SectionHeader title="Send Draft (Approval Required)" helpKey="emailSend" />
-            <label style={{ fontSize: 12 }}>
-              Draft ID
-              <input value={emailSendForm.draftId} onChange={(e) => setEmailSendForm({ ...emailSendForm, draftId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Send To (comma)
-              <input value={emailSendForm.sendTo} onChange={(e) => setEmailSendForm({ ...emailSendForm, sendTo: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              CC (comma)
-              <input value={emailSendForm.cc} onChange={(e) => setEmailSendForm({ ...emailSendForm, cc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              BCC (comma)
-              <input value={emailSendForm.bcc} onChange={(e) => setEmailSendForm({ ...emailSendForm, bcc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
-            </label>
-            <button
-              onClick={async () => {
-                const resp = await runTool("email.send", {
-                  draftId: emailSendForm.draftId,
-                  sendTo: parseTagList(emailSendForm.sendTo),
-                  cc: parseTagList(emailSendForm.cc),
-                  bcc: parseTagList(emailSendForm.bcc)
-                });
-                setEmailSendResult(resp);
-              }}
-              style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
-            >
-              Send
-            </button>
-            {emailSendResult && (
-              <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <SectionHeader title="Draft Reply" helpKey="emailDraft" />
+              <label style={{ fontSize: 12 }}>
+                From
+                <input value={emailDraftForm.from} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, from: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                To (comma)
+                <input value={emailDraftForm.to} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, to: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                Subject
+                <input value={emailDraftForm.subject} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, subject: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                Body
+                <textarea value={emailDraftForm.body} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, body: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                Tone
+                <select value={emailDraftForm.tone} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, tone: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                  <option value="friendly">friendly</option>
+                  <option value="direct">direct</option>
+                  <option value="executive">executive</option>
+                </select>
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                Context
+                <input value={emailDraftForm.context} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, context: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                Sign off name
+                <input value={emailDraftForm.signOffName} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, signOffName: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <button
+                onClick={async () => {
+                  const resp = await runTool("email.draftReply", {
+                    originalEmail: {
+                      from: emailDraftForm.from,
+                      to: parseTagList(emailDraftForm.to),
+                      subject: emailDraftForm.subject,
+                      body: emailDraftForm.body
+                    },
+                    tone: emailDraftForm.tone,
+                    context: emailDraftForm.context,
+                    signOffName: emailDraftForm.signOffName
+                  });
+                  setEmailDraftResult(resp);
+                  if (resp?.data?.id) setEmailSendForm({ ...emailSendForm, draftId: resp.data.id });
+                }}
+                style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+              >
+                Create Draft
+              </button>
+              {emailDraftResult && (
+                <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+{JSON.stringify(emailDraftResult, null, 2)}
+                </pre>
+              )}
+            </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <SectionHeader title="Send Draft (Approval Required)" helpKey="emailSend" />
+              <label style={{ fontSize: 12 }}>
+                Draft ID
+                <input value={emailSendForm.draftId} onChange={(e) => setEmailSendForm({ ...emailSendForm, draftId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                Send To (comma)
+                <input value={emailSendForm.sendTo} onChange={(e) => setEmailSendForm({ ...emailSendForm, sendTo: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                CC (comma)
+                <input value={emailSendForm.cc} onChange={(e) => setEmailSendForm({ ...emailSendForm, cc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 8 }}>
+                BCC (comma)
+                <input value={emailSendForm.bcc} onChange={(e) => setEmailSendForm({ ...emailSendForm, bcc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <button
+                onClick={async () => {
+                  const resp = await runTool("email.send", {
+                    draftId: emailSendForm.draftId,
+                    sendTo: parseTagList(emailSendForm.sendTo),
+                    cc: parseTagList(emailSendForm.cc),
+                    bcc: parseTagList(emailSendForm.bcc)
+                  });
+                  setEmailSendResult(resp);
+                }}
+                style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+              >
+                Send
+              </button>
+              {emailSendResult && (
+                <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(emailSendResult, null, 2)}
-              </pre>
-            )}
+                </pre>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1210,12 +1490,31 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             Google status: {googleStatus?.connected ? "connected" : "not connected"}
             {integrationsStatus?.google_docs?.configured === false ? " (missing config)" : ""}
           </div>
+          <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
+            Gmail scope: {googleStatus?.scopes?.some(s => String(s).includes("gmail")) ? "enabled" : "not enabled"}
+          </div>
+          <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
+            Microsoft status: {microsoftStatus?.connected ? "connected" : "not connected"}
+            {integrationsStatus?.microsoft?.configured === false ? " (missing config)" : ""}
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <button
               onClick={() => window.open(`${serverUrl}/api/auth/google/connect?ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
               style={{ padding: "6px 10px", borderRadius: 8 }}
             >
               Connect Google Docs
+            </button>
+            <button
+              onClick={() => window.open(`${serverUrl}/api/integrations/google/connect?preset=gmail_readonly&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
+              style={{ padding: "6px 10px", borderRadius: 8 }}
+            >
+              Connect Gmail (Read)
+            </button>
+            <button
+              onClick={() => window.open(`${serverUrl}/api/integrations/microsoft/connect?preset=mail_read&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
+              style={{ padding: "6px 10px", borderRadius: 8 }}
+            >
+              Connect Microsoft
             </button>
             <button
               onClick={async () => {
@@ -1225,6 +1524,8 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                   setIntegrationsStatus(integrationsData.integrations || {});
                   const googleResp = await fetch(`${serverUrl}/api/integrations/google/status`);
                   setGoogleStatus(await googleResp.json());
+                  const microsoftResp = await fetch(`${serverUrl}/api/integrations/microsoft/status`);
+                  setMicrosoftStatus(await microsoftResp.json());
                 } catch {
                   // ignore
                 }

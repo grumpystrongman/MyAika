@@ -17,6 +17,18 @@ export const GOOGLE_SCOPE_PRESETS = {
     "https://www.googleapis.com/auth/meetings.space.created",
     "https://www.googleapis.com/auth/meetings.space.settings"
   ],
+  gmail_readonly: [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.readonly"
+  ],
+  gmail_full: [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.modify"
+  ],
   readonly: [
     "https://www.googleapis.com/auth/drive.metadata.readonly",
     "https://www.googleapis.com/auth/documents.readonly",
@@ -81,6 +93,10 @@ function scopeSatisfied(current, required) {
     ],
     "https://www.googleapis.com/auth/drive.metadata.readonly": [
       "https://www.googleapis.com/auth/drive.file"
+    ],
+    "https://www.googleapis.com/auth/gmail.readonly": [
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/gmail.readonly"
     ]
   };
   const aliases = aliasMap[required] || [];
