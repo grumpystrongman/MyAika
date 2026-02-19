@@ -1,38 +1,20 @@
-import { createEmailDraft, getEmailDraft, updateEmailDraftStatus } from "../../storage/email.js";
+import { getEmailDraft, updateEmailDraftStatus } from "../../storage/email.js";
 import { writeOutbox } from "../../storage/outbox.js";
-
-function toneTemplate(tone) {
-  if (tone === "direct") {
-    return "Direct and concise";
-  }
-  if (tone === "executive") {
-    return "Executive summary style";
-  }
-  return "Friendly and helpful";
-}
+import {
+  buildDraftReply,
+  createTodoFromEmail,
+  scheduleEmailFollowUp,
+  replyWithContext
+} from "../../src/email/emailActions.js";
 
 export function draftReply({ originalEmail, tone = "friendly", context = "", signOffName = "" }, contextData = {}) {
-  if (!originalEmail?.subject || !originalEmail?.body) {
-    const err = new Error("original_email_required");
-    err.status = 400;
-    throw err;
-  }
-  const subject = originalEmail.subject.startsWith("Re:")
-    ? originalEmail.subject
-    : `Re: ${originalEmail.subject}`;
-  const signOff = signOffName ? `\n\nBest,\n${signOffName}` : "";
-  const body = `(${toneTemplate(tone)})\n\nThanks for the note. ${context ? `Context: ${context}. ` : ""}Here is my response:\n\n- Acknowledged your message\n- Proposed next step\n- Requested any missing details\n${signOff}`;
-  const draft = createEmailDraft({
-    originalFrom: originalEmail.from || "",
-    originalSubject: originalEmail.subject,
-    draftSubject: subject,
-    draftBody: body,
-    to: originalEmail.to || [],
-    cc: [],
-    bcc: [],
+  return buildDraftReply({
+    originalEmail,
+    tone,
+    context,
+    signOffName,
     userId: contextData.userId || "local"
   });
-  return { id: draft.id, subject, body };
 }
 
 export function sendEmail({ draftId, sendTo = null, cc = [], bcc = [] }, contextData = {}) {
@@ -55,4 +37,16 @@ export function sendEmail({ draftId, sendTo = null, cc = [], bcc = [] }, context
   };
   const outbox = writeOutbox(payload);
   return { status: "sent", transport: "stub", outboxId: outbox.id };
+}
+
+export async function convertEmailToTodo(params = {}, contextData = {}) {
+  return await createTodoFromEmail(params, { userId: contextData.userId || "local" });
+}
+
+export async function scheduleFollowUp(params = {}, contextData = {}) {
+  return await scheduleEmailFollowUp(params, { userId: contextData.userId || "local" });
+}
+
+export async function replyWithContextTool(params = {}, contextData = {}) {
+  return await replyWithContext(params, { userId: contextData.userId || "local" });
 }

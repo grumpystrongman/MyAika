@@ -4,7 +4,7 @@ import { createNote, searchNotesTool } from "./tools/notes.js";
 import { createTodo, listTodos, updateTodo, completeTodo, createTodoList, listTodoLists, updateTodoList } from "./tools/todos.js";
 import { summarizeMeeting } from "./tools/meeting.js";
 import { proposeHold } from "./tools/calendar.js";
-import { draftReply, sendEmail } from "./tools/email.js";
+import { draftReply, sendEmail, convertEmailToTodo, scheduleFollowUp, replyWithContextTool } from "./tools/email.js";
 import { applyChanges } from "./tools/spreadsheet.js";
 import { writeMemoryTool, searchMemoryTool, rotateKeyTool } from "./tools/memory.js";
 import { actionRun } from "./tools/actionRunner.js";
@@ -193,6 +193,36 @@ registry.register(
     humanSummary: params => `Send email draft ${params?.draftId || ""}`
   },
   sendEmail
+);
+
+registry.register(
+  {
+    name: "email.convertToTodo",
+    description: "Convert an email into a todo item.",
+    paramsSchema: { email: "object", title: "string", details: "string", notes: "string", due: "string", reminderAt: "string", priority: "string", tags: "string[]", listId: "string" },
+    riskLevel: "low"
+  },
+  convertEmailToTodo
+);
+
+registry.register(
+  {
+    name: "email.scheduleFollowUp",
+    description: "Schedule a follow-up task (and optional calendar hold) for an email.",
+    paramsSchema: { email: "object", followUpAt: "string", reminderAt: "string", priority: "string", tags: "string[]", listId: "string", hold: "object", notes: "string" },
+    riskLevel: "medium"
+  },
+  scheduleFollowUp
+);
+
+registry.register(
+  {
+    name: "email.replyWithContext",
+    description: "Draft a reply using RAG context from notes and todos.",
+    paramsSchema: { email: "object", tone: "string", signOffName: "string", ragTopK: "number", ragModel: "string" },
+    riskLevel: "medium"
+  },
+  replyWithContextTool
 );
 
 registry.register(

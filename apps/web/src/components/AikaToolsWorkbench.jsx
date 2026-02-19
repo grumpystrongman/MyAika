@@ -48,6 +48,11 @@ const TOOL_HELP = {
     why: "Pull in recent emails without storing full mailboxes locally.",
     how: "Pick a provider, refresh the list, and open a message to see RAG context."
   },
+  emailActions: {
+    title: "Email Action Layer",
+    why: "Turn messages into tasks, follow-ups, and contextual replies.",
+    how: "Select an email, then create a todo, schedule a follow-up, or draft a reply with context."
+  },
   emailSend: {
     title: "Send Email",
     why: "Send a vetted draft after review and approval.",
@@ -183,6 +188,24 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailContextLoading, setEmailContextLoading] = useState(false);
   const [emailSyncResult, setEmailSyncResult] = useState(null);
   const [emailSyncing, setEmailSyncing] = useState(false);
+  const [emailTodoForm, setEmailTodoForm] = useState({ title: "", due: "", reminderAt: "", priority: "medium", tags: "", listId: "", notes: "" });
+  const [emailFollowUpForm, setEmailFollowUpForm] = useState({
+    followUpAt: "",
+    reminderAt: "",
+    priority: "medium",
+    tags: "",
+    listId: "",
+    notes: "",
+    createHold: false,
+    holdTitle: "",
+    holdStart: "",
+    holdEnd: "",
+    holdTimezone: "UTC",
+    holdAttendees: "",
+    holdLocation: "",
+    holdDescription: ""
+  });
+  const [emailActionResult, setEmailActionResult] = useState(null);
   const [sheetForm, setSheetForm] = useState({ type: "localFile", pathOrId: "", changes: "[]" });
   const [sheetResult, setSheetResult] = useState(null);
   const [memoryForm, setMemoryForm] = useState({ tier: 1, title: "", content: "", tags: "", containsPHI: false });
@@ -519,6 +542,22 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     }
     setEmailContextResult(null);
     askEmailContext(emailSelected);
+  }, [active, emailSelected?.id]);
+
+  useEffect(() => {
+    if (active !== "email") return;
+    if (!emailSelected) return;
+    const fallbackTitle = emailSelected.subject
+      ? `Follow up: ${emailSelected.subject}`
+      : "Email follow-up";
+    setEmailTodoForm(prev => ({
+      ...prev,
+      title: prev.title || fallbackTitle
+    }));
+    setEmailFollowUpForm(prev => ({
+      ...prev,
+      holdTitle: prev.holdTitle || fallbackTitle
+    }));
   }, [active, emailSelected?.id]);
 
   useEffect(() => {
@@ -1242,6 +1281,178 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                 )}
               </div>
             </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <SectionHeader title="Action Layer" helpKey="emailActions" />
+              {!emailSelected && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  Select an email to create a todo, schedule a follow-up, or draft a reply with context.
+                </div>
+              )}
+              {emailSelected && (
+                <>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Convert to Todo</div>
+                  <label style={{ fontSize: 12 }}>
+                    Title
+                    <input value={emailTodoForm.title} onChange={(e) => setEmailTodoForm({ ...emailTodoForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Due (ISO)
+                      <input value={emailTodoForm.due} onChange={(e) => setEmailTodoForm({ ...emailTodoForm, due: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Reminder (ISO)
+                      <input value={emailTodoForm.reminderAt} onChange={(e) => setEmailTodoForm({ ...emailTodoForm, reminderAt: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Priority
+                      <select value={emailTodoForm.priority} onChange={(e) => setEmailTodoForm({ ...emailTodoForm, priority: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                        <option value="urgent">urgent</option>
+                      </select>
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      List ID (optional)
+                      <input value={emailTodoForm.listId} onChange={(e) => setEmailTodoForm({ ...emailTodoForm, listId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                  </div>
+                  <label style={{ fontSize: 12, marginTop: 6 }}>
+                    Tags (comma)
+                    <input value={emailTodoForm.tags} onChange={(e) => setEmailTodoForm({ ...emailTodoForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12, marginTop: 6 }}>
+                    Notes
+                    <input value={emailTodoForm.notes} onChange={(e) => setEmailTodoForm({ ...emailTodoForm, notes: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <button
+                    onClick={async () => {
+                      const resp = await runTool("email.convertToTodo", {
+                        email: emailSelected,
+                        title: emailTodoForm.title,
+                        due: emailTodoForm.due || null,
+                        reminderAt: emailTodoForm.reminderAt || null,
+                        priority: emailTodoForm.priority,
+                        tags: parseTagList(emailTodoForm.tags),
+                        listId: emailTodoForm.listId || null,
+                        notes: emailTodoForm.notes || ""
+                      });
+                      setEmailActionResult(resp);
+                    }}
+                    style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    Create Todo
+                  </button>
+
+                  <div style={{ marginTop: 12, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Schedule Follow-up</div>
+                    <label style={{ fontSize: 12 }}>
+                      Follow-up At (ISO)
+                      <input value={emailFollowUpForm.followUpAt} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, followUpAt: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12, marginTop: 6 }}>
+                      Reminder At (ISO)
+                      <input value={emailFollowUpForm.reminderAt} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, reminderAt: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                      <label style={{ fontSize: 12 }}>
+                        Priority
+                        <select value={emailFollowUpForm.priority} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, priority: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                          <option value="low">low</option>
+                          <option value="medium">medium</option>
+                          <option value="high">high</option>
+                          <option value="urgent">urgent</option>
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 12 }}>
+                        List ID (optional)
+                        <input value={emailFollowUpForm.listId} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, listId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                      </label>
+                    </div>
+                    <label style={{ fontSize: 12, marginTop: 6 }}>
+                      Tags (comma)
+                      <input value={emailFollowUpForm.tags} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12, marginTop: 6 }}>
+                      Notes
+                      <input value={emailFollowUpForm.notes} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, notes: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12, marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}>
+                      <input type="checkbox" checked={emailFollowUpForm.createHold} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, createHold: e.target.checked })} />
+                      Create calendar hold
+                    </label>
+                    {emailFollowUpForm.createHold && (
+                      <div style={{ marginTop: 6, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <label style={{ fontSize: 12 }}>
+                          Hold Title
+                          <input value={emailFollowUpForm.holdTitle} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, holdTitle: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                        </label>
+                        <label style={{ fontSize: 12 }}>
+                          Timezone
+                          <input value={emailFollowUpForm.holdTimezone} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, holdTimezone: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                        </label>
+                        <label style={{ fontSize: 12 }}>
+                          Start (ISO)
+                          <input value={emailFollowUpForm.holdStart} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, holdStart: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                        </label>
+                        <label style={{ fontSize: 12 }}>
+                          End (ISO)
+                          <input value={emailFollowUpForm.holdEnd} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, holdEnd: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                        </label>
+                        <label style={{ fontSize: 12 }}>
+                          Attendees (comma)
+                          <input value={emailFollowUpForm.holdAttendees} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, holdAttendees: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                        </label>
+                        <label style={{ fontSize: 12 }}>
+                          Location
+                          <input value={emailFollowUpForm.holdLocation} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, holdLocation: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                        </label>
+                        <label style={{ fontSize: 12, gridColumn: "1 / -1" }}>
+                          Description
+                          <input value={emailFollowUpForm.holdDescription} onChange={(e) => setEmailFollowUpForm({ ...emailFollowUpForm, holdDescription: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                        </label>
+                      </div>
+                    )}
+                    <button
+                      onClick={async () => {
+                        const hold = emailFollowUpForm.createHold ? {
+                          title: emailFollowUpForm.holdTitle || "",
+                          start: emailFollowUpForm.holdStart || "",
+                          end: emailFollowUpForm.holdEnd || "",
+                          timezone: emailFollowUpForm.holdTimezone || "UTC",
+                          attendees: parseTagList(emailFollowUpForm.holdAttendees),
+                          location: emailFollowUpForm.holdLocation || "",
+                          description: emailFollowUpForm.holdDescription || ""
+                        } : null;
+                        const resp = await runTool("email.scheduleFollowUp", {
+                          email: emailSelected,
+                          followUpAt: emailFollowUpForm.followUpAt,
+                          reminderAt: emailFollowUpForm.reminderAt || null,
+                          priority: emailFollowUpForm.priority,
+                          tags: parseTagList(emailFollowUpForm.tags),
+                          listId: emailFollowUpForm.listId || null,
+                          notes: emailFollowUpForm.notes || "",
+                          hold
+                        });
+                        setEmailActionResult(resp);
+                      }}
+                      style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+                    >
+                      Schedule Follow-up
+                    </button>
+                  </div>
+                </>
+              )}
+              {emailActionResult && (
+                <pre style={{ marginTop: 10, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+{JSON.stringify(emailActionResult, null, 2)}
+                </pre>
+              )}
+            </div>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1279,26 +1490,55 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                 Sign off name
                 <input value={emailDraftForm.signOffName} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, signOffName: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
-              <button
-                onClick={async () => {
-                  const resp = await runTool("email.draftReply", {
-                    originalEmail: {
-                      from: emailDraftForm.from,
-                      to: parseTagList(emailDraftForm.to),
-                      subject: emailDraftForm.subject,
-                      body: emailDraftForm.body
-                    },
-                    tone: emailDraftForm.tone,
-                    context: emailDraftForm.context,
-                    signOffName: emailDraftForm.signOffName
-                  });
-                  setEmailDraftResult(resp);
-                  if (resp?.data?.id) setEmailSendForm({ ...emailSendForm, draftId: resp.data.id });
-                }}
-                style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
-              >
-                Create Draft
-              </button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <button
+                  onClick={async () => {
+                    const resp = await runTool("email.draftReply", {
+                      originalEmail: {
+                        from: emailDraftForm.from,
+                        to: parseTagList(emailDraftForm.to),
+                        subject: emailDraftForm.subject,
+                        body: emailDraftForm.body
+                      },
+                      tone: emailDraftForm.tone,
+                      context: emailDraftForm.context,
+                      signOffName: emailDraftForm.signOffName
+                    });
+                    setEmailDraftResult(resp);
+                    if (resp?.data?.id) setEmailSendForm({ ...emailSendForm, draftId: resp.data.id });
+                  }}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Create Draft
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!emailSelected) {
+                      setError("select_email_first");
+                      return;
+                    }
+                    const resp = await runTool("email.replyWithContext", {
+                      email: emailSelected,
+                      tone: emailDraftForm.tone,
+                      signOffName: emailDraftForm.signOffName
+                    });
+                    setEmailDraftResult(resp);
+                    const draft = resp?.data?.draft || null;
+                    if (draft?.id) {
+                      setEmailSendForm({ ...emailSendForm, draftId: draft.id });
+                      setEmailDraftForm(prev => ({
+                        ...prev,
+                        subject: draft.subject || prev.subject,
+                        body: draft.body || prev.body,
+                        context: resp?.data?.context || prev.context
+                      }));
+                    }
+                  }}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Reply With Context
+                </button>
+              </div>
               {emailDraftResult && (
                 <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(emailDraftResult, null, 2)}
