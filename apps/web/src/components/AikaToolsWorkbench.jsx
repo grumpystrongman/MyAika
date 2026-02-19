@@ -7,6 +7,10 @@ function parseTagList(value) {
     .filter(Boolean);
 }
 
+function fetchWithCreds(url, options = {}) {
+  return fetch(url, { ...options, credentials: "include" });
+}
+
 const TOOL_HELP = {
   meetings: {
     title: "Meeting Summaries",
@@ -347,7 +351,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   async function runTool(name, params) {
     setError("");
     try {
-      const r = await fetch(`${serverUrl}/api/tools/call`, {
+      const r = await fetchWithCreds(`${serverUrl}/api/tools/call`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, params })
@@ -487,7 +491,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       payload.ragModel = "all";
     }
     try {
-      const resp = await fetch(`${serverUrl}/api/rag/ask`, {
+      const resp = await fetchWithCreds(`${serverUrl}/api/rag/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -511,7 +515,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
         limit: "30",
         lookbackDays: String(emailLookbackDays || 14)
       });
-      const resp = await fetch(`${serverUrl}/api/email/inbox?${params.toString()}`);
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/inbox?${params.toString()}`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_inbox_failed");
       setEmailInbox(data.items || []);
@@ -527,7 +531,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     setEmailContextLoading(true);
     try {
       const prompt = `Find any relevant notes or todos related to this email.\nSubject: ${message.subject}\nFrom: ${message.from}\nSnippet: ${message.snippet}`;
-      const resp = await fetch(`${serverUrl}/api/rag/ask`, {
+      const resp = await fetchWithCreds(`${serverUrl}/api/rag/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -556,7 +560,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     try {
       for (const target of targets) {
         try {
-          const resp = await fetch(`${serverUrl}/api/connectors/${target}/sync`, {
+          const resp = await fetchWithCreds(`${serverUrl}/api/connectors/${target}/sync`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({})
@@ -579,7 +583,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     setEmailRulesRunning(true);
     setEmailRulesResult(null);
     try {
-      const resp = await fetch(`${serverUrl}/api/email/rules/run`, { method: "POST" });
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/run`, { method: "POST" });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_failed");
       setEmailRulesResult(data);
@@ -599,7 +603,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       const providers = provider === "all" ? ["gmail", "outlook"] : [provider];
       const lookbackDays = emailRulesPreviewFilters.lookbackDays === "" ? null : Number(emailRulesPreviewFilters.lookbackDays || 0);
       const limit = emailRulesPreviewFilters.limit === "" ? null : Number(emailRulesPreviewFilters.limit || 0);
-      const resp = await fetch(`${serverUrl}/api/email/rules/preview`, {
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -620,7 +624,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
   async function loadEmailRulesConfig() {
     try {
-      const resp = await fetch(`${serverUrl}/api/email/rules/config`);
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/config`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_config_failed");
       const form = mapRulesConfigToForm(data.config);
@@ -637,7 +641,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
   async function loadEmailRulesStatus() {
     try {
-      const resp = await fetch(`${serverUrl}/api/email/rules/status`);
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/status`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_status_failed");
       setEmailRulesStatus(data.status || null);
@@ -651,7 +655,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     setEmailRulesSaving(true);
     try {
       const payload = buildEmailRulesPayload(emailRulesForm);
-      const resp = await fetch(`${serverUrl}/api/email/rules/config`, {
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -669,7 +673,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
   async function loadEmailRulesTemplates() {
     try {
-      const resp = await fetch(`${serverUrl}/api/email/rules/templates`);
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/templates`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_templates_failed");
       setEmailRulesTemplates(Array.isArray(data.templates) ? data.templates : []);
@@ -691,7 +695,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
         name,
         config: buildEmailRulesPayload(emailRulesForm)
       };
-      const resp = await fetch(`${serverUrl}/api/email/rules/templates`, {
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/templates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -712,7 +716,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     if (!emailRulesTemplateId) return;
     setEmailRulesTemplateDeleting(true);
     try {
-      const resp = await fetch(`${serverUrl}/api/email/rules/templates/${emailRulesTemplateId}`, { method: "DELETE" });
+      const resp = await fetchWithCreds(`${serverUrl}/api/email/rules/templates/${emailRulesTemplateId}`, { method: "DELETE" });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_template_delete_failed");
       setEmailRulesTemplateId("");
@@ -739,7 +743,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
   async function loadTodoReminderConfig() {
     try {
-      const resp = await fetch(`${serverUrl}/api/todos/reminders/config`);
+      const resp = await fetchWithCreds(`${serverUrl}/api/todos/reminders/config`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "todo_reminder_config_failed");
       setTodoReminderForm(mapTodoReminderConfigToForm(data.config));
@@ -750,7 +754,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
   async function loadTodoReminderStatus() {
     try {
-      const resp = await fetch(`${serverUrl}/api/todos/reminders/status`);
+      const resp = await fetchWithCreds(`${serverUrl}/api/todos/reminders/status`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "todo_reminder_status_failed");
       setTodoReminderStatus(data.status || null);
@@ -774,7 +778,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
         telegramChatIds: parseTagList(todoReminderForm.telegramChatIds || ""),
         emailTo: parseTagList(todoReminderForm.emailTo || "")
       };
-      const resp = await fetch(`${serverUrl}/api/todos/reminders/config`, {
+      const resp = await fetchWithCreds(`${serverUrl}/api/todos/reminders/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -794,7 +798,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     setTodoReminderRunning(true);
     setTodoReminderResult(null);
     try {
-      const resp = await fetch(`${serverUrl}/api/todos/reminders/run`, { method: "POST" });
+      const resp = await fetchWithCreds(`${serverUrl}/api/todos/reminders/run`, { method: "POST" });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "todo_reminder_run_failed");
       setTodoReminderResult(data);
@@ -812,16 +816,16 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     async function loadStatus() {
       try {
         const [statusResp, integrationsResp, googleResp] = await Promise.all([
-          fetch(`${serverUrl}/api/status`),
-          fetch(`${serverUrl}/api/integrations`),
-          fetch(`${serverUrl}/api/integrations/google/status`)
+          fetchWithCreds(`${serverUrl}/api/status`),
+          fetchWithCreds(`${serverUrl}/api/integrations`),
+          fetchWithCreds(`${serverUrl}/api/integrations/google/status`)
         ]);
         const statusData = await statusResp.json();
         const integrationsData = await integrationsResp.json();
         const googleData = await googleResp.json();
         let microsoftData = null;
         try {
-          const microsoftResp = await fetch(`${serverUrl}/api/integrations/microsoft/status`);
+          const microsoftResp = await fetchWithCreds(`${serverUrl}/api/integrations/microsoft/status`);
           microsoftData = await microsoftResp.json();
         } catch {
           microsoftData = null;
@@ -2476,12 +2480,12 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             <button
               onClick={async () => {
                 try {
-                  const integrationsResp = await fetch(`${serverUrl}/api/integrations`);
+                  const integrationsResp = await fetchWithCreds(`${serverUrl}/api/integrations`);
                   const integrationsData = await integrationsResp.json();
                   setIntegrationsStatus(integrationsData.integrations || {});
-                  const googleResp = await fetch(`${serverUrl}/api/integrations/google/status`);
+                  const googleResp = await fetchWithCreds(`${serverUrl}/api/integrations/google/status`);
                   setGoogleStatus(await googleResp.json());
-                  const microsoftResp = await fetch(`${serverUrl}/api/integrations/microsoft/status`);
+                  const microsoftResp = await fetchWithCreds(`${serverUrl}/api/integrations/microsoft/status`);
                   setMicrosoftStatus(await microsoftResp.json());
                 } catch {
                   // ignore
@@ -2570,6 +2574,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     </div>
   );
 }
+
 
 
 

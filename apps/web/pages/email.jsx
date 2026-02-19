@@ -16,6 +16,10 @@ function buildUrl(base, path) {
   return `${base}${path}`;
 }
 
+function fetchWithCreds(url, options = {}) {
+  return fetch(url, { ...options, credentials: "include" });
+}
+
 function formatTime(value) {
   if (!value) return "--";
   const ts = Date.parse(value);
@@ -97,7 +101,7 @@ export default function EmailPage() {
 
   const loadStatus = async () => {
     try {
-      const resp = await fetch(buildUrl(baseUrl, "/api/integrations/google/status"));
+      const resp = await fetchWithCreds(buildUrl(baseUrl, "/api/integrations/google/status"));
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "google_status_failed");
       setStatus(data);
@@ -116,7 +120,7 @@ export default function EmailPage() {
         limit: "40",
         lookbackDays: String(lookbackDays || 14)
       });
-      const resp = await fetch(buildUrl(baseUrl, `/api/email/inbox?${params.toString()}`));
+      const resp = await fetchWithCreds(buildUrl(baseUrl, `/api/email/inbox?${params.toString()}`));
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_inbox_failed");
       const items = Array.isArray(data.items) ? data.items : [];
@@ -143,7 +147,7 @@ export default function EmailPage() {
     setSyncResult(null);
     setError("");
     try {
-      const resp = await fetch(buildUrl(baseUrl, "/api/connectors/gmail/sync"), {
+      const resp = await fetchWithCreds(buildUrl(baseUrl, "/api/connectors/gmail/sync"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({})
@@ -166,7 +170,7 @@ export default function EmailPage() {
     setContextCitations([]);
     try {
       const prompt = `Find any relevant notes or todos related to this email.\nSubject: ${selectedEmail.subject}\nFrom: ${selectedEmail.from}\nSnippet: ${selectedEmail.snippet}`;
-      const resp = await fetch(buildUrl(baseUrl, "/api/rag/ask"), {
+      const resp = await fetchWithCreds(buildUrl(baseUrl, "/api/rag/ask"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -190,7 +194,7 @@ export default function EmailPage() {
   };
 
   const callTool = async (name, params) => {
-    const resp = await fetch(buildUrl(baseUrl, "/api/tools/call"), {
+    const resp = await fetchWithCreds(buildUrl(baseUrl, "/api/tools/call"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, params })
