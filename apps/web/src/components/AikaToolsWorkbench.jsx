@@ -58,6 +58,11 @@ const TOOL_HELP = {
     why: "Automate follow-ups based on senders and labels.",
     how: "Enable rules, set senders/labels, and save. Run once to validate."
   },
+  todoReminders: {
+    title: "Reminder Delivery",
+    why: "Route upcoming todo reminders to Slack, Telegram, email, or in-app.",
+    how: "Enable reminders, pick channels + targets, save, and run a test reminder."
+  },
   emailSend: {
     title: "Send Email",
     why: "Send a vetted draft after review and approval.",
@@ -198,6 +203,11 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailRulesForm, setEmailRulesForm] = useState(null);
   const [emailRulesStatus, setEmailRulesStatus] = useState(null);
   const [emailRulesSaving, setEmailRulesSaving] = useState(false);
+  const [todoReminderForm, setTodoReminderForm] = useState(null);
+  const [todoReminderStatus, setTodoReminderStatus] = useState(null);
+  const [todoReminderResult, setTodoReminderResult] = useState(null);
+  const [todoReminderSaving, setTodoReminderSaving] = useState(false);
+  const [todoReminderRunning, setTodoReminderRunning] = useState(false);
   const [emailTodoForm, setEmailTodoForm] = useState({ title: "", due: "", reminderAt: "", priority: "medium", tags: "", listId: "", notes: "" });
   const [emailFollowUpForm, setEmailFollowUpForm] = useState({
     followUpAt: "",
@@ -258,6 +268,31 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       outlookSenders: toTagText(config.providers?.outlook?.senders || []),
       outlookFolderIds: toTagText(config.providers?.outlook?.folderIds || [])
     };
+  }
+
+  function mapTodoReminderConfigToForm(config) {
+    if (!config) return null;
+    return {
+      enabled: Boolean(config.enabled),
+      runOnStartup: Boolean(config.runOnStartup),
+      intervalMinutes: config.intervalMinutes ?? 5,
+      maxPerRun: config.maxPerRun ?? 25,
+      channels: Array.isArray(config.channels) ? config.channels : ["in_app"],
+      slackChannels: toTagText(config.slackChannels || []),
+      telegramChatIds: toTagText(config.telegramChatIds || []),
+      emailTo: toTagText(config.emailTo || [])
+    };
+  }
+
+  function toggleReminderChannel(channel) {
+    if (!todoReminderForm) return;
+    const next = new Set(todoReminderForm.channels || []);
+    if (next.has(channel)) {
+      next.delete(channel);
+    } else {
+      next.add(channel);
+    }
+    setTodoReminderForm({ ...todoReminderForm, channels: Array.from(next) });
   }
 
   function mapTodoToEditor(todo) {
@@ -581,6 +616,75 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     }
   }
 
+  async function loadTodoReminderConfig() {
+    try {
+      const resp = await fetch(`${serverUrl}/api/todos/reminders/config`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "todo_reminder_config_failed");
+      setTodoReminderForm(mapTodoReminderConfigToForm(data.config));
+    } catch {
+      setTodoReminderForm(null);
+    }
+  }
+
+  async function loadTodoReminderStatus() {
+    try {
+      const resp = await fetch(`${serverUrl}/api/todos/reminders/status`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "todo_reminder_status_failed");
+      setTodoReminderStatus(data.status || null);
+    } catch {
+      setTodoReminderStatus(null);
+    }
+  }
+
+  async function saveTodoReminderSettings() {
+    if (!todoReminderForm) return;
+    setTodoReminderSaving(true);
+    setTodoReminderResult(null);
+    try {
+      const payload = {
+        enabled: Boolean(todoReminderForm.enabled),
+        runOnStartup: Boolean(todoReminderForm.runOnStartup),
+        intervalMinutes: Number(todoReminderForm.intervalMinutes || 0),
+        maxPerRun: Number(todoReminderForm.maxPerRun || 0),
+        channels: Array.isArray(todoReminderForm.channels) ? todoReminderForm.channels : [],
+        slackChannels: parseTagList(todoReminderForm.slackChannels || ""),
+        telegramChatIds: parseTagList(todoReminderForm.telegramChatIds || ""),
+        emailTo: parseTagList(todoReminderForm.emailTo || "")
+      };
+      const resp = await fetch(`${serverUrl}/api/todos/reminders/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "todo_reminder_save_failed");
+      setTodoReminderForm(mapTodoReminderConfigToForm(data.config));
+      await loadTodoReminderStatus();
+    } catch (err) {
+      setTodoReminderResult({ ok: false, error: err?.message || "todo_reminder_save_failed" });
+    } finally {
+      setTodoReminderSaving(false);
+    }
+  }
+
+  async function runTodoRemindersNow() {
+    setTodoReminderRunning(true);
+    setTodoReminderResult(null);
+    try {
+      const resp = await fetch(`${serverUrl}/api/todos/reminders/run`, { method: "POST" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "todo_reminder_run_failed");
+      setTodoReminderResult(data);
+      await loadTodoReminderStatus();
+    } catch (err) {
+      setTodoReminderResult({ ok: false, error: err?.message || "todo_reminder_run_failed" });
+    } finally {
+      setTodoReminderRunning(false);
+    }
+  }
+
   useEffect(() => {
     if (active !== "integrations" && active !== "email") return;
     let cancelled = false;
@@ -650,6 +754,8 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     if (active !== "email") return;
     loadEmailRulesConfig();
     loadEmailRulesStatus();
+    loadTodoReminderConfig();
+    loadTodoReminderStatus();
   }, [active]);
 
   useEffect(() => {
@@ -1680,6 +1786,115 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                     <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
                       Status: {emailRulesStatus.enabled ? "enabled" : "disabled"} | Last run: {emailRulesStatus.lastRunAt || "never"}
                     </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <SectionHeader title="Reminder Delivery" helpKey="todoReminders" />
+              {!todoReminderForm && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading reminder settings...</div>
+              )}
+              {todoReminderForm && (
+                <>
+                  <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={todoReminderForm.enabled}
+                      onChange={(e) => setTodoReminderForm({ ...todoReminderForm, enabled: e.target.checked })}
+                    />
+                    Enable reminder delivery
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Interval minutes
+                      <input value={todoReminderForm.intervalMinutes} onChange={(e) => setTodoReminderForm({ ...todoReminderForm, intervalMinutes: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Max per run
+                      <input value={todoReminderForm.maxPerRun} onChange={(e) => setTodoReminderForm({ ...todoReminderForm, maxPerRun: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                  </div>
+                  <label style={{ fontSize: 12, marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={todoReminderForm.runOnStartup}
+                      onChange={(e) => setTodoReminderForm({ ...todoReminderForm, runOnStartup: e.target.checked })}
+                    />
+                    Run on startup
+                  </label>
+                  <div style={{ marginTop: 10, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Channels</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={todoReminderForm.channels?.includes("in_app")}
+                          onChange={() => toggleReminderChannel("in_app")}
+                        />
+                        In-app
+                      </label>
+                      <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={todoReminderForm.channels?.includes("slack")}
+                          onChange={() => toggleReminderChannel("slack")}
+                        />
+                        Slack
+                      </label>
+                      <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={todoReminderForm.channels?.includes("telegram")}
+                          onChange={() => toggleReminderChannel("telegram")}
+                        />
+                        Telegram
+                      </label>
+                      <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={todoReminderForm.channels?.includes("email")}
+                          onChange={() => toggleReminderChannel("email")}
+                        />
+                        Email
+                      </label>
+                    </div>
+                  </div>
+                  <label style={{ fontSize: 12, marginTop: 8 }}>
+                    Slack channels (comma)
+                    <input value={todoReminderForm.slackChannels} onChange={(e) => setTodoReminderForm({ ...todoReminderForm, slackChannels: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12, marginTop: 8 }}>
+                    Telegram chat IDs (comma)
+                    <input value={todoReminderForm.telegramChatIds} onChange={(e) => setTodoReminderForm({ ...todoReminderForm, telegramChatIds: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12, marginTop: 8 }}>
+                    Email recipients (comma)
+                    <input value={todoReminderForm.emailTo} onChange={(e) => setTodoReminderForm({ ...todoReminderForm, emailTo: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                    <button onClick={saveTodoReminderSettings} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={todoReminderSaving}>
+                      {todoReminderSaving ? "Saving..." : "Save Reminder Settings"}
+                    </button>
+                    <button onClick={runTodoRemindersNow} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={todoReminderRunning}>
+                      {todoReminderRunning ? "Running..." : "Run Reminders Now"}
+                    </button>
+                  </div>
+                  {todoReminderStatus && (
+                    <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
+                      Status: {todoReminderStatus.enabled ? "enabled" : "disabled"} | Last run: {todoReminderStatus.lastRunAt || "never"}
+                    </div>
+                  )}
+                  {todoReminderStatus?.lastRunSummary && (
+                    <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+{JSON.stringify(todoReminderStatus.lastRunSummary, null, 2)}
+                    </pre>
+                  )}
+                  {todoReminderResult && (
+                    <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+{JSON.stringify(todoReminderResult, null, 2)}
+                    </pre>
                   )}
                 </>
               )}

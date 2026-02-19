@@ -8,6 +8,7 @@ import { getProvider, setProvider } from "../../integrations/store.js";
 
 const DEFAULT_MAX_PER_RUN = 25;
 const DEFAULT_INTERVAL_MINUTES = 5;
+const DEFAULT_CHANNELS = ["in_app"];
 
 function parseList(value) {
   return String(value || "")
@@ -16,15 +17,23 @@ function parseList(value) {
     .filter(Boolean);
 }
 
+function normalizeListInput(value, fallback = []) {
+  if (Array.isArray(value)) {
+    return value.map(item => String(item || "").trim()).filter(Boolean);
+  }
+  if (value === undefined || value === null) return Array.isArray(fallback) ? fallback : parseList(fallback);
+  return parseList(value);
+}
+
 function toNumber(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function getReminderConfig() {
+function buildDefaultsFromEnv() {
   return {
     enabled: String(process.env.TODO_REMINDER_ENABLED || "0") === "1",
-    channels: parseList(process.env.TODO_REMINDER_CHANNELS) || [],
+    channels: parseList(process.env.TODO_REMINDER_CHANNELS) || DEFAULT_CHANNELS,
     slackChannels: parseList(process.env.TODO_REMINDER_SLACK_CHANNELS),
     telegramChatIds: parseList(process.env.TODO_REMINDER_TELEGRAM_CHAT_IDS),
     emailTo: parseList(process.env.TODO_REMINDER_EMAIL_TO),
@@ -32,6 +41,33 @@ function getReminderConfig() {
     intervalMinutes: toNumber(process.env.TODO_REMINDER_INTERVAL_MINUTES, DEFAULT_INTERVAL_MINUTES),
     runOnStartup: String(process.env.TODO_REMINDER_ON_STARTUP || "0") === "1"
   };
+}
+
+function normalizeConfigInput(value, defaults) {
+  const cfg = value || {};
+  return {
+    enabled: cfg.enabled !== undefined ? Boolean(cfg.enabled) : defaults.enabled,
+    channels: normalizeListInput(cfg.channels, defaults.channels || DEFAULT_CHANNELS),
+    slackChannels: normalizeListInput(cfg.slackChannels, defaults.slackChannels),
+    telegramChatIds: normalizeListInput(cfg.telegramChatIds, defaults.telegramChatIds),
+    emailTo: normalizeListInput(cfg.emailTo, defaults.emailTo),
+    maxPerRun: toNumber(cfg.maxPerRun, defaults.maxPerRun),
+    intervalMinutes: toNumber(cfg.intervalMinutes, defaults.intervalMinutes),
+    runOnStartup: cfg.runOnStartup !== undefined ? Boolean(cfg.runOnStartup) : defaults.runOnStartup
+  };
+}
+
+export function getTodoReminderConfig(userId = "local") {
+  const defaults = buildDefaultsFromEnv();
+  const stored = getProvider("todo_reminders_config", userId) || {};
+  return normalizeConfigInput(stored, defaults);
+}
+
+export function saveTodoReminderConfig(config, userId = "local") {
+  const defaults = buildDefaultsFromEnv();
+  const normalized = normalizeConfigInput(config, defaults);
+  setProvider("todo_reminders_config", normalized, userId);
+  return normalized;
 }
 
 function normalizeChannels(config) {
@@ -145,7 +181,7 @@ function saveReminderState(userId, summary) {
 }
 
 export async function runTodoReminders({ userId = "local", config, deps = {} } = {}) {
-  const cfg = config || getReminderConfig();
+  const cfg = config ? normalizeConfigInput(config, buildDefaultsFromEnv()) : getTodoReminderConfig(userId);
   if (!cfg.enabled) return { ok: false, disabled: true };
   const channels = normalizeChannels(cfg);
   const todos = listDueReminders({ userId, limit: cfg.maxPerRun });
@@ -228,7 +264,7 @@ let reminderTimer = null;
 
 export function startTodoReminderLoop() {
   if (reminderTimer) return;
-  const config = getReminderConfig();
+  const config = getTodoReminderConfig("local");
   if (!config.enabled) return;
   if (config.runOnStartup) {
     runTodoReminders({ userId: "local" }).catch(() => {});
@@ -240,7 +276,7 @@ export function startTodoReminderLoop() {
 }
 
 export function getTodoReminderStatus(userId = "local") {
-  const config = getReminderConfig();
+  const config = getTodoReminderConfig(userId);
   const state = loadReminderState(userId);
   return {
     enabled: config.enabled,

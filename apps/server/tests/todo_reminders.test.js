@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { initDb } from "../storage/db.js";
 import { runMigrations } from "../storage/schema.js";
 import { createTodoRecord, getTodoRecord } from "../storage/todos.js";
-import { runTodoReminders } from "../src/todos/reminders.js";
+import { runTodoReminders, getTodoReminderConfig, saveTodoReminderConfig } from "../src/todos/reminders.js";
+import { setProvider } from "../integrations/store.js";
 
 initDb();
 runMigrations();
@@ -58,4 +59,22 @@ test("todo reminders send slack via executor", async () => {
   assert.equal(sent, true);
   const updated = getTodoRecord({ id: todo.id, userId: "local" });
   assert.equal(updated.reminderStatus, "sent");
+});
+
+test("todo reminder config saves and loads", () => {
+  const userId = "todo-reminder-config";
+  setProvider("todo_reminders_config", null, userId);
+  const saved = saveTodoReminderConfig({
+    enabled: true,
+    channels: "slack, email",
+    slackChannels: ["#ops"],
+    emailTo: "owner@example.com",
+    intervalMinutes: 9
+  }, userId);
+  assert.equal(saved.enabled, true);
+  assert.ok(saved.channels.includes("slack"));
+  assert.ok(saved.emailTo.includes("owner@example.com"));
+  const loaded = getTodoReminderConfig(userId);
+  assert.equal(loaded.intervalMinutes, 9);
+  setProvider("todo_reminders_config", null, userId);
 });

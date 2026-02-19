@@ -177,7 +177,7 @@ import {
 } from "./src/connectors/index.js";
 import { getEmailInbox } from "./src/connectors/emailInbox.js";
 import { runEmailRules, startEmailRulesLoop, getEmailRulesStatus, getEmailRulesConfig, saveEmailRulesConfig } from "./src/email/emailRules.js";
-import { startTodoReminderLoop, runTodoReminders, getTodoReminderStatus } from "./src/todos/reminders.js";
+import { startTodoReminderLoop, runTodoReminders, getTodoReminderStatus, getTodoReminderConfig, saveTodoReminderConfig } from "./src/todos/reminders.js";
 import {
   startTradingYoutubeLoop,
   crawlTradingYoutubeSources,
@@ -7365,6 +7365,23 @@ app.post("/api/email/rules/run", rateLimit, async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err?.message || "email_rules_run_failed" });
+  }
+});
+
+app.get("/api/todos/reminders/config", rateLimit, async (req, res) => {
+  try {
+    res.json({ ok: true, config: getTodoReminderConfig(getUserId(req)) });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "todo_reminder_config_failed" });
+  }
+});
+
+app.post("/api/todos/reminders/config", rateLimit, async (req, res) => {
+  try {
+    const config = saveTodoReminderConfig(req.body || {}, getUserId(req));
+    res.json({ ok: true, config });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "todo_reminder_config_save_failed" });
   }
 });
 

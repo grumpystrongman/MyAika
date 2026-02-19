@@ -16,6 +16,7 @@ const SENSITIVE_PROVIDERS = new Set([
   "email_rules",
   "email_rules_config",
   "todo_reminders",
+  "todo_reminders_config",
   "jira",
   "confluence",
   "meta",

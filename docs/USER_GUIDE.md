@@ -1,6 +1,6 @@
 # MyAika User Guide (Training Manual)
 
-Last updated: February 18, 2026
+Last updated: February 19, 2026
 
 ## Sidebar Navigation (Quick Links)
 Use these links as a sidebar jump list inside the guide.
@@ -152,9 +152,9 @@ A structured set of tools for daily operations and personal productivity.
 ### Tool groups and when to use them
 - `Meeting Summaries`: Turn raw transcripts into structured summaries and store them.
 - `Notes`: Create or search notes for long-term recall.
-- `Todos`: Create and list tasks with priority and due dates.
+- `Todos`: Create and list tasks with priority, due dates, and reminder timestamps.
 - `Calendar`: Create calendar holds and invite attendees.
-- `Email`: Draft or send emails with review gates.
+- `Email`: Inbox preview, action layer (todo + follow-up), rules automation, and approval-gated send flows.
 - `Spreadsheet`: Apply structured updates to local files or sheets.
 - `Memory`: Store or search memory tiers for personalization.
 - `Integrations`: Check connection status and health.
@@ -165,6 +165,91 @@ A structured set of tools for daily operations and personal productivity.
 2. Fill in the form fields.
 3. Click the action button (for example `Create Note`).
 4. Review the response for success or errors.
+
+### Email Workflows (Inbox + Context)
+![Email workflows](user-guide/screenshots/tools_email_workflows.png)
+
+What it is
+- Pull recent Gmail/Outlook previews without mirroring full mailboxes locally.
+- Add RAG context from notes + todos to help craft replies quickly.
+
+Key functions
+- `Refresh Inbox`: Pulls recent email previews for the selected provider and lookback window.
+- `Sync Gmail + Outlook`: Runs connector sync to ingest and index recent threads.
+- `Message Context`: Shows sender, recipients, timestamp, and snippet.
+- `Find Context`: Queries your RAG store for related notes/todos.
+- `Use in Draft`: Prefills the draft fields with the selected message.
+
+How to use
+1. Connect Gmail and/or Microsoft in the Integrations panel.
+2. Set provider + lookback days, then click `Refresh Inbox`.
+3. Select a message to view details and click `Find Context`.
+4. Click `Use in Draft` to seed the reply composer.
+
+### Email Action Layer (Todos + Follow-ups)
+![Email action layer](user-guide/screenshots/tools_email_workflows.png)
+
+What it is
+- Convert an email into a structured todo.
+- Schedule follow-ups with optional calendar holds.
+- Generate reply drafts with RAG context and approval gates.
+
+Key functions
+- `Convert to Todo`: Creates a todo with title, due date, tags, list, and notes.
+- `Schedule Follow-up`: Sets `followUpAt` plus optional `reminderAt`.
+- `Create calendar hold`: Reserves time for the follow-up.
+- `Reply With Context`: Drafts a reply using RAG context.
+- `Send With Context`: Sends only after approval gates.
+
+How to use
+1. Select an email in Inbox Preview.
+2. Fill out the Action Layer fields and click `Create Todo` or `Schedule Follow-up`.
+3. Use `Reply With Context` to generate a draft.
+4. Use `Send With Context` only after reviewing the draft and approving the action.
+
+### Rules & Automation (Auto Follow-ups)
+![Email rules](user-guide/screenshots/tools_email_rules.png)
+
+What it is
+- Auto-create follow-up todos from specific senders, labels, or folders.
+- Deduplicate and throttle so you do not create duplicate follow-ups.
+
+Key functions
+- `Enable rules`: Turns automation on/off without editing env vars.
+- `Gmail Rules`: Match by sender or label IDs.
+- `Outlook Rules`: Match by sender or folder IDs.
+- `Dedup hours`: Prevents repeated follow-ups for the same message.
+- `Priority + Tags`: Applies consistent metadata to created follow-ups.
+
+How to use
+1. Open `Rules & Automation`.
+2. Add senders and label/folder IDs.
+3. Choose follow-up timing, priority, tags, and list ID.
+4. Click `Save Rules`, then `Run Rules Now` to validate.
+
+### Reminder Delivery (Slack/Telegram/Email/In-app)
+![Reminder delivery](user-guide/screenshots/tools_reminders.png)
+
+What it is
+- Route todo reminders to your preferred channels with approval gates.
+- Store reminder targets in the app instead of `.env`.
+
+Key functions
+- `Enable reminder delivery`: Toggle reminders globally.
+- `Channels`: Choose `In-app`, `Slack`, `Telegram`, and/or `Email`.
+- `Targets`: Set Slack channels, Telegram chat IDs, and email recipients.
+- `Interval minutes`: Control how often the reminder loop runs.
+- `Run on startup`: Fire reminders immediately on server boot.
+
+How to use
+1. Turn on reminder delivery and pick your channels.
+2. Add channel targets and click `Save Reminder Settings`.
+3. Click `Run Reminders Now` for a manual test run.
+4. Set `reminderAt` on todos to trigger delivery.
+
+Notes
+- Email reminders require Gmail send scopes; missing scopes will queue into outbox if `EMAIL_OUTBOX_FALLBACK=1`.
+- External channels (Slack/Telegram/Email) run through approval gates for safety.
 
 ## Tools Tab (MCP-lite Tools)
 ![Tools tab](user-guide/screenshots/tools_mcp.png)
@@ -346,6 +431,7 @@ Key functions
 - `Signals`: Pattern highlights and recent bias events.
 - `Order Ticket`: Propose and approve trades (paper or live).
 - `Post-Trade Outcome`: Record PnL and lessons learned.
+- `Manual Trade Tracker`: Log manual trades with entry/exit and PnL tracking.
 - `Loss Lessons (RAG)`: Query past trade outcomes.
 - `Watchlists`: Track stocks/crypto for scenarios and recommendations.
 - `Recommendations`: Ranked picks with rationale and analysis.
@@ -354,6 +440,7 @@ Key functions
 When to use
 - Fast context on a ticker before you trade.
 - Structured review of chart, signal, and risk before proposing a trade.
+- Tracking manual trades and outcomes in one place.
 
 How to use
 1. Enter a symbol and choose an interval.
@@ -361,6 +448,10 @@ How to use
 3. Use `Order Ticket` to propose a trade.
 4. Approve the trade if required.
 5. Record outcomes and lessons learned.
+6. Log manual trades in `Manual Trade Tracker` to track PnL and win rate.
+
+Tip
+- Intraday stock candles require Alpaca data keys. Without them, the terminal falls back to daily bars.
 
 ### Paper (Synthetic Strategy Runs)
 ![Trading paper](user-guide/screenshots/trading_paper.png)
