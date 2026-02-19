@@ -1,15 +1,33 @@
-﻿import Database from "better-sqlite3";
+import Database from "better-sqlite3";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-
-const repoRoot = path.resolve(process.cwd(), "..", "..");
-const dataDir = path.join(repoRoot, "data", "db");
-const dbPath = path.join(dataDir, "aika.sqlite");
+import { threadId } from "node:worker_threads";
 
 let db = null;
+let dbPath = "";
 
-function ensureDir() {
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+function resolveRepoRoot() {
+  const override = process.env.AIKA_REPO_ROOT || "";
+  if (override) return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
+  return path.resolve(process.cwd(), "..", "..");
+}
+
+function resolveDbPath() {
+  const override = process.env.AIKA_DB_PATH || "";
+  if (override) {
+    if (override === ":memory:") return override;
+    return path.isAbsolute(override) ? override : path.join(resolveRepoRoot(), override);
+  }
+  if (process.env.NODE_ENV === "test") {
+    const suffix = `${process.pid}-${threadId || 0}`;
+    return path.join(os.tmpdir(), `aika_test_${suffix}.sqlite`);
+  }
+  return path.join(resolveRepoRoot(), "data", "db", "aika.sqlite");
+}
+
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 }
 
 export function getDb() {
@@ -19,7 +37,8 @@ export function getDb() {
 
 export function initDb() {
   if (db) return db;
-  ensureDir();
+  dbPath = resolveDbPath();
+  if (dbPath !== ":memory:") ensureDir(path.dirname(dbPath));
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");

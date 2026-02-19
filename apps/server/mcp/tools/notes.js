@@ -1,5 +1,6 @@
 import { createNoteRecord, searchNotes } from "../../storage/notes.js";
 import { createGoogleDocInFolder, ensureDriveFolderPath } from "../../integrations/google.js";
+import { ingestNoteToRag } from "../../src/rag/notesIngest.js";
 
 export async function createNote({ title, body, tags = [], store = { googleDocs: true, localMarkdown: true } }, context = {}) {
   if (!title || !body) {
@@ -25,11 +26,25 @@ export async function createNote({ title, body, tags = [], store = { googleDocs:
     googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null,
     userId
   });
+  let rag = null;
+  try {
+    rag = await ingestNoteToRag({
+      noteId: record.id,
+      title,
+      body,
+      tags,
+      sourceUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : "",
+      updatedAt: new Date().toISOString()
+    });
+  } catch {
+    rag = null;
+  }
   return {
     id: record.id,
     markdownPath: record.cachePath,
     googleDocId: doc?.documentId || null,
-    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null
+    googleDocUrl: doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}` : null,
+    rag
   };
 }
 

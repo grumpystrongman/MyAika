@@ -373,6 +373,63 @@ const migrations = [
     CREATE INDEX IF NOT EXISTS idx_assistant_proposals_owner
       ON assistant_change_proposals (owner_id, status, created_at);
     `
+  },
+  {
+    id: 10,
+    sql: `
+    CREATE TABLE IF NOT EXISTS trading_manual_trades (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      symbol TEXT,
+      asset_class TEXT,
+      side TEXT,
+      quantity REAL,
+      entry_price REAL,
+      exit_price REAL,
+      fees REAL,
+      opened_at TEXT,
+      closed_at TEXT,
+      notes TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_trading_manual_trades_user
+      ON trading_manual_trades (user_id, created_at);
+    `
+  },
+  {
+    id: 11,
+    sql: `
+    CREATE TABLE IF NOT EXISTS todo_lists (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      color TEXT,
+      icon TEXT,
+      sort_order INTEGER,
+      created_at TEXT,
+      updated_at TEXT,
+      user_id TEXT
+    );
+
+    ALTER TABLE todos ADD COLUMN list_id TEXT;
+    ALTER TABLE todos ADD COLUMN notes TEXT;
+    ALTER TABLE todos ADD COLUMN reminder_at TEXT;
+    ALTER TABLE todos ADD COLUMN repeat_rule TEXT;
+    ALTER TABLE todos ADD COLUMN completed_at TEXT;
+    ALTER TABLE todos ADD COLUMN steps_json TEXT;
+    ALTER TABLE todos ADD COLUMN pinned INTEGER;
+    ALTER TABLE todos ADD COLUMN sort_order INTEGER;
+    ALTER TABLE todos ADD COLUMN archived_at TEXT;
+
+    INSERT OR IGNORE INTO todo_lists (id, name, color, icon, sort_order, created_at, updated_at, user_id)
+    VALUES ('inbox', 'Inbox', '#22c55e', 'inbox', 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'local');
+
+    UPDATE todos SET list_id = 'inbox' WHERE list_id IS NULL AND user_id = 'local';
+
+    CREATE INDEX IF NOT EXISTS idx_todos_list ON todos(list_id);
+    CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
+    CREATE INDEX IF NOT EXISTS idx_todos_due ON todos(due);
+    `
   }
 ];
 

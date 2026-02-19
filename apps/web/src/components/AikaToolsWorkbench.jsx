@@ -23,15 +23,15 @@ const TOOL_HELP = {
     why: "Find previous notes quickly when you need context or a reminder.",
     how: "Search by keyword and optional tags; results return ranked matches."
   },
-  todosCreate: {
-    title: "Create Todos",
-    why: "Track action items with priority and due dates so nothing slips.",
-    how: "Fill the fields and click Create Todo. Use tags to group related items."
+  todosHub: {
+    title: "Todo Command Center",
+    why: "Keep projects, work, and follow-ups organized with lists, steps, reminders, and tags.",
+    how: "Pick a list, add tasks, and use the detail panel to edit, schedule, and complete."
   },
-  todosList: {
-    title: "List Todos",
-    why: "Review open or due tasks and stay current on commitments.",
-    how: "Filter by status, due window, or tag, then click List Todos."
+  vault: {
+    title: "Knowledge Vault",
+    why: "Ask questions across saved notes and todos with RAG retrieval.",
+    how: "Pick a scope, enter a question, and review the answer plus citations."
   },
   calendar: {
     title: "Calendar Holds",
@@ -97,13 +97,13 @@ function InfoTip({ help }) {
         type="button"
         onClick={() => setOpen(!open)}
         style={{
-          border: "1px solid #cbd5f5",
-          background: "#f8fafc",
+          border: "1px solid var(--panel-border-strong)",
+          background: "var(--panel-bg-soft)",
           borderRadius: 999,
           width: 18,
           height: 18,
           fontSize: 11,
-          color: "#0f172a",
+          color: "var(--text-primary)",
           cursor: "pointer",
           lineHeight: "16px",
           textAlign: "center"
@@ -153,9 +153,16 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [notesResult, setNotesResult] = useState(null);
   const [notesSearch, setNotesSearch] = useState({ query: "", tags: "" });
   const [notesSearchResults, setNotesSearchResults] = useState([]);
-  const [todosForm, setTodosForm] = useState({ title: "", details: "", due: "", priority: "medium", tags: "" });
-  const [todoFilters, setTodoFilters] = useState({ status: "open", dueWithinDays: 14, tag: "" });
+  const [todoLists, setTodoLists] = useState([]);
+  const [activeTodoListId, setActiveTodoListId] = useState("");
+  const [todoDraft, setTodoDraft] = useState({ title: "", details: "", due: "", priority: "medium", tags: "" });
+  const [todoFilters, setTodoFilters] = useState({ status: "open", dueWithinDays: 14, tag: "", query: "" });
   const [todoResults, setTodoResults] = useState([]);
+  const [selectedTodoId, setSelectedTodoId] = useState("");
+  const [todoEditor, setTodoEditor] = useState(null);
+  const [todoNewStep, setTodoNewStep] = useState("");
+  const [todoListForm, setTodoListForm] = useState({ name: "", color: "", icon: "" });
+  const [todoLoading, setTodoLoading] = useState(false);
   const [calendarForm, setCalendarForm] = useState({ title: "", start: "", end: "", timezone: "UTC", attendees: "", location: "", description: "" });
   const [calendarResult, setCalendarResult] = useState(null);
   const [emailDraftForm, setEmailDraftForm] = useState({ from: "", to: "", subject: "", body: "", tone: "friendly", context: "", signOffName: "" });
@@ -174,6 +181,24 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [configStatus, setConfigStatus] = useState(null);
   const [integrationsStatus, setIntegrationsStatus] = useState(null);
   const [googleStatus, setGoogleStatus] = useState(null);
+  const [vaultScope, setVaultScope] = useState("vault");
+  const [vaultQuery, setVaultQuery] = useState("");
+  const [vaultResult, setVaultResult] = useState(null);
+  const [vaultError, setVaultError] = useState("");
+  const [vaultLoading, setVaultLoading] = useState(false);
+
+  function toTagText(tags = []) {
+    return Array.isArray(tags) ? tags.join(", ") : "";
+  }
+
+  function mapTodoToEditor(todo) {
+    if (!todo) return null;
+    return {
+      ...todo,
+      tagsText: toTagText(todo.tags || []),
+      steps: Array.isArray(todo.steps) ? todo.steps : []
+    };
+  }
 
   async function runTool(name, params) {
     setError("");
@@ -187,6 +212,150 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     } catch (err) {
       setError(err?.message || "tool_call_failed");
       return null;
+    }
+  }
+
+  async function loadTodoLists() {
+    const resp = await runTool("todos.listLists", {});
+    const lists = resp?.data || [];
+    setTodoLists(lists);
+    if (!lists.length) return;
+    if (!activeTodoListId || !lists.find(list => list.id === activeTodoListId)) {
+      setActiveTodoListId(lists[0].id);
+    }
+  }
+
+  async function loadTodos(listOverride = "") {
+    const listId = listOverride || activeTodoListId || "";
+    if (!listId) return;
+    const dueWindow = todoFilters.dueWithinDays === "" ? null : Number(todoFilters.dueWithinDays);
+    const resp = await runTool("todos.list", {
+      status: todoFilters.status,
+      dueWithinDays: dueWindow,
+      tag: todoFilters.tag || null,
+      listId,
+      query: todoFilters.query || "",
+      limit: 200
+    });
+    const rows = resp?.data || [];
+    setTodoResults(rows);
+    if (selectedTodoId) {
+      const match = rows.find(row => row.id === selectedTodoId);
+      setTodoEditor(match ? mapTodoToEditor(match) : null);
+    }
+  }
+
+  async function handleCreateTodoList() {
+    const name = todoListForm.name.trim();
+    if (!name) return;
+    const resp = await runTool("todos.createList", {
+      name,
+      color: todoListForm.color || "",
+      icon: todoListForm.icon || ""
+    });
+    if (resp?.data?.id) {
+      setTodoListForm({ name: "", color: "", icon: "" });
+      await loadTodoLists();
+      setActiveTodoListId(resp.data.id);
+    }
+  }
+
+  async function handleCreateTodo() {
+    const title = todoDraft.title.trim();
+    if (!title) {
+      setError("title_required");
+      return;
+    }
+    const resp = await runTool("todos.create", {
+      title,
+      details: todoDraft.details || "",
+      due: todoDraft.due || null,
+      priority: todoDraft.priority || "medium",
+      tags: parseTagList(todoDraft.tags),
+      listId: activeTodoListId || null
+    });
+    if (resp?.data) {
+      setTodoDraft({ title: "", details: "", due: "", priority: "medium", tags: "" });
+      setSelectedTodoId(resp.data.id);
+      setTodoEditor(mapTodoToEditor(resp.data));
+      await loadTodos(activeTodoListId);
+    }
+  }
+
+  async function handleSaveTodo() {
+    if (!todoEditor?.id) return;
+    const resp = await runTool("todos.update", {
+      id: todoEditor.id,
+      title: todoEditor.title,
+      details: todoEditor.details,
+      notes: todoEditor.notes,
+      due: todoEditor.due || null,
+      reminderAt: todoEditor.reminderAt || null,
+      repeatRule: todoEditor.repeatRule || "",
+      priority: todoEditor.priority || "medium",
+      status: todoEditor.status || "open",
+      tags: parseTagList(todoEditor.tagsText || ""),
+      steps: todoEditor.steps || [],
+      pinned: Boolean(todoEditor.pinned),
+      listId: todoEditor.listId || activeTodoListId || null
+    });
+    if (resp?.data) {
+      const updated = mapTodoToEditor(resp.data);
+      setTodoEditor(updated);
+      setSelectedTodoId(updated.id);
+      if (updated.listId && updated.listId !== activeTodoListId) {
+        setActiveTodoListId(updated.listId);
+      } else {
+        await loadTodos(activeTodoListId);
+      }
+    }
+  }
+
+  async function toggleTodoStatus(todo) {
+    if (!todo?.id) return;
+    const resp = todo.status === "done"
+      ? await runTool("todos.update", { id: todo.id, status: "open" })
+      : await runTool("todos.complete", { id: todo.id });
+    if (resp?.data) {
+      setSelectedTodoId(resp.data.id);
+      setTodoEditor(mapTodoToEditor(resp.data));
+      await loadTodos(activeTodoListId);
+    }
+  }
+
+  async function askVault() {
+    const query = vaultQuery.trim();
+    if (!query) {
+      setVaultError("question_required");
+      return;
+    }
+    setVaultError("");
+    setVaultLoading(true);
+    const payload = { question: query, topK: 8 };
+    if (vaultScope === "vault") {
+      payload.ragModel = "all";
+      payload.filters = { meetingIdPrefix: "rag:" };
+    } else if (vaultScope === "notes") {
+      payload.ragModel = "notes";
+    } else if (vaultScope === "todos") {
+      payload.ragModel = "todos";
+    } else if (vaultScope === "all") {
+      payload.ragModel = "all";
+    }
+    try {
+      const resp = await fetch(`${serverUrl}/api/rag/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "rag_query_failed");
+      setVaultResult(data);
+    } catch (err) {
+      setVaultResult(null);
+      setVaultError(err?.message || "rag_query_failed");
+    } finally {
+      setVaultLoading(false);
     }
   }
 
@@ -222,20 +391,49 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     };
   }, [active, serverUrl]);
 
+  useEffect(() => {
+    if (active !== "todos") return;
+    let cancelled = false;
+    async function load() {
+      setTodoLoading(true);
+      await loadTodoLists();
+      if (!cancelled) setTodoLoading(false);
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
+
+  useEffect(() => {
+    if (active !== "todos") return;
+    if (!activeTodoListId) return;
+    let cancelled = false;
+    async function load() {
+      setTodoLoading(true);
+      await loadTodos();
+      if (!cancelled) setTodoLoading(false);
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, activeTodoListId, todoFilters.status, todoFilters.dueWithinDays, todoFilters.tag, todoFilters.query]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>Aika Tools v1</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>Aika Tools v2</div>
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {["meetings", "notes", "todos", "calendar", "email", "spreadsheet", "memory", "integrations", "messaging"].map(tab => (
+        {["meetings", "notes", "todos", "vault", "calendar", "email", "spreadsheet", "memory", "integrations", "messaging"].map(tab => (
           <button
             key={tab}
             onClick={() => setActive(tab)}
             style={{
               padding: "6px 10px",
               borderRadius: 8,
-              border: active === tab ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-              background: active === tab ? "#e6f0ff" : "white",
+              border: active === tab ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+              background: active === tab ? "var(--chip-bg)" : "var(--panel-bg)",
               textTransform: "capitalize"
             }}
           >
@@ -244,15 +442,15 @@ export default function AikaToolsWorkbench({ serverUrl }) {
         ))}
       </div>
       {active === "meetings" && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <SectionHeader title="Summarize & Store" helpKey="meetings" />
           <label style={{ fontSize: 12 }}>
             Title
-            <input value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Transcript
-            <textarea value={meetingTranscript} onChange={(e) => setMeetingTranscript(e.target.value)} rows={6} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <textarea value={meetingTranscript} onChange={(e) => setMeetingTranscript(e.target.value)} rows={6} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <button
             onClick={async () => {
@@ -268,7 +466,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             Summarize & Store
           </button>
           {meetingResult && (
-            <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+            <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(meetingResult, null, 2)}
             </pre>
           )}
@@ -277,19 +475,19 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "notes" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
             <SectionHeader title="Create Note" helpKey="notesCreate" />
             <label style={{ fontSize: 12 }}>
               Title
-              <input value={notesForm.title} onChange={(e) => setNotesForm({ ...notesForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={notesForm.title} onChange={(e) => setNotesForm({ ...notesForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Body
-              <textarea value={notesForm.body} onChange={(e) => setNotesForm({ ...notesForm, body: e.target.value })} rows={5} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <textarea value={notesForm.body} onChange={(e) => setNotesForm({ ...notesForm, body: e.target.value })} rows={5} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Tags (comma)
-              <input value={notesForm.tags} onChange={(e) => setNotesForm({ ...notesForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={notesForm.tags} onChange={(e) => setNotesForm({ ...notesForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <button
               onClick={async () => {
@@ -306,21 +504,21 @@ export default function AikaToolsWorkbench({ serverUrl }) {
               Create Note
             </button>
             {notesResult && (
-              <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+              <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(notesResult, null, 2)}
               </pre>
             )}
           </div>
 
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
             <SectionHeader title="Search Notes" helpKey="notesSearch" />
             <label style={{ fontSize: 12 }}>
               Query
-              <input value={notesSearch.query} onChange={(e) => setNotesSearch({ ...notesSearch, query: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={notesSearch.query} onChange={(e) => setNotesSearch({ ...notesSearch, query: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Tags (comma)
-              <input value={notesSearch.tags} onChange={(e) => setNotesSearch({ ...notesSearch, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={notesSearch.tags} onChange={(e) => setNotesSearch({ ...notesSearch, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <button
               onClick={async () => {
@@ -337,7 +535,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             </button>
             <div style={{ marginTop: 8, fontSize: 12 }}>
               {notesSearchResults.map(n => (
-                <div key={n.id} style={{ borderBottom: "1px solid #f3f4f6", padding: "6px 0" }}>
+                <div key={n.id} style={{ borderBottom: "1px solid var(--panel-border-subtle)", padding: "6px 0" }}>
                   <div style={{ fontWeight: 600 }}>{n.title}</div>
                   <div style={{ color: "#6b7280" }}>{n.snippet}</div>
                   {n.googleDocUrl && (
@@ -354,115 +552,394 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       )}
 
       {active === "todos" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <SectionHeader title="Create Todo" helpKey="todosCreate" />
-            <label style={{ fontSize: 12 }}>
-              Title
-              <input value={todosForm.title} onChange={(e) => setTodosForm({ ...todosForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Details
-              <input value={todosForm.details} onChange={(e) => setTodosForm({ ...todosForm, details: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Due (ISO or date)
-              <input value={todosForm.due} onChange={(e) => setTodosForm({ ...todosForm, due: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Priority
-              <select value={todosForm.priority} onChange={(e) => setTodosForm({ ...todosForm, priority: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-              </select>
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Tags (comma)
-              <input value={todosForm.tags} onChange={(e) => setTodosForm({ ...todosForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
-            </label>
-            <button
-              onClick={async () => {
-                const resp = await runTool("todos.create", {
-                  title: todosForm.title,
-                  details: todosForm.details,
-                  due: todosForm.due || null,
-                  priority: todosForm.priority,
-                  tags: parseTagList(todosForm.tags)
-                });
-                setTodoResults(resp?.data ? [resp.data] : []);
-              }}
-              style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
-            >
-              Create Todo
-            </button>
-          </div>
-
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
-            <SectionHeader title="List Todos" helpKey="todosList" />
-            <label style={{ fontSize: 12 }}>
-              Status
-              <select value={todoFilters.status} onChange={(e) => setTodoFilters({ ...todoFilters, status: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
-                <option value="open">open</option>
-                <option value="done">done</option>
-                <option value="all">all</option>
-              </select>
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Due within days
-              <input value={todoFilters.dueWithinDays} onChange={(e) => setTodoFilters({ ...todoFilters, dueWithinDays: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
-            </label>
-            <label style={{ fontSize: 12, marginTop: 8 }}>
-              Tag
-              <input value={todoFilters.tag} onChange={(e) => setTodoFilters({ ...todoFilters, tag: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
-            </label>
-            <button
-              onClick={async () => {
-                const resp = await runTool("todos.list", {
-                  status: todoFilters.status,
-                  dueWithinDays: Number(todoFilters.dueWithinDays || 14),
-                  tag: todoFilters.tag || null
-                });
-                setTodoResults(resp?.data || []);
-              }}
-              style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
-            >
-              List Todos
-            </button>
-            <div style={{ marginTop: 8, fontSize: 12 }}>
-              {todoResults.map(t => (
-                <div key={t.id} style={{ borderBottom: "1px solid #f3f4f6", padding: "6px 0" }}>
-                  <div style={{ fontWeight: 600 }}>{t.title}</div>
-                  <div style={{ color: "#6b7280" }}>{t.status} {t.due ? `- due ${t.due}` : ""}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <SectionHeader title="Todo Command Center" helpKey="todosHub" />
+          <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 1fr", gap: 12 }}>
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Lists</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {todoLists.map(list => (
+                  <button
+                    key={list.id}
+                    onClick={() => {
+                      setActiveTodoListId(list.id);
+                      setSelectedTodoId("");
+                      setTodoEditor(null);
+                    }}
+                    style={{
+                      textAlign: "left",
+                      padding: "6px 8px",
+                      borderRadius: 8,
+                      border: list.id === activeTodoListId ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                      background: list.id === activeTodoListId ? "var(--chip-bg)" : "var(--panel-bg-soft)",
+                      color: "var(--text-primary)",
+                      fontWeight: list.id === activeTodoListId ? 600 : 500
+                    }}
+                  >
+                    {list.name || "Untitled"}
+                  </button>
+                ))}
+                {todoLists.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No lists yet.</div>
+                )}
+              </div>
+              <div style={{ marginTop: 12, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>New List</div>
+                <input
+                  value={todoListForm.name}
+                  onChange={(e) => setTodoListForm({ ...todoListForm, name: e.target.value })}
+                  placeholder="List name"
+                  style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                  <input
+                    value={todoListForm.color}
+                    onChange={(e) => setTodoListForm({ ...todoListForm, color: e.target.value })}
+                    placeholder="Color"
+                    style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                  />
+                  <input
+                    value={todoListForm.icon}
+                    onChange={(e) => setTodoListForm({ ...todoListForm, icon: e.target.value })}
+                    placeholder="Icon"
+                    style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                  />
                 </div>
-              ))}
+                <button
+                  onClick={handleCreateTodoList}
+                  style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Add List
+                </button>
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>Tasks</div>
+                {todoLoading && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</div>}
+              </div>
+              <label style={{ fontSize: 12 }}>
+                Title
+                <input value={todoDraft.title} onChange={(e) => setTodoDraft({ ...todoDraft, title: e.target.value })} placeholder="New task" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <label style={{ fontSize: 12, marginTop: 6 }}>
+                Details
+                <input value={todoDraft.details} onChange={(e) => setTodoDraft({ ...todoDraft, details: e.target.value })} placeholder="Short detail" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                <label style={{ fontSize: 12 }}>
+                  Due
+                  <input value={todoDraft.due} onChange={(e) => setTodoDraft({ ...todoDraft, due: e.target.value })} placeholder="2026-02-19" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  Priority
+                  <select value={todoDraft.priority} onChange={(e) => setTodoDraft({ ...todoDraft, priority: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                    <option value="urgent">urgent</option>
+                  </select>
+                </label>
+              </div>
+              <label style={{ fontSize: 12, marginTop: 6 }}>
+                Tags (comma)
+                <input value={todoDraft.tags} onChange={(e) => setTodoDraft({ ...todoDraft, tags: e.target.value })} placeholder="client, finance" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <button
+                onClick={handleCreateTodo}
+                style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+              >
+                Add Todo
+              </button>
+
+              <div style={{ marginTop: 10, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Filters</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  <label style={{ fontSize: 12 }}>
+                    Status
+                    <select value={todoFilters.status} onChange={(e) => setTodoFilters({ ...todoFilters, status: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                      <option value="open">open</option>
+                      <option value="done">done</option>
+                      <option value="all">all</option>
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    Due within days
+                    <input value={todoFilters.dueWithinDays} onChange={(e) => setTodoFilters({ ...todoFilters, dueWithinDays: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    Tag
+                    <input value={todoFilters.tag} onChange={(e) => setTodoFilters({ ...todoFilters, tag: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    Search
+                    <input value={todoFilters.query} onChange={(e) => setTodoFilters({ ...todoFilters, query: e.target.value })} placeholder="keyword" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+                {todoResults.map(todo => (
+                  <div
+                    key={todo.id}
+                    onClick={() => {
+                      setSelectedTodoId(todo.id);
+                      setTodoEditor(mapTodoToEditor(todo));
+                    }}
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "flex-start",
+                      padding: 8,
+                      borderRadius: 10,
+                      border: "1px solid var(--panel-border-subtle)",
+                      background: todo.id === selectedTodoId ? "var(--panel-bg-soft)" : "transparent",
+                      cursor: "pointer"
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={todo.status === "done"}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        toggleTodoStatus(todo);
+                      }}
+                      style={{ marginTop: 2 }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, textDecoration: todo.status === "done" ? "line-through" : "none" }}>{todo.title}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {todo.due ? `Due ${todo.due}` : "No due date"}
+                        {todo.priority ? ` | ${todo.priority}` : ""}
+                        {todo.tags?.length ? ` | ${todo.tags.join(", ")}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {todoResults.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No tasks found.</div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Details</div>
+              {!todoEditor && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Select a task to view details.</div>
+              )}
+              {todoEditor && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <label style={{ fontSize: 12 }}>
+                    Title
+                    <input value={todoEditor.title} onChange={(e) => setTodoEditor({ ...todoEditor, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    Details
+                    <input value={todoEditor.details} onChange={(e) => setTodoEditor({ ...todoEditor, details: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    Notes
+                    <textarea value={todoEditor.notes} onChange={(e) => setTodoEditor({ ...todoEditor, notes: e.target.value })} rows={3} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Due
+                      <input value={todoEditor.due || ""} onChange={(e) => setTodoEditor({ ...todoEditor, due: e.target.value })} placeholder="2026-02-19" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Reminder
+                      <input value={todoEditor.reminderAt || ""} onChange={(e) => setTodoEditor({ ...todoEditor, reminderAt: e.target.value })} placeholder="2026-02-19T09:00" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Priority
+                      <select value={todoEditor.priority} onChange={(e) => setTodoEditor({ ...todoEditor, priority: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                        <option value="urgent">urgent</option>
+                      </select>
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Status
+                      <select value={todoEditor.status} onChange={(e) => setTodoEditor({ ...todoEditor, status: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                        <option value="open">open</option>
+                        <option value="done">done</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label style={{ fontSize: 12 }}>
+                    Repeat Rule
+                    <input value={todoEditor.repeatRule || ""} onChange={(e) => setTodoEditor({ ...todoEditor, repeatRule: e.target.value })} placeholder="weekly" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    Tags (comma)
+                    <input value={todoEditor.tagsText || ""} onChange={(e) => setTodoEditor({ ...todoEditor, tagsText: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    List
+                    <select value={todoEditor.listId || activeTodoListId} onChange={(e) => setTodoEditor({ ...todoEditor, listId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                      {todoLists.map(list => (
+                        <option key={list.id} value={list.id}>{list.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="checkbox" checked={Boolean(todoEditor.pinned)} onChange={(e) => setTodoEditor({ ...todoEditor, pinned: e.target.checked })} />
+                    Pin to top
+                  </label>
+
+                  <div style={{ borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Steps</div>
+                    {todoEditor.steps.map((step, idx) => (
+                      <div key={step.id || idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(step.done)}
+                          onChange={() => {
+                            const next = [...todoEditor.steps];
+                            next[idx] = { ...next[idx], done: !next[idx].done };
+                            setTodoEditor({ ...todoEditor, steps: next });
+                          }}
+                        />
+                        <input
+                          value={step.title || ""}
+                          onChange={(e) => {
+                            const next = [...todoEditor.steps];
+                            next[idx] = { ...next[idx], title: e.target.value };
+                            setTodoEditor({ ...todoEditor, steps: next });
+                          }}
+                          style={{ flex: 1, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                        />
+                        <button
+                          onClick={() => {
+                            const next = todoEditor.steps.filter((_, stepIdx) => stepIdx !== idx);
+                            setTodoEditor({ ...todoEditor, steps: next });
+                          }}
+                          style={{ padding: "4px 8px", borderRadius: 8 }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        value={todoNewStep}
+                        onChange={(e) => setTodoNewStep(e.target.value)}
+                        placeholder="New step"
+                        style={{ flex: 1, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                      />
+                      <button
+                        onClick={() => {
+                          const title = todoNewStep.trim();
+                          if (!title) return;
+                          const next = [...todoEditor.steps, { title, done: false }];
+                          setTodoEditor({ ...todoEditor, steps: next });
+                          setTodoNewStep("");
+                        }}
+                        style={{ padding: "6px 10px", borderRadius: 8 }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                    <button onClick={handleSaveTodo} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                      Save
+                    </button>
+                    <button onClick={() => toggleTodoStatus(todoEditor)} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                      {todoEditor.status === "done" ? "Reopen" : "Mark Complete"}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    Updated {todoEditor.updatedAt || "just now"}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
+      {active === "vault" && (
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)", display: "flex", flexDirection: "column", gap: 12 }}>
+          <SectionHeader title="Knowledge Vault" helpKey="vault" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 12 }}>
+                Question
+                <input value={vaultQuery} onChange={(e) => setVaultQuery(e.target.value)} placeholder="What have I said about the onboarding checklist?" style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+              </label>
+              <button onClick={askVault} disabled={vaultLoading} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+                {vaultLoading ? "Searching..." : "Ask"}
+              </button>
+              {vaultError && <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c" }}>{vaultError}</div>}
+            </div>
+            <div>
+              <label style={{ fontSize: 12 }}>
+                Scope
+                <select value={vaultScope} onChange={(e) => setVaultScope(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                  <option value="vault">Notes + Todos</option>
+                  <option value="notes">Notes only</option>
+                  <option value="todos">Todos only</option>
+                  <option value="all">All sources</option>
+                </select>
+              </label>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+                Vault scope stays inside your saved knowledge.
+              </div>
+            </div>
+          </div>
+
+          {vaultResult && (
+            <div style={{ borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Answer</div>
+              <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.5 }}>{vaultResult.answer}</div>
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Citations</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {(vaultResult.citations || []).map((c, idx) => (
+                    <div key={`${c.chunk_id}-${idx}`} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 8, background: "var(--panel-bg-soft)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 600 }}>{c.meeting_title || "Source"}</div>
+                      {c.occurred_at && <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{c.occurred_at}</div>}
+                      <div style={{ fontSize: 11, marginTop: 4, color: "var(--text-primary)" }}>{String(c.snippet || "").slice(0, 280)}</div>
+                    </div>
+                  ))}
+                  {(!vaultResult.citations || vaultResult.citations.length === 0) && (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No citations returned.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {active === "calendar" && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <SectionHeader title="Propose Hold" helpKey="calendar" />
           <label style={{ fontSize: 12 }}>
             Title
-            <input value={calendarForm.title} onChange={(e) => setCalendarForm({ ...calendarForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={calendarForm.title} onChange={(e) => setCalendarForm({ ...calendarForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Start (ISO)
-            <input value={calendarForm.start} onChange={(e) => setCalendarForm({ ...calendarForm, start: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={calendarForm.start} onChange={(e) => setCalendarForm({ ...calendarForm, start: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <label style={{ fontSize: 12, marginTop: 8 }}>
             End (ISO)
-            <input value={calendarForm.end} onChange={(e) => setCalendarForm({ ...calendarForm, end: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={calendarForm.end} onChange={(e) => setCalendarForm({ ...calendarForm, end: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Timezone
-            <input value={calendarForm.timezone} onChange={(e) => setCalendarForm({ ...calendarForm, timezone: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={calendarForm.timezone} onChange={(e) => setCalendarForm({ ...calendarForm, timezone: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Attendees (comma emails)
-            <input value={calendarForm.attendees} onChange={(e) => setCalendarForm({ ...calendarForm, attendees: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={calendarForm.attendees} onChange={(e) => setCalendarForm({ ...calendarForm, attendees: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <button
             onClick={async () => {
@@ -480,7 +957,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             Save Draft Hold
           </button>
           {calendarResult && (
-            <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+            <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(calendarResult, null, 2)}
             </pre>
           )}
@@ -489,27 +966,27 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "email" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
             <SectionHeader title="Draft Reply" helpKey="emailDraft" />
             <label style={{ fontSize: 12 }}>
               From
-              <input value={emailDraftForm.from} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, from: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailDraftForm.from} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, from: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               To (comma)
-              <input value={emailDraftForm.to} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, to: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailDraftForm.to} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, to: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Subject
-              <input value={emailDraftForm.subject} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, subject: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailDraftForm.subject} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, subject: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Body
-              <textarea value={emailDraftForm.body} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, body: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <textarea value={emailDraftForm.body} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, body: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Tone
-              <select value={emailDraftForm.tone} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, tone: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+              <select value={emailDraftForm.tone} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, tone: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
                 <option value="friendly">friendly</option>
                 <option value="direct">direct</option>
                 <option value="executive">executive</option>
@@ -517,11 +994,11 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Context
-              <input value={emailDraftForm.context} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, context: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailDraftForm.context} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, context: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Sign off name
-              <input value={emailDraftForm.signOffName} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, signOffName: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailDraftForm.signOffName} onChange={(e) => setEmailDraftForm({ ...emailDraftForm, signOffName: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <button
               onClick={async () => {
@@ -544,29 +1021,29 @@ export default function AikaToolsWorkbench({ serverUrl }) {
               Create Draft
             </button>
             {emailDraftResult && (
-              <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+              <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(emailDraftResult, null, 2)}
               </pre>
             )}
           </div>
 
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
             <SectionHeader title="Send Draft (Approval Required)" helpKey="emailSend" />
             <label style={{ fontSize: 12 }}>
               Draft ID
-              <input value={emailSendForm.draftId} onChange={(e) => setEmailSendForm({ ...emailSendForm, draftId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailSendForm.draftId} onChange={(e) => setEmailSendForm({ ...emailSendForm, draftId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Send To (comma)
-              <input value={emailSendForm.sendTo} onChange={(e) => setEmailSendForm({ ...emailSendForm, sendTo: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailSendForm.sendTo} onChange={(e) => setEmailSendForm({ ...emailSendForm, sendTo: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               CC (comma)
-              <input value={emailSendForm.cc} onChange={(e) => setEmailSendForm({ ...emailSendForm, cc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailSendForm.cc} onChange={(e) => setEmailSendForm({ ...emailSendForm, cc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               BCC (comma)
-              <input value={emailSendForm.bcc} onChange={(e) => setEmailSendForm({ ...emailSendForm, bcc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={emailSendForm.bcc} onChange={(e) => setEmailSendForm({ ...emailSendForm, bcc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <button
               onClick={async () => {
@@ -583,7 +1060,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
               Send
             </button>
             {emailSendResult && (
-              <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+              <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(emailSendResult, null, 2)}
               </pre>
             )}
@@ -592,22 +1069,22 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       )}
 
       {active === "spreadsheet" && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <SectionHeader title="Draft Spreadsheet Patch" helpKey="spreadsheet" />
           <label style={{ fontSize: 12 }}>
             Target Type
-            <select value={sheetForm.type} onChange={(e) => setSheetForm({ ...sheetForm, type: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+            <select value={sheetForm.type} onChange={(e) => setSheetForm({ ...sheetForm, type: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
               <option value="localFile">localFile</option>
               <option value="googleSheet">googleSheet</option>
             </select>
           </label>
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Path or ID
-            <input value={sheetForm.pathOrId} onChange={(e) => setSheetForm({ ...sheetForm, pathOrId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={sheetForm.pathOrId} onChange={(e) => setSheetForm({ ...sheetForm, pathOrId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Changes (JSON)
-            <textarea value={sheetForm.changes} onChange={(e) => setSheetForm({ ...sheetForm, changes: e.target.value })} rows={5} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "monospace" }} />
+            <textarea value={sheetForm.changes} onChange={(e) => setSheetForm({ ...sheetForm, changes: e.target.value })} rows={5} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)", fontFamily: "monospace" }} />
           </label>
           <button
             onClick={async () => {
@@ -625,7 +1102,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             Create Patch
           </button>
           {sheetResult && (
-            <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+            <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(sheetResult, null, 2)}
             </pre>
           )}
@@ -634,11 +1111,11 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "memory" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
             <SectionHeader title="Write Memory" helpKey="memoryWrite" />
             <label style={{ fontSize: 12 }}>
               Tier
-              <select value={memoryForm.tier} onChange={(e) => setMemoryForm({ ...memoryForm, tier: Number(e.target.value) })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+              <select value={memoryForm.tier} onChange={(e) => setMemoryForm({ ...memoryForm, tier: Number(e.target.value) })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
                 <option value={1}>Tier 1</option>
                 <option value={2}>Tier 2</option>
                 <option value={3}>Tier 3</option>
@@ -646,15 +1123,15 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Title
-              <input value={memoryForm.title} onChange={(e) => setMemoryForm({ ...memoryForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={memoryForm.title} onChange={(e) => setMemoryForm({ ...memoryForm, title: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Content
-              <textarea value={memoryForm.content} onChange={(e) => setMemoryForm({ ...memoryForm, content: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <textarea value={memoryForm.content} onChange={(e) => setMemoryForm({ ...memoryForm, content: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Tags (comma)
-              <input value={memoryForm.tags} onChange={(e) => setMemoryForm({ ...memoryForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={memoryForm.tags} onChange={(e) => setMemoryForm({ ...memoryForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8, display: "flex", gap: 6, alignItems: "center" }}>
               <input type="checkbox" checked={memoryForm.containsPHI} onChange={(e) => setMemoryForm({ ...memoryForm, containsPHI: e.target.checked })} />
@@ -676,17 +1153,17 @@ export default function AikaToolsWorkbench({ serverUrl }) {
               Write Memory
             </button>
             {memoryResult && (
-              <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+              <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(memoryResult, null, 2)}
               </pre>
             )}
           </div>
 
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+          <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
             <SectionHeader title="Search Memory" helpKey="memorySearch" />
             <label style={{ fontSize: 12 }}>
               Tier
-              <select value={memorySearchForm.tier} onChange={(e) => setMemorySearchForm({ ...memorySearchForm, tier: Number(e.target.value) })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+              <select value={memorySearchForm.tier} onChange={(e) => setMemorySearchForm({ ...memorySearchForm, tier: Number(e.target.value) })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
                 <option value={1}>Tier 1</option>
                 <option value={2}>Tier 2</option>
                 <option value={3}>Tier 3</option>
@@ -694,11 +1171,11 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Query
-              <input value={memorySearchForm.query} onChange={(e) => setMemorySearchForm({ ...memorySearchForm, query: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={memorySearchForm.query} onChange={(e) => setMemorySearchForm({ ...memorySearchForm, query: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Tags (comma)
-              <input value={memorySearchForm.tags} onChange={(e) => setMemorySearchForm({ ...memorySearchForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={memorySearchForm.tags} onChange={(e) => setMemorySearchForm({ ...memorySearchForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
             <button
               onClick={async () => {
@@ -716,7 +1193,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             </button>
             <div style={{ marginTop: 8, fontSize: 12 }}>
               {memorySearchResults.map(m => (
-                <div key={m.id} style={{ borderBottom: "1px solid #f3f4f6", padding: "6px 0" }}>
+                <div key={m.id} style={{ borderBottom: "1px solid var(--panel-border-subtle)", padding: "6px 0" }}>
                   <div style={{ fontWeight: 600 }}>{m.title}</div>
                   <div style={{ color: "#6b7280" }}>{m.snippet}</div>
                 </div>
@@ -727,7 +1204,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       )}
 
       {active === "integrations" && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <SectionHeader title="Integration Checks" helpKey="integrations" />
           <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
             Google status: {googleStatus?.connected ? "connected" : "not connected"}
@@ -771,7 +1248,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             </button>
           </div>
           {integrationResult && (
-            <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+            <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(integrationResult, null, 2)}
             </pre>
           )}
@@ -779,11 +1256,11 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       )}
 
       {active === "messaging" && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <SectionHeader title="Send Message (Approval Required)" helpKey="messaging" />
           <label style={{ fontSize: 12 }}>
             Tool
-            <select value={messageForm.tool} onChange={(e) => setMessageForm({ ...messageForm, tool: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+            <select value={messageForm.tool} onChange={(e) => setMessageForm({ ...messageForm, tool: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
               <option value="messaging.slackPost">Slack</option>
               <option value="messaging.telegramSend">Telegram</option>
               <option value="messaging.discordSend">Discord</option>
@@ -792,24 +1269,24 @@ export default function AikaToolsWorkbench({ serverUrl }) {
           {messageForm.tool === "messaging.slackPost" && (
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Channel
-              <input value={messageForm.channel} onChange={(e) => setMessageForm({ ...messageForm, channel: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={messageForm.channel} onChange={(e) => setMessageForm({ ...messageForm, channel: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
           )}
           {messageForm.tool === "messaging.telegramSend" && (
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Chat ID
-              <input value={messageForm.chatId} onChange={(e) => setMessageForm({ ...messageForm, chatId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={messageForm.chatId} onChange={(e) => setMessageForm({ ...messageForm, chatId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
           )}
           {messageForm.tool === "messaging.discordSend" && (
             <label style={{ fontSize: 12, marginTop: 8 }}>
               Channel ID (optional)
-              <input value={messageForm.channelId} onChange={(e) => setMessageForm({ ...messageForm, channelId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+              <input value={messageForm.channelId} onChange={(e) => setMessageForm({ ...messageForm, channelId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
             </label>
           )}
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Message
-            <textarea value={messageForm.message} onChange={(e) => setMessageForm({ ...messageForm, message: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <textarea value={messageForm.message} onChange={(e) => setMessageForm({ ...messageForm, message: e.target.value })} rows={4} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
           <button
             onClick={async () => {
@@ -826,7 +1303,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
             Queue Message
           </button>
           {messageResult && (
-            <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+            <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(messageResult, null, 2)}
             </pre>
           )}
@@ -835,3 +1312,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     </div>
   );
 }
+
+
+
+

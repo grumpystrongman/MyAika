@@ -7,6 +7,7 @@ import {
   upsertVectors,
   persistHnsw,
   getMeeting,
+  deleteMeetingChunks,
   upsertRagCollection,
   upsertKnowledgeDocument,
   getKnowledgeDocumentByHash,
@@ -115,6 +116,7 @@ export function ensureConnectorCollection({ id, title, description } = {}) {
 export async function ingestConnectorDocument({
   collectionId,
   sourceType,
+  meetingId,
   title,
   sourceUrl,
   text,
@@ -122,7 +124,8 @@ export async function ingestConnectorDocument({
   metadata = {},
   sourceGroup = "",
   occurredAt,
-  force = false
+  force = false,
+  replaceExisting = false
 } = {}) {
   const normalizedText = normalizeText(text);
   if (!normalizedText) {
@@ -151,10 +154,15 @@ export async function ingestConnectorDocument({
   }
 
   const idSeed = sourceUrl || `${title}:${normalizedText.slice(0, 120)}`;
-  const meetingId = `rag:${resolvedCollection}:${sourceType || "doc"}:${hashSeed(idSeed)}`;
-  const existing = getMeeting(meetingId);
-  if (existing && !force && existing.raw_transcript === normalizedText) {
-    return { ok: true, skipped: true, meetingId, chunks: 0 };
+  const resolvedMeetingId = meetingId || `rag:${resolvedCollection}:${sourceType || "doc"}:${hashSeed(idSeed)}`;
+  const existing = getMeeting(resolvedMeetingId);
+  if (existing) {
+    if (!force && !replaceExisting && existing.raw_transcript === normalizedText) {
+      return { ok: true, skipped: true, meetingId: resolvedMeetingId, chunks: 0 };
+    }
+    if (force || replaceExisting) {
+      deleteMeetingChunks(resolvedMeetingId);
+    }
   }
 
   const occurred = occurredAt || nowIso();
@@ -166,7 +174,7 @@ export async function ingestConnectorDocument({
   const reliability = scoreReliability(sourceUrl || "", normalizedTags);
 
   upsertMeeting({
-    id: meetingId,
+    id: resolvedMeetingId,
     title: title || `${resolvedCollection} (${sourceType || "doc"})`,
     occurred_at: occurred,
     participants_json: "",
@@ -176,9 +184,9 @@ export async function ingestConnectorDocument({
     created_at: occurred
   });
 
-  const chunks = chunkTranscript({ meetingId, rawText: raw });
+  const chunks = chunkTranscript({ meetingId: resolvedMeetingId, rawText: raw });
   if (!chunks.length) {
-    return { ok: false, error: "chunking_failed", meetingId };
+    return { ok: false, error: "chunking_failed", meetingId: resolvedMeetingId };
   }
   upsertChunks(chunks);
   const embeddings = [];
@@ -190,7 +198,7 @@ export async function ingestConnectorDocument({
   await persistHnsw();
 
   upsertKnowledgeDocument({
-    doc_id: meetingId,
+    doc_id: resolvedMeetingId,
     collection_id: resolvedCollection,
     source_type: sourceType || "",
     source_url: sourceUrl || "",
@@ -208,7 +216,7 @@ export async function ingestConnectorDocument({
     reviewed_at: nowIso(),
     tags: normalizedTags,
     metadata: { sourceType: sourceType || "", ...metadata },
-    meeting_id: meetingId,
+    meeting_id: resolvedMeetingId,
     created_at: occurred
   });
 
@@ -217,5 +225,5 @@ export async function ingestConnectorDocument({
     candidates.unshift({ content_hash: contentHash, simhash, source_url: sourceUrl || "", collection_id: resolvedCollection });
   }
 
-  return { ok: true, meetingId, chunks: chunks.length };
+  return { ok: true, meetingId: resolvedMeetingId, chunks: chunks.length };
 }

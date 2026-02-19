@@ -1,5 +1,7 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { threadId } from "node:worker_threads";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 
@@ -22,9 +24,10 @@ function resolveRepoRoot() {
 const repoRoot = resolveRepoRoot();
 const defaultDbPath = path.join(repoRoot, "apps", "server", "data", "aika_rag.sqlite");
 const envPath = process.env.RAG_SQLITE_PATH || "";
+const testPath = path.join(os.tmpdir(), `aika_rag_test_${process.pid}-${threadId || 0}.sqlite`);
 const dbPath = envPath
   ? (path.isAbsolute(envPath) ? envPath : path.join(repoRoot, envPath))
-  : defaultDbPath;
+  : (process.env.NODE_ENV === "test" ? testPath : defaultDbPath);
 const dataDir = path.dirname(dbPath);
 const hnswDir = path.join(dataDir, "rag_hnsw");
 const hnswIndexPath = path.join(hnswDir, "index.bin");
@@ -2972,3 +2975,4 @@ export function getMeetingStats({ type = "all", meetingIdPrefix = "" } = {}) {
     latest: row?.latest || ""
   };
 }
+

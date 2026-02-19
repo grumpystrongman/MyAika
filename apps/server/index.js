@@ -43,7 +43,15 @@ import {
   markFirefliesConnected
 } from "./integrations/fireflies.js";
 import { fetchPlexIdentity } from "./integrations/plex.js";
-import { sendSlackMessage, sendTelegramMessage, sendDiscordMessage, sendWhatsAppMessage, sendSmsMessage } from "./integrations/messaging.js";
+import {
+  sendSlackMessage,
+  sendTelegramMessage,
+  sendTelegramVoiceNote,
+  downloadTelegramFile,
+  sendDiscordMessage,
+  sendWhatsAppMessage,
+  sendSmsMessage
+} from "./integrations/messaging.js";
 import { startDiscordBot } from "./integrations/discord_bot.js";
 import { handleInboundMessage } from "./integrations/inbound.js";
 import { fetchCurrentWeather } from "./integrations/weather.js";
@@ -85,7 +93,7 @@ import {
 } from "./storage/agent_actions.js";
 import { writeOutbox } from "./storage/outbox.js";
 import { listPairings, approvePairing, denyPairing } from "./storage/pairings.js";
-import { getThread, listThreadMessages, appendThreadMessage } from "./storage/threads.js";
+import { getThread, listThreadMessages, appendThreadMessage, ensureActiveThread, closeThread } from "./storage/threads.js";
 import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { getAssistantProfile, updateAssistantProfile } from "./storage/assistant_profile.js";
 import { listAssistantTasks, createAssistantTask, updateAssistantTask } from "./storage/assistant_tasks.js";
@@ -171,6 +179,7 @@ import { runTradingScenario, listTradingScenarios, getScenarioDetail } from "./s
 import { searchSymbols } from "./src/trading/symbolSearch.js";
 import { buildRecommendationDetail } from "./src/trading/recommendationDetail.js";
 import { buildLongTermSignal } from "./src/trading/signalEngine.js";
+import { fetchMarketCandles } from "./src/trading/marketData.js";
 import { getPolicy, savePolicy, reloadPolicy, getPolicyMeta } from "./src/safety/policyLoader.js";
 import { executeAction } from "./src/safety/executeAction.js";
 import { listAuditEvents, verifyAuditChain } from "./src/safety/auditLog.js";
@@ -221,6 +230,7 @@ import {
   startReminderScheduler
 } from "./skills/index.js";
 import { getTradingSettings, updateTradingSettings, getTradingEmailSettings, getTradingTrainingSettings, getDefaultTradingUniverse } from "./storage/trading_settings.js";
+import { listManualTrades, createManualTrade, updateManualTrade, deleteManualTrade, summarizeManualTrades } from "./storage/trading_manual_trades.js";
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -319,6 +329,8 @@ const recordingsDir = getRecordingBaseDir();
 const sttUploadDir = path.resolve(serverRoot, "..", "..", "data", "_stt_uploads");
 if (!fs.existsSync(sttUploadDir)) fs.mkdirSync(sttUploadDir, { recursive: true });
 const sttUpload = multer({ dest: sttUploadDir });
+const telegramUploadDir = path.resolve(serverRoot, "..", "..", "data", "_telegram_uploads");
+if (!fs.existsSync(telegramUploadDir)) fs.mkdirSync(telegramUploadDir, { recursive: true });
 const recordingUpload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
@@ -2634,6 +2646,39 @@ User: ${userText}`
   }
 });
 
+// Full-duplex call threads (Telegram/Web call bridge)
+app.post("/api/call/start", (req, res) => {
+  try {
+    const { channel, senderId, senderName, chatId, ragModel } = req.body || {};
+    const thread = ensureActiveThread({
+      channel: channel || "call",
+      senderId: senderId || "caller",
+      senderName,
+      chatId: chatId || "call",
+      workspaceId: getWorkspaceId(req),
+      ragModel: ragModel || "auto"
+    });
+    if (!thread?.id) return res.status(500).json({ error: "thread_create_failed" });
+    return res.json({ ok: true, threadId: thread.id });
+  } catch (err) {
+    console.warn("CALL START ERROR:", err?.message || err);
+    return res.status(500).json({ error: "call_start_failed" });
+  }
+});
+
+app.post("/api/call/stop", (req, res) => {
+  try {
+    const { threadId } = req.body || {};
+    if (!threadId) return res.status(400).json({ error: "threadId_required" });
+    const closed = closeThread(threadId);
+    if (!closed) return res.status(404).json({ error: "thread_not_found" });
+    return res.json({ ok: true, threadId: closed.id });
+  } catch (err) {
+    console.warn("CALL STOP ERROR:", err?.message || err);
+    return res.status(500).json({ error: "call_stop_failed" });
+  }
+});
+
 // Aika Voice - TTS
 app.post("/api/aika/voice", async (req, res) => {
   try {
@@ -3712,6 +3757,7 @@ const firefliesSyncSchema = z.object({
 const ragAskSchema = z.object({
   question: z.string().min(1),
   topK: z.number().int().min(1).max(20).optional(),
+  ragModel: z.string().optional(),
   filters: z.object({
     dateFrom: z.string().optional(),
     dateTo: z.string().optional(),
@@ -3902,6 +3948,21 @@ const tradingOutcomeSchema = z.object({
   notes: z.string().optional()
 });
 
+const tradingManualTradeSchema = z.object({
+  symbol: z.string().min(1),
+  assetClass: z.enum(["stock", "crypto"]).optional(),
+  side: z.enum(["buy", "sell", "long", "short"]).optional(),
+  quantity: z.union([z.number(), z.string()]),
+  entryPrice: z.union([z.number(), z.string()]),
+  exitPrice: z.union([z.number(), z.string()]).optional(),
+  fees: z.union([z.number(), z.string()]).optional(),
+  openedAt: z.string().optional(),
+  closedAt: z.string().optional(),
+  notes: z.string().optional()
+});
+
+const tradingManualTradeUpdateSchema = tradingManualTradeSchema.partial();
+
 const actionPlanSchema = z.object({
   instruction: z.string().min(3),
   startUrl: z.string().optional()
@@ -4058,7 +4119,7 @@ app.post("/api/rag/ask", async (req, res) => {
     const result = await answerRagQuestionRouted(parsed.question, {
       topK: parsed.topK,
       filters: parsed.filters || {},
-      ragModel: "auto"
+      ragModel: parsed.ragModel || "auto"
     });
     res.json(result);
   } catch (err) {
@@ -4131,6 +4192,24 @@ app.post("/api/rag/models", rateLimit, async (req, res) => {
     }
     const message = err?.message || "rag_model_create_failed";
     res.status(500).json({ error: message });
+  }
+});
+
+app.get("/api/market/candles", rateLimit, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || "").trim();
+    const assetClass = String(req.query.asset || req.query.assetClass || "stock").trim().toLowerCase();
+    const interval = String(req.query.interval || "1h").trim().toLowerCase();
+    const limit = Number(req.query.limit || 200);
+    const feed = String(req.query.feed || "").trim();
+    if (!symbol) return res.status(400).json({ error: "symbol_required" });
+    const result = await fetchMarketCandles({ symbol, assetClass, interval, limit, feed });
+    if (result?.error && (!result.candles || result.candles.length === 0)) {
+      return res.status(502).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "market_candles_failed" });
   }
 });
 
@@ -4928,6 +5007,51 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
     }
   });
 
+  app.get("/api/trading/manual-trades", rateLimit, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit || 50);
+      const trades = listManualTrades(getUserId(req), { limit });
+      res.json({ trades, summary: summarizeManualTrades(trades) });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "manual_trades_failed" });
+    }
+  });
+
+  app.post("/api/trading/manual-trades", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingManualTradeSchema.parse(req.body || {});
+      const trade = createManualTrade(getUserId(req), parsed);
+      res.json({ ok: true, trade });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "manual_trade_create_failed" });
+    }
+  });
+
+  app.patch("/api/trading/manual-trades/:id", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingManualTradeUpdateSchema.parse(req.body || {});
+      const trade = updateManualTrade(getUserId(req), req.params.id, parsed);
+      res.json({ ok: true, trade });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "manual_trade_update_failed" });
+    }
+  });
+
+  app.delete("/api/trading/manual-trades/:id", rateLimit, async (req, res) => {
+    try {
+      const result = deleteManualTrade(getUserId(req), req.params.id);
+      res.json({ ok: result.deleted });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "manual_trade_delete_failed" });
+    }
+  });
+
   app.post("/api/trading/outcome", rateLimit, async (req, res) => {
     try {
       const parsed = tradingOutcomeSchema.parse(req.body || {});
@@ -5559,27 +5683,93 @@ app.post("/api/integrations/telegram/webhook", rateLimit, async (req, res) => {
     const chatId = message?.chat?.id;
     const senderId = message?.from?.id ? String(message.from.id) : "";
     const senderName = message?.from?.username || message?.from?.first_name || "";
-    if (text && chatId) {
+    const voicePayload = message?.voice || message?.audio || message?.video_note || null;
+    const voiceRepliesEnabled = String(process.env.TELEGRAM_VOICE_REPLIES || "1") !== "0";
+    let inboundText = text;
+    let downloadedPath = "";
+    if (!inboundText && voicePayload?.file_id) {
+      try {
+        const maxBytes = Number(process.env.STT_MAX_MB || 20) * 1024 * 1024;
+        if (voicePayload?.file_size && voicePayload.file_size > maxBytes) {
+          inboundText = "";
+        } else {
+          const file = await downloadTelegramFile({ fileId: voicePayload.file_id, destDir: telegramUploadDir });
+          downloadedPath = file?.path || "";
+          const transcript = await transcribeAudio(downloadedPath);
+          inboundText = String(transcript?.text || "").trim();
+        }
+      } catch (err) {
+        inboundText = "";
+        console.warn("telegram voice download/transcribe failed", err?.message || err);
+      } finally {
+        if (downloadedPath) {
+          try { fs.unlinkSync(downloadedPath); } catch {}
+        }
+      }
+    }
+
+    if (chatId && inboundText) {
       await handleInboundMessage({
         channel: "telegram",
         senderId,
         senderName,
-        text,
+        text: inboundText,
         workspaceId: "default",
         chatId,
-        reply: async (replyText) => {
+        reply: async (replyText, meta = {}) => {
+          const replyBody = String(replyText || "").trim();
+          if (!replyBody) return;
+          const isChatReply = meta?.kind === "chat";
+          const useVoice = voiceRepliesEnabled && isChatReply;
+          if (useVoice) {
+            try {
+              const cfg = readAikaConfig();
+              const mergedSettings = {
+                voice: {
+                  name: process.env.TTS_VOICE_NAME || cfg.voice?.default_name || "",
+                  reference_wav_path: defaultRefOverride || cfg.voice?.default_reference_wav || "",
+                  prompt_text: cfg.voice?.prompt_text || ""
+                }
+              };
+              const voiceResult = await generateAikaVoice({ text: replyBody, settings: mergedSettings });
+              const result = await executeAction({
+                actionType: "messaging.telegramVoiceSend",
+                params: { chatId, text: replyBody },
+                context: { userId: "system" },
+                outboundTargets: ["https://api.telegram.org"],
+                summary: "Send Telegram voice reply",
+                handler: async () => sendTelegramVoiceNote(chatId, voiceResult.filePath)
+              });
+              if (result.status === "approval_required") {
+                return;
+              }
+              return;
+            } catch (err) {
+              console.warn("telegram voice reply failed", err?.message || err);
+            }
+          }
           const result = await executeAction({
             actionType: "messaging.telegramSend",
-            params: { chatId, text: replyText },
+            params: { chatId, text: replyBody },
             context: { userId: "system" },
             outboundTargets: ["https://api.telegram.org"],
             summary: "Reply to Telegram message",
-            handler: async () => sendTelegramMessage(chatId, replyText)
+            handler: async () => sendTelegramMessage(chatId, replyBody)
           });
           if (result.status === "approval_required") {
             return;
           }
         }
+      });
+    } else if (chatId && voicePayload?.file_id && !inboundText) {
+      const fallback = "I couldn't transcribe that voice message. Please try again or send text.";
+      await executeAction({
+        actionType: "messaging.telegramSend",
+        params: { chatId, text: fallback },
+        context: { userId: "system" },
+        outboundTargets: ["https://api.telegram.org"],
+        summary: "Reply to Telegram message",
+        handler: async () => sendTelegramMessage(chatId, fallback)
       });
     }
     res.json({ ok: true });

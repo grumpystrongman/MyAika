@@ -1,7 +1,7 @@
 import { ToolRegistry } from "./registry.js";
 import { ToolExecutor } from "./executor.js";
 import { createNote, searchNotesTool } from "./tools/notes.js";
-import { createTodo, listTodos } from "./tools/todos.js";
+import { createTodo, listTodos, updateTodo, completeTodo, createTodoList, listTodoLists, updateTodoList } from "./tools/todos.js";
 import { summarizeMeeting } from "./tools/meeting.js";
 import { proposeHold } from "./tools/calendar.js";
 import { draftReply, sendEmail } from "./tools/email.js";
@@ -67,9 +67,51 @@ registry.register(
 
 registry.register(
   {
+    name: "todos.createList",
+    description: "Create a todo list.",
+    paramsSchema: { name: "string", color: "string", icon: "string", sortOrder: "number" },
+    riskLevel: "low"
+  },
+  createTodoList
+);
+
+registry.register(
+  {
+    name: "todos.listLists",
+    description: "List todo lists.",
+    paramsSchema: {},
+    riskLevel: "low"
+  },
+  listTodoLists
+);
+
+registry.register(
+  {
+    name: "todos.updateList",
+    description: "Update a todo list.",
+    paramsSchema: { id: "string", name: "string", color: "string", icon: "string", sortOrder: "number" },
+    riskLevel: "low"
+  },
+  updateTodoList
+);
+
+registry.register(
+  {
     name: "todos.create",
     description: "Create a todo item.",
-    paramsSchema: { title: "string", details: "string", due: "string", priority: "string", tags: "string[]" },
+    paramsSchema: {
+      title: "string",
+      details: "string",
+      notes: "string",
+      due: "string",
+      reminderAt: "string",
+      repeatRule: "string",
+      priority: "string",
+      tags: "string[]",
+      steps: "object[]",
+      listId: "string",
+      pinned: "boolean"
+    },
     riskLevel: "low"
   },
   createTodo
@@ -79,10 +121,45 @@ registry.register(
   {
     name: "todos.list",
     description: "List todos with filters.",
-    paramsSchema: { status: "string", dueWithinDays: "number", tag: "string" },
+    paramsSchema: { status: "string", dueWithinDays: "number", tag: "string", listId: "string", query: "string", limit: "number" },
     riskLevel: "low"
   },
   listTodos
+);
+
+registry.register(
+  {
+    name: "todos.update",
+    description: "Update a todo item.",
+    paramsSchema: {
+      id: "string",
+      title: "string",
+      details: "string",
+      notes: "string",
+      due: "string",
+      reminderAt: "string",
+      repeatRule: "string",
+      priority: "string",
+      tags: "string[]",
+      steps: "object[]",
+      listId: "string",
+      pinned: "boolean",
+      sortOrder: "number",
+      status: "string"
+    },
+    riskLevel: "low"
+  },
+  updateTodo
+);
+
+registry.register(
+  {
+    name: "todos.complete",
+    description: "Complete a todo item.",
+    paramsSchema: { id: "string" },
+    riskLevel: "low"
+  },
+  completeTodo
 );
 
 registry.register(
