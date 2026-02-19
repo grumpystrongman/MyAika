@@ -253,6 +253,8 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     if (!config) return null;
     return {
       enabled: Boolean(config.enabled),
+      intervalMinutes: config.intervalMinutes ?? 0,
+      runOnStartup: Boolean(config.runOnStartup),
       lookbackDays: config.lookbackDays ?? 7,
       limit: config.limit ?? 40,
       followUpDays: config.followUpDays ?? 2,
@@ -579,6 +581,8 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     try {
       const payload = {
         enabled: Boolean(emailRulesForm.enabled),
+        intervalMinutes: Number(emailRulesForm.intervalMinutes || 0),
+        runOnStartup: Boolean(emailRulesForm.runOnStartup),
         lookbackDays: Number(emailRulesForm.lookbackDays || 0),
         limit: Number(emailRulesForm.limit || 0),
         followUpDays: Number(emailRulesForm.followUpDays || 0),
@@ -1705,6 +1709,20 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                     />
                     Enable rules
                   </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Interval minutes
+                      <input value={emailRulesForm.intervalMinutes} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, intervalMinutes: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", marginTop: 22 }}>
+                      <input
+                        type="checkbox"
+                        checked={emailRulesForm.runOnStartup}
+                        onChange={(e) => setEmailRulesForm({ ...emailRulesForm, runOnStartup: e.target.checked })}
+                      />
+                      Run on startup
+                    </label>
+                  </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
                     <label style={{ fontSize: 12 }}>
                       Lookback days

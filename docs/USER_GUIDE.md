@@ -216,6 +216,8 @@ What it is
 
 Key functions
 - `Enable rules`: Turns automation on/off without editing env vars.
+- `Interval minutes`: How often the rule engine runs automatically.
+- `Run on startup`: Executes rules once when the server boots.
 - `Gmail Rules`: Match by sender or label IDs.
 - `Outlook Rules`: Match by sender or folder IDs.
 - `Dedup hours`: Prevents repeated follow-ups for the same message.

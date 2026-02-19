@@ -92,6 +92,8 @@ export function matchEmailRule(provider, email, rules) {
 function buildDefaultsFromEnv() {
   return {
     enabled: String(process.env.EMAIL_RULES_ENABLED || "0") === "1",
+    intervalMinutes: toNumber(process.env.EMAIL_RULES_INTERVAL_MINUTES, 0),
+    runOnStartup: String(process.env.EMAIL_RULES_ON_STARTUP || "0") === "1",
     lookbackDays: toNumber(process.env.EMAIL_RULES_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS),
     limit: toNumber(process.env.EMAIL_RULES_LIMIT, DEFAULT_LIMIT),
     followUpDays: toNumber(process.env.EMAIL_RULES_FOLLOWUP_DAYS, DEFAULT_FOLLOWUP_DAYS),
@@ -122,6 +124,8 @@ function normalizeRulesInput(value, defaults) {
   const outlook = providers.outlook || {};
   return {
     enabled: cfg.enabled !== undefined ? Boolean(cfg.enabled) : defaults.enabled,
+    intervalMinutes: toNumber(cfg.intervalMinutes, defaults.intervalMinutes),
+    runOnStartup: cfg.runOnStartup !== undefined ? Boolean(cfg.runOnStartup) : defaults.runOnStartup,
     lookbackDays: toNumber(cfg.lookbackDays, defaults.lookbackDays),
     limit: toNumber(cfg.limit, defaults.limit),
     followUpDays: toNumber(cfg.followUpDays, defaults.followUpDays),
@@ -280,8 +284,8 @@ export function startEmailRulesLoop() {
   if (rulesTimer) return;
   const config = getEmailRulesConfig("local");
   if (!config.enabled) return;
-  const intervalMinutes = toNumber(process.env.EMAIL_RULES_INTERVAL_MINUTES, 0);
-  const runOnStartup = String(process.env.EMAIL_RULES_ON_STARTUP || "0") === "1";
+  const intervalMinutes = toNumber(config.intervalMinutes, 0);
+  const runOnStartup = Boolean(config.runOnStartup);
   if (!intervalMinutes || intervalMinutes <= 0) {
     if (runOnStartup) runEmailRules({ userId: "local" }).catch(() => {});
     return;

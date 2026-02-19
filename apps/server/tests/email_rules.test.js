@@ -57,12 +57,18 @@ test("email rules config saves and loads", () => {
   setProvider("email_rules_config", null, userId);
   const saved = saveEmailRulesConfig({
     enabled: true,
+    intervalMinutes: 15,
+    runOnStartup: true,
     lookbackDays: 3,
     providers: { gmail: { senders: ["vip@example.com"] } }
   }, userId);
   assert.equal(saved.enabled, true);
+  assert.equal(saved.intervalMinutes, 15);
+  assert.equal(saved.runOnStartup, true);
   const loaded = getEmailRulesConfig(userId);
   assert.equal(loaded.enabled, true);
+  assert.equal(loaded.intervalMinutes, 15);
+  assert.equal(loaded.runOnStartup, true);
   assert.ok(loaded.providers.gmail.senders.includes("vip@example.com"));
   setProvider("email_rules_config", null, userId);
 });
