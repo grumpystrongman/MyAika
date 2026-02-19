@@ -176,7 +176,17 @@ import {
   syncConfluenceConnector
 } from "./src/connectors/index.js";
 import { getEmailInbox } from "./src/connectors/emailInbox.js";
-import { runEmailRules, startEmailRulesLoop, getEmailRulesStatus, getEmailRulesConfig, saveEmailRulesConfig, previewEmailRules } from "./src/email/emailRules.js";
+import {
+  runEmailRules,
+  startEmailRulesLoop,
+  getEmailRulesStatus,
+  getEmailRulesConfig,
+  saveEmailRulesConfig,
+  previewEmailRules,
+  listEmailRuleTemplates,
+  saveEmailRuleTemplate,
+  deleteEmailRuleTemplate
+} from "./src/email/emailRules.js";
 import { startTodoReminderLoop, runTodoReminders, getTodoReminderStatus, getTodoReminderConfig, saveTodoReminderConfig } from "./src/todos/reminders.js";
 import {
   startTradingYoutubeLoop,
@@ -7356,6 +7366,34 @@ app.post("/api/email/rules/config", rateLimit, async (req, res) => {
     res.json({ ok: true, config });
   } catch (err) {
     res.status(500).json({ error: err?.message || "email_rules_config_save_failed" });
+  }
+});
+
+app.get("/api/email/rules/templates", rateLimit, async (req, res) => {
+  try {
+    const templates = listEmailRuleTemplates(getUserId(req));
+    res.json({ ok: true, templates });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_templates_failed" });
+  }
+});
+
+app.post("/api/email/rules/templates", rateLimit, async (req, res) => {
+  try {
+    const { id, name, config } = req.body || {};
+    const template = saveEmailRuleTemplate({ id, name, config }, getUserId(req));
+    res.json({ ok: true, template });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_templates_save_failed" });
+  }
+});
+
+app.delete("/api/email/rules/templates/:id", rateLimit, async (req, res) => {
+  try {
+    const ok = deleteEmailRuleTemplate(req.params.id, getUserId(req));
+    res.json({ ok });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_templates_delete_failed" });
   }
 });
 

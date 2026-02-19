@@ -206,6 +206,12 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailRulesPreview, setEmailRulesPreview] = useState(null);
   const [emailRulesPreviewing, setEmailRulesPreviewing] = useState(false);
   const [emailRulesPreviewFilters, setEmailRulesPreviewFilters] = useState({ provider: "all", lookbackDays: "", limit: "" });
+  const [emailRulesPreviewCopied, setEmailRulesPreviewCopied] = useState(false);
+  const [emailRulesTemplates, setEmailRulesTemplates] = useState([]);
+  const [emailRulesTemplateName, setEmailRulesTemplateName] = useState("");
+  const [emailRulesTemplateId, setEmailRulesTemplateId] = useState("");
+  const [emailRulesTemplateSaving, setEmailRulesTemplateSaving] = useState(false);
+  const [emailRulesTemplateDeleting, setEmailRulesTemplateDeleting] = useState(false);
   const [todoReminderForm, setTodoReminderForm] = useState(null);
   const [todoReminderStatus, setTodoReminderStatus] = useState(null);
   const [todoReminderResult, setTodoReminderResult] = useState(null);
@@ -272,6 +278,35 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       gmailLabelIds: toTagText(config.providers?.gmail?.labelIds || []),
       outlookSenders: toTagText(config.providers?.outlook?.senders || []),
       outlookFolderIds: toTagText(config.providers?.outlook?.folderIds || [])
+    };
+  }
+
+  function buildEmailRulesPayload(form) {
+    if (!form) return null;
+    return {
+      enabled: Boolean(form.enabled),
+      intervalMinutes: Number(form.intervalMinutes || 0),
+      runOnStartup: Boolean(form.runOnStartup),
+      lookbackDays: Number(form.lookbackDays || 0),
+      limit: Number(form.limit || 0),
+      followUpDays: Number(form.followUpDays || 0),
+      followUpHours: Number(form.followUpHours || 0),
+      reminderOffsetHours: Number(form.reminderOffsetHours || 0),
+      dedupHours: Number(form.dedupHours || 0),
+      maxProcessed: Number(form.maxProcessed || 0),
+      priority: form.priority || "medium",
+      listId: form.listId || "",
+      tags: parseTagList(form.tags || ""),
+      providers: {
+        gmail: {
+          senders: parseTagList(form.gmailSenders || ""),
+          labelIds: parseTagList(form.gmailLabelIds || "")
+        },
+        outlook: {
+          senders: parseTagList(form.outlookSenders || ""),
+          folderIds: parseTagList(form.outlookFolderIds || "")
+        }
+      }
     };
   }
 
@@ -615,31 +650,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     if (!emailRulesForm) return;
     setEmailRulesSaving(true);
     try {
-      const payload = {
-        enabled: Boolean(emailRulesForm.enabled),
-        intervalMinutes: Number(emailRulesForm.intervalMinutes || 0),
-        runOnStartup: Boolean(emailRulesForm.runOnStartup),
-        lookbackDays: Number(emailRulesForm.lookbackDays || 0),
-        limit: Number(emailRulesForm.limit || 0),
-        followUpDays: Number(emailRulesForm.followUpDays || 0),
-        followUpHours: Number(emailRulesForm.followUpHours || 0),
-        reminderOffsetHours: Number(emailRulesForm.reminderOffsetHours || 0),
-        dedupHours: Number(emailRulesForm.dedupHours || 0),
-        maxProcessed: Number(emailRulesForm.maxProcessed || 0),
-        priority: emailRulesForm.priority || "medium",
-        listId: emailRulesForm.listId || "",
-        tags: parseTagList(emailRulesForm.tags || ""),
-        providers: {
-          gmail: {
-            senders: parseTagList(emailRulesForm.gmailSenders || ""),
-            labelIds: parseTagList(emailRulesForm.gmailLabelIds || "")
-          },
-          outlook: {
-            senders: parseTagList(emailRulesForm.outlookSenders || ""),
-            folderIds: parseTagList(emailRulesForm.outlookFolderIds || "")
-          }
-        }
-      };
+      const payload = buildEmailRulesPayload(emailRulesForm);
       const resp = await fetch(`${serverUrl}/api/email/rules/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -654,6 +665,76 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     } finally {
       setEmailRulesSaving(false);
     }
+  }
+
+  async function loadEmailRulesTemplates() {
+    try {
+      const resp = await fetch(`${serverUrl}/api/email/rules/templates`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_templates_failed");
+      setEmailRulesTemplates(Array.isArray(data.templates) ? data.templates : []);
+    } catch {
+      setEmailRulesTemplates([]);
+    }
+  }
+
+  async function saveEmailRulesTemplate() {
+    if (!emailRulesForm) return;
+    const name = emailRulesTemplateName.trim();
+    if (!name) {
+      setError("template_name_required");
+      return;
+    }
+    setEmailRulesTemplateSaving(true);
+    try {
+      const payload = {
+        name,
+        config: buildEmailRulesPayload(emailRulesForm)
+      };
+      const resp = await fetch(`${serverUrl}/api/email/rules/templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_template_save_failed");
+      setEmailRulesTemplateName("");
+      await loadEmailRulesTemplates();
+      if (data?.template?.id) setEmailRulesTemplateId(data.template.id);
+    } catch (err) {
+      setError(err?.message || "email_rules_template_save_failed");
+    } finally {
+      setEmailRulesTemplateSaving(false);
+    }
+  }
+
+  async function deleteEmailRulesTemplate() {
+    if (!emailRulesTemplateId) return;
+    setEmailRulesTemplateDeleting(true);
+    try {
+      const resp = await fetch(`${serverUrl}/api/email/rules/templates/${emailRulesTemplateId}`, { method: "DELETE" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_template_delete_failed");
+      setEmailRulesTemplateId("");
+      await loadEmailRulesTemplates();
+    } catch (err) {
+      setError(err?.message || "email_rules_template_delete_failed");
+    } finally {
+      setEmailRulesTemplateDeleting(false);
+    }
+  }
+
+  function applyEmailRulesTemplate() {
+    if (!emailRulesTemplateId) return;
+    const template = emailRulesTemplates.find(t => t.id === emailRulesTemplateId);
+    if (!template?.config) return;
+    const form = mapRulesConfigToForm(template.config);
+    setEmailRulesForm(form);
+    setEmailRulesPreviewFilters(prev => ({
+      ...prev,
+      lookbackDays: form?.lookbackDays ?? prev.lookbackDays,
+      limit: form?.limit ?? prev.limit
+    }));
   }
 
   async function loadTodoReminderConfig() {
@@ -794,6 +875,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     if (active !== "email") return;
     loadEmailRulesConfig();
     loadEmailRulesStatus();
+    loadEmailRulesTemplates();
     loadTodoReminderConfig();
     loadTodoReminderStatus();
   }, [active]);
@@ -1849,6 +1931,37 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                       </label>
                     </div>
                   </div>
+                  <div style={{ marginTop: 10, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Templates</div>
+                    <label style={{ fontSize: 12 }}>
+                      Template name
+                      <input value={emailRulesTemplateName} onChange={(e) => setEmailRulesTemplateName(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                      <button onClick={saveEmailRulesTemplate} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={emailRulesTemplateSaving}>
+                        {emailRulesTemplateSaving ? "Saving..." : "Save as Template"}
+                      </button>
+                    </div>
+                    {emailRulesTemplates.length > 0 && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 6, marginTop: 8, alignItems: "end" }}>
+                        <label style={{ fontSize: 12 }}>
+                          Saved templates
+                          <select value={emailRulesTemplateId} onChange={(e) => setEmailRulesTemplateId(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                            <option value="">Select template</option>
+                            {emailRulesTemplates.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <button onClick={applyEmailRulesTemplate} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={!emailRulesTemplateId}>
+                          Load
+                        </button>
+                        <button onClick={deleteEmailRulesTemplate} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={!emailRulesTemplateId || emailRulesTemplateDeleting}>
+                          {emailRulesTemplateDeleting ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                     <button onClick={saveEmailRules} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={emailRulesSaving}>
                       {emailRulesSaving ? "Saving..." : "Save Rules"}
@@ -1867,20 +1980,45 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                   )}
                   {emailRulesPreview?.preview && (
                     <div style={{ marginTop: 8 }}>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
-                        Preview: {emailRulesPreview.wouldCreate || 0} follow-ups would be created.
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                          Preview: {emailRulesPreview.wouldCreate || 0} follow-ups would be created.
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(JSON.stringify(emailRulesPreview.preview || [], null, 2));
+                              setEmailRulesPreviewCopied(true);
+                              setTimeout(() => setEmailRulesPreviewCopied(false), 1500);
+                            } catch {
+                              setError("copy_failed");
+                            }
+                          }}
+                          style={{ padding: "4px 8px", borderRadius: 6, fontSize: 11 }}
+                        >
+                          {emailRulesPreviewCopied ? "Copied" : "Copy Preview JSON"}
+                        </button>
                       </div>
                       {emailRulesPreview.preview.length === 0 && (
                         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No matches for the current rules.</div>
                       )}
                       {emailRulesPreview.preview.length > 0 && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
                           {emailRulesPreview.preview.slice(0, 10).map(item => (
                             <div key={`${item.provider}-${item.id}`} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 8, padding: 8 }}>
-                              <div style={{ fontSize: 12, fontWeight: 600 }}>{item.subject || "(no subject)"}</div>
-                              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.from || ""} | {item.provider}</div>
-                              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600 }}>{item.subject || "(no subject)"}</div>
+                                <div style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)" }}>{item.provider}</div>
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.from || ""}</div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                                 Follow-up: {item.followUpAt || "n/a"} | Reminder: {item.reminderAt || "n/a"}
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                                List: {item.listId || "default"} | Priority: {item.priority || "medium"}
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                                Tags: {Array.isArray(item.tags) && item.tags.length ? item.tags.join(", ") : "none"}
                               </div>
                             </div>
                           ))}

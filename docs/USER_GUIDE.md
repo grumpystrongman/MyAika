@@ -220,6 +220,8 @@ Key functions
 - `Run on startup`: Executes rules once when the server boots.
 - `Preview Rules`: Shows which emails would create follow-ups without writing todos.
 - `Preview filters`: Scope by provider, lookback days, and limit to test a smaller slice.
+- `Copy Preview JSON`: Copies the preview payload for audits or debugging.
+- `Templates`: Save the current rules as a named preset, load it later, or delete it.
 - `Gmail Rules`: Match by sender or label IDs.
 - `Outlook Rules`: Match by sender or folder IDs.
 - `Dedup hours`: Prevents repeated follow-ups for the same message.
@@ -231,6 +233,7 @@ How to use
 3. Choose follow-up timing, priority, tags, and list ID.
 4. Click `Save Rules`, then `Preview Rules` to validate matches.
 5. Click `Run Rules Now` when you are ready to create follow-ups.
+6. Use `Save as Template` if you want to reuse the rules later.
 
 ### Reminder Delivery (Slack/Telegram/Email/In-app)
 ![Reminder delivery](user-guide/screenshots/tools_reminders.png)

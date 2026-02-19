@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { listGmailPreview } from "../connectors/gmail.js";
 import { listOutlookPreview } from "../connectors/outlook.js";
 import { scheduleEmailFollowUp } from "./emailActions.js";
@@ -190,6 +191,16 @@ function loadRuleState(userId = "local") {
   return { version: 1, processed: {}, lastRunAt: null };
 }
 
+function loadTemplateState(userId = "local") {
+  const stored = getProvider("email_rules_templates", userId);
+  if (stored?.version === 1 && Array.isArray(stored.templates)) return stored;
+  return { version: 1, templates: [] };
+}
+
+function normalizeTemplateConfig(config, defaults) {
+  return normalizeRulesInput(config || {}, defaults);
+}
+
 function pruneProcessed(entries, dedupMs, maxEntries) {
   const now = Date.now();
   const cleaned = Object.entries(entries || {})
@@ -262,7 +273,10 @@ export async function runEmailRules({ userId = "local", providers = ["gmail", "o
             from: email?.from || "",
             receivedAt: email?.receivedAt || "",
             followUpAt,
-            reminderAt
+            reminderAt,
+            listId: rules.listId || null,
+            priority: rules.priority || "medium",
+            tags: ["auto-followup", ...rules.tags]
           });
           processed += 1;
         } else {
@@ -332,4 +346,41 @@ export function getEmailRulesStatus(userId = "local") {
     lastRunAt: state.lastRunAt || null,
     providers: Object.keys(config.providers || {})
   };
+}
+
+export function listEmailRuleTemplates(userId = "local") {
+  const state = loadTemplateState(userId);
+  return state.templates || [];
+}
+
+export function saveEmailRuleTemplate({ id, name, config }, userId = "local") {
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName) throw new Error("template_name_required");
+  const defaults = buildDefaultsFromEnv();
+  const normalizedConfig = normalizeTemplateConfig(config || {}, defaults);
+  const state = loadTemplateState(userId);
+  const templates = Array.isArray(state.templates) ? [...state.templates] : [];
+  const now = new Date().toISOString();
+  const templateId = id || crypto.randomUUID();
+  const idx = templates.findIndex(t => t.id === templateId);
+  const nextTemplate = {
+    id: templateId,
+    name: trimmedName,
+    updatedAt: now,
+    createdAt: idx >= 0 ? templates[idx]?.createdAt || now : now,
+    config: normalizedConfig
+  };
+  if (idx >= 0) templates[idx] = nextTemplate;
+  else templates.push(nextTemplate);
+  setProvider("email_rules_templates", { version: 1, templates }, userId);
+  return nextTemplate;
+}
+
+export function deleteEmailRuleTemplate(id, userId = "local") {
+  const templateId = String(id || "").trim();
+  if (!templateId) return false;
+  const state = loadTemplateState(userId);
+  const templates = Array.isArray(state.templates) ? state.templates.filter(t => t.id !== templateId) : [];
+  setProvider("email_rules_templates", { version: 1, templates }, userId);
+  return true;
 }

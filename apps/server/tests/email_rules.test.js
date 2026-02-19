@@ -1,6 +1,14 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { matchEmailRule, runEmailRules, getEmailRulesConfig, saveEmailRulesConfig } from "../src/email/emailRules.js";
+import {
+  matchEmailRule,
+  runEmailRules,
+  getEmailRulesConfig,
+  saveEmailRulesConfig,
+  listEmailRuleTemplates,
+  saveEmailRuleTemplate,
+  deleteEmailRuleTemplate
+} from "../src/email/emailRules.js";
 import { getProvider, setProvider } from "../integrations/store.js";
 
 const baseConfig = {
@@ -69,6 +77,10 @@ test("runEmailRules dry run previews matches without creating", async () => {
   assert.equal(result.dryRun, true);
   assert.equal(result.wouldCreate, 1);
   assert.equal(created, 0);
+  assert.equal(result.preview.length, 1);
+  assert.equal(result.preview[0].listId, baseConfig.listId || null);
+  assert.equal(result.preview[0].priority, baseConfig.priority);
+  assert.ok(result.preview[0].tags.includes("auto-followup"));
   const state = getProvider("email_rules", userId);
   assert.equal(state, null);
 });
@@ -92,4 +104,19 @@ test("email rules config saves and loads", () => {
   assert.equal(loaded.runOnStartup, true);
   assert.ok(loaded.providers.gmail.senders.includes("vip@example.com"));
   setProvider("email_rules_config", null, userId);
+});
+
+test("email rules templates save, list, and delete", () => {
+  const userId = "email-rules-templates";
+  setProvider("email_rules_templates", null, userId);
+  const template = saveEmailRuleTemplate({ name: "Default Follow-ups", config: baseConfig }, userId);
+  assert.ok(template.id);
+  assert.equal(template.name, "Default Follow-ups");
+  const list = listEmailRuleTemplates(userId);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, template.id);
+  const deleted = deleteEmailRuleTemplate(template.id, userId);
+  assert.equal(deleted, true);
+  const after = listEmailRuleTemplates(userId);
+  assert.equal(after.length, 0);
 });
