@@ -219,6 +219,7 @@ Key functions
 - `Interval minutes`: How often the rule engine runs automatically.
 - `Run on startup`: Executes rules once when the server boots.
 - `Preview Rules`: Shows which emails would create follow-ups without writing todos.
+- `Preview filters`: Scope by provider, lookback days, and limit to test a smaller slice.
 - `Gmail Rules`: Match by sender or label IDs.
 - `Outlook Rules`: Match by sender or folder IDs.
 - `Dedup hours`: Prevents repeated follow-ups for the same message.

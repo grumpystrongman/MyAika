@@ -205,6 +205,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailRulesSaving, setEmailRulesSaving] = useState(false);
   const [emailRulesPreview, setEmailRulesPreview] = useState(null);
   const [emailRulesPreviewing, setEmailRulesPreviewing] = useState(false);
+  const [emailRulesPreviewFilters, setEmailRulesPreviewFilters] = useState({ provider: "all", lookbackDays: "", limit: "" });
   const [todoReminderForm, setTodoReminderForm] = useState(null);
   const [todoReminderStatus, setTodoReminderStatus] = useState(null);
   const [todoReminderResult, setTodoReminderResult] = useState(null);
@@ -559,7 +560,19 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     setEmailRulesPreviewing(true);
     setEmailRulesPreview(null);
     try {
-      const resp = await fetch(`${serverUrl}/api/email/rules/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const provider = emailRulesPreviewFilters.provider || "all";
+      const providers = provider === "all" ? ["gmail", "outlook"] : [provider];
+      const lookbackDays = emailRulesPreviewFilters.lookbackDays === "" ? null : Number(emailRulesPreviewFilters.lookbackDays || 0);
+      const limit = emailRulesPreviewFilters.limit === "" ? null : Number(emailRulesPreviewFilters.limit || 0);
+      const resp = await fetch(`${serverUrl}/api/email/rules/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providers,
+          lookbackDays: Number.isFinite(lookbackDays) && lookbackDays > 0 ? lookbackDays : undefined,
+          limit: Number.isFinite(limit) && limit > 0 ? limit : undefined
+        })
+      });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_preview_failed");
       setEmailRulesPreview(data);
@@ -575,7 +588,13 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       const resp = await fetch(`${serverUrl}/api/email/rules/config`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_config_failed");
-      setEmailRulesForm(mapRulesConfigToForm(data.config));
+      const form = mapRulesConfigToForm(data.config);
+      setEmailRulesForm(form);
+      setEmailRulesPreviewFilters(prev => ({
+        ...prev,
+        lookbackDays: form?.lookbackDays ?? prev.lookbackDays,
+        limit: form?.limit ?? prev.limit
+      }));
     } catch {
       setEmailRulesForm(null);
     }
@@ -1808,6 +1827,27 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                       Folder IDs (comma)
                       <input value={emailRulesForm.outlookFolderIds} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, outlookFolderIds: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                     </label>
+                  </div>
+                  <div style={{ marginTop: 10, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Preview Filters</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      <label style={{ fontSize: 12 }}>
+                        Provider
+                        <select value={emailRulesPreviewFilters.provider} onChange={(e) => setEmailRulesPreviewFilters({ ...emailRulesPreviewFilters, provider: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                          <option value="all">all</option>
+                          <option value="gmail">gmail</option>
+                          <option value="outlook">outlook</option>
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 12 }}>
+                        Lookback days
+                        <input value={emailRulesPreviewFilters.lookbackDays} onChange={(e) => setEmailRulesPreviewFilters({ ...emailRulesPreviewFilters, lookbackDays: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                      </label>
+                      <label style={{ fontSize: 12 }}>
+                        Limit
+                        <input value={emailRulesPreviewFilters.limit} onChange={(e) => setEmailRulesPreviewFilters({ ...emailRulesPreviewFilters, limit: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                      </label>
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                     <button onClick={saveEmailRules} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={emailRulesSaving}>

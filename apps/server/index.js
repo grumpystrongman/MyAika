@@ -7370,11 +7370,17 @@ app.post("/api/email/rules/run", rateLimit, async (req, res) => {
 
 app.post("/api/email/rules/preview", rateLimit, async (req, res) => {
   try {
-    const { providers, lookbackDays } = req.body || {};
+    const { providers, lookbackDays, limit } = req.body || {};
+    const userId = getUserId(req);
+    const resolvedProviders = Array.isArray(providers) && providers.length ? providers : ["gmail", "outlook"];
+    const limitNumber = Number(limit);
+    const baseConfig = getEmailRulesConfig(userId);
+    const config = Number.isFinite(limitNumber) && limitNumber > 0 ? { ...baseConfig, limit: limitNumber } : baseConfig;
     const result = await previewEmailRules({
-      userId: getUserId(req),
-      providers: Array.isArray(providers) && providers.length ? providers : ["gmail", "outlook"],
-      lookbackDays
+      userId,
+      providers: resolvedProviders,
+      lookbackDays,
+      config
     });
     res.json(result);
   } catch (err) {
