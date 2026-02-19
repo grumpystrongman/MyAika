@@ -72,6 +72,22 @@ function formatSourceLabel(value, maxLen = 26) {
   return raw.length > maxLen ? `${raw.slice(0, maxLen)}...` : raw;
 }
 
+function toLocalInputValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function toIsoFromLocalInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toISOString();
+}
+
 function intervalToMs(interval) {
   const lookup = {
     "1m": 60_000,
@@ -313,7 +329,7 @@ function KnowledgeGraph({ graph, width = 560, height = 360, selectedId = "", onS
       const radius = node.radius || 6;
       const label = formatLabel(node);
       ctx.beginPath();
-      const baseColor = label.type === "source" ? "#22c55e" : label.type === "tag" ? "#0ea5e9" : "#0ea5e9";
+      const baseColor = label.type === "source" ? "#22c55e" : label.type === "tag" ? "var(--accent)" : "var(--accent)";
       const hoverColor = label.type === "source" ? "#34d399" : "#38bdf8";
       ctx.fillStyle = isSelected ? "#f97316" : isHovered ? hoverColor : baseColor;
       ctx.globalAlpha = isSelected ? 0.95 : 0.85;
@@ -520,7 +536,7 @@ function KnowledgeGraph({ graph, width = 560, height = 360, selectedId = "", onS
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <canvas ref={canvasRef} width={width} height={height} style={{ width: "100%", borderRadius: 12, background: "#0f172a" }} />
-      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
         {hovered
           ? `Hover: ${formatLabel(hovered).full || hovered.id} (${hovered.count || 0})`
           : "Drag to move, scroll to zoom, click a node for details."}
@@ -942,7 +958,7 @@ function IndicatorPanel({
 
   return (
     <div style={{ display: "grid", gap: 6 }}>
-      <div style={{ fontSize: 12, color: "#94a3b8" }}>{title}</div>
+      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{title}</div>
       <canvas
         ref={canvasRef}
         width={width}
@@ -1111,7 +1127,7 @@ function MacdPanel({
 
   return (
     <div style={{ display: "grid", gap: 6 }}>
-      <div style={{ fontSize: 12, color: "#94a3b8" }}>MACD</div>
+      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>MACD</div>
       <canvas
         ref={canvasRef}
         width={width}
@@ -1137,6 +1153,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [dataSource, setDataSource] = useState("loading");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [marketNote, setMarketNote] = useState("");
   const [symbolTouched, setSymbolTouched] = useState(false);
   const [showVwap, setShowVwap] = useState(true);
   const [showRsi, setShowRsi] = useState(true);
@@ -1178,6 +1195,24 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [trackedStocks, setTrackedStocks] = useState([]);
   const [trackedCryptos, setTrackedCryptos] = useState([]);
   const [outcome, setOutcome] = useState({ pnl: "", pnlPct: "", notes: "" });
+  const [manualTrades, setManualTrades] = useState([]);
+  const [manualTradeSummary, setManualTradeSummary] = useState(null);
+  const [manualTradeStatus, setManualTradeStatus] = useState("");
+  const [manualTradeSaving, setManualTradeSaving] = useState(false);
+  const [manualTradeLoading, setManualTradeLoading] = useState(false);
+  const [manualTradeEditingId, setManualTradeEditingId] = useState("");
+  const [manualTradeForm, setManualTradeForm] = useState({
+    symbol: "",
+    assetClass: "stock",
+    side: "buy",
+    quantity: "",
+    entryPrice: "",
+    exitPrice: "",
+    fees: "",
+    openedAt: "",
+    closedAt: "",
+    notes: ""
+  });
   const [lessonQuery, setLessonQuery] = useState("");
   const [lessons, setLessons] = useState([]);
   const [lessonStatus, setLessonStatus] = useState("");
@@ -1680,6 +1715,113 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     await saveWatchlists(next, trackedCryptos);
   };
 
+  const resetManualTradeForm = () => {
+    setManualTradeEditingId("");
+    setManualTradeForm({
+      symbol: "",
+      assetClass: "stock",
+      side: "buy",
+      quantity: "",
+      entryPrice: "",
+      exitPrice: "",
+      fees: "",
+      openedAt: "",
+      closedAt: "",
+      notes: ""
+    });
+  };
+
+  const loadManualTrades = async () => {
+    if (!serverUrl) return;
+    setManualTradeLoading(true);
+    setManualTradeStatus("");
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/manual-trades?limit=25`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.error || "manual_trades_failed");
+      setManualTrades(Array.isArray(data.trades) ? data.trades : []);
+      setManualTradeSummary(data.summary || null);
+    } catch (err) {
+      setManualTradeStatus(err?.message || "manual_trades_failed");
+    } finally {
+      setManualTradeLoading(false);
+    }
+  };
+
+  const submitManualTrade = async () => {
+    if (!serverUrl) {
+      setManualTradeStatus("Trading server URL not configured.");
+      return;
+    }
+    setManualTradeSaving(true);
+    setManualTradeStatus("");
+    try {
+      const payload = {
+        symbol: manualTradeForm.symbol.trim().toUpperCase(),
+        assetClass: manualTradeForm.assetClass,
+        side: manualTradeForm.side,
+        quantity: manualTradeForm.quantity,
+        entryPrice: manualTradeForm.entryPrice,
+        exitPrice: manualTradeForm.exitPrice,
+        fees: manualTradeForm.fees,
+        openedAt: manualTradeForm.openedAt ? toIsoFromLocalInput(manualTradeForm.openedAt) : "",
+        closedAt: manualTradeForm.closedAt ? toIsoFromLocalInput(manualTradeForm.closedAt) : "",
+        notes: manualTradeForm.notes
+      };
+      const url = manualTradeEditingId
+        ? `${serverUrl}/api/trading/manual-trades/${manualTradeEditingId}`
+        : `${serverUrl}/api/trading/manual-trades`;
+      const resp = await fetch(url, {
+        method: manualTradeEditingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.error || "manual_trade_save_failed");
+      setManualTradeStatus(manualTradeEditingId ? "Trade updated." : "Trade saved.");
+      resetManualTradeForm();
+      await loadManualTrades();
+    } catch (err) {
+      setManualTradeStatus(err?.message || "manual_trade_save_failed");
+    } finally {
+      setManualTradeSaving(false);
+      setTimeout(() => setManualTradeStatus(""), 2500);
+    }
+  };
+
+  const editManualTrade = (trade) => {
+    if (!trade) return;
+    setManualTradeEditingId(trade.id || "");
+    setManualTradeForm({
+      symbol: trade.symbol || "",
+      assetClass: trade.assetClass || "stock",
+      side: trade.side || "buy",
+      quantity: trade.quantity != null ? String(trade.quantity) : "",
+      entryPrice: trade.entryPrice != null ? String(trade.entryPrice) : "",
+      exitPrice: trade.exitPrice != null ? String(trade.exitPrice) : "",
+      fees: trade.fees != null ? String(trade.fees) : "",
+      openedAt: trade.openedAt ? toLocalInputValue(trade.openedAt) : "",
+      closedAt: trade.closedAt ? toLocalInputValue(trade.closedAt) : "",
+      notes: trade.notes || ""
+    });
+  };
+
+  const removeManualTrade = async (tradeId) => {
+    if (!tradeId || !serverUrl) return;
+    if (typeof window !== "undefined") {
+      const ok = window.confirm("Delete this manual trade?");
+      if (!ok) return;
+    }
+    try {
+      const resp = await fetch(`${serverUrl}/api/trading/manual-trades/${tradeId}`, { method: "DELETE" });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.error || "manual_trade_delete_failed");
+      await loadManualTrades();
+    } catch (err) {
+      setManualTradeStatus(err?.message || "manual_trade_delete_failed");
+    }
+  };
+
   useEffect(() => {
     if (!serverUrl) return;
     const query = watchlistQuery.trim();
@@ -1823,6 +1965,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   }, [tradingTab, tradeApiUrl]);
 
   useEffect(() => {
+    if (tradingTab !== "terminal") return;
+    loadManualTrades();
+  }, [tradingTab, serverUrl]);
+
+  useEffect(() => {
     if (!symbolTouched) {
       setSymbol(assetClass === "crypto" ? DEFAULTS.crypto : DEFAULTS.stock);
     }
@@ -1839,18 +1986,26 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     async function loadCandles() {
       setLoading(true);
       setError("");
+      setMarketNote("");
       try {
         const resp = await fetch(`/api/market/candles?symbol=${encodeURIComponent(symbol)}&asset=${assetClass}&interval=${interval}`);
-        const data = await resp.json();
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          const detail = data?.error ? `Market feed unavailable (${data.error}).` : `Market feed unavailable (${resp.status}).`;
+          throw new Error(detail);
+        }
         if (!mounted) return;
         const rows = Array.isArray(data.candles) ? data.candles : [];
-        if (rows.length) {
-          setCandles(rows);
-          setError("");
-        }
+        setCandles(rows);
         setDataSource(data.source || "unavailable");
+        const notes = [];
+        if (data.warning) notes.push(data.warning);
+        if (data.interval && data.interval !== interval) notes.push(`Showing ${data.interval} bars for this feed.`);
+        setMarketNote(notes.join(" "));
         if (data.error) {
           setError(`Market feed unavailable (${data.error}).`);
+        } else if (!rows.length) {
+          setError("No candles available.");
         }
       } catch (err) {
         if (!mounted) return;
@@ -3208,9 +3363,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     background: "linear-gradient(135deg, #f7f8fb 0%, #eef3ff 35%, #fef7f1 100%)",
     borderRadius: fullPage ? 0 : 16,
     padding: fullPage ? "24px 28px" : 16,
-    border: fullPage ? "none" : "1px solid #e5e7eb",
+    border: fullPage ? "none" : "1px solid var(--panel-border)",
     fontFamily: "'Space Grotesk', 'IBM Plex Sans', sans-serif",
-    color: "#0f172a"
+    color: "var(--text-primary)"
   };
 
   return (
@@ -3221,7 +3376,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>Aika Trading Terminal</div>
-          <div style={{ fontSize: 12, color: "#475569" }}>Commercial-grade view with real-time feeds (Coinbase live; Alpaca optional for stocks).</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Commercial-grade view with real-time feeds (Coinbase live; Alpaca optional for stocks).</div>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "flex-end" }}>
           <div style={{ display: "flex", gap: 6 }}>
@@ -3240,8 +3395,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 style={{
                   padding: "6px 10px",
                   borderRadius: 10,
-                  border: tradingTab === tab.id ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
-                  background: tradingTab === tab.id ? "#e0f2fe" : "#fff",
+                  border: tradingTab === tab.id ? "1px solid var(--accent)" : "1px solid var(--panel-border-strong)",
+                  background: tradingTab === tab.id ? "var(--chip-bg)" : "#fff",
                   fontWeight: 600
                 }}
               >
@@ -3251,15 +3406,15 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
           {tradingTab === "terminal" && (
             <>
-              <div style={{ fontSize: 12, color: "#64748b" }}>Asset</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Asset</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   onClick={() => switchAssetClass("crypto")}
                   style={{
                     padding: "6px 10px",
                     borderRadius: 999,
-                    border: assetClass === "crypto" ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
-                    background: assetClass === "crypto" ? "#e0f2fe" : "#fff"
+                    border: assetClass === "crypto" ? "1px solid var(--accent)" : "1px solid var(--panel-border-strong)",
+                    background: assetClass === "crypto" ? "var(--chip-bg)" : "#fff"
                   }}
                 >
                   Crypto
@@ -3269,8 +3424,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   style={{
                     padding: "6px 10px",
                     borderRadius: 999,
-                    border: assetClass === "stock" ? "2px solid #0ea5e9" : "1px solid #cbd5f5",
-                    background: assetClass === "stock" ? "#e0f2fe" : "#fff"
+                    border: assetClass === "stock" ? "1px solid var(--accent)" : "1px solid var(--panel-border-strong)",
+                    background: assetClass === "stock" ? "var(--chip-bg)" : "#fff"
                   }}
                 >
                   Stocks
@@ -3282,8 +3437,8 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             <a href="/trading" target="_blank" rel="noreferrer" style={{
               padding: "8px 12px",
               borderRadius: 10,
-              border: "1px solid #0ea5e9",
-              color: "#0ea5e9",
+              border: "1px solid var(--accent)",
+              color: "var(--accent)",
               textDecoration: "none",
               fontWeight: 600
             }}>
@@ -3300,18 +3455,18 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         gap: 16
       }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Ticker</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 value={symbol}
                 onChange={(e) => { setSymbol(e.target.value.toUpperCase()); setSymbolTouched(true); }}
-                style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5", fontSize: 14 }}
+                style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", fontSize: 14 }}
               />
               <select
                 value={interval}
                 onChange={(e) => setInterval(e.target.value)}
-                style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
               >
                 {INTERVALS.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
               </select>
@@ -3323,12 +3478,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <div style={{ fontSize: 12, color: change >= 0 ? "#16a34a" : "#dc2626" }}>
                 {change >= 0 ? "+" : ""}{formatNumber(change)} ({formatNumber(changePct, 2)}%)
               </div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>Data: {dataSource}{liveTag}{loading ? " (loading...)" : ""}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Data: {dataSource}{liveTag}{loading ? " (loading...)" : ""}</div>
               {error && <div style={{ fontSize: 11, color: "#b91c1c" }}>{error}</div>}
+              {marketNote && <div style={{ fontSize: 11, color: "#b45309" }}>{marketNote}</div>}
             </div>
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Order Ticket</div>
             <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
               <label>
@@ -3336,7 +3492,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <select
                   value={order.broker}
                   onChange={(e) => setOrder({ ...order, broker: e.target.value })}
-                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="coinbase">Coinbase</option>
                   <option value="alpaca">Alpaca</option>
@@ -3348,14 +3504,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   flex: 1,
                   padding: "6px 0",
                   borderRadius: 8,
-                  border: order.side === "buy" ? "2px solid #22c55e" : "1px solid #cbd5f5",
+                  border: order.side === "buy" ? "2px solid #22c55e" : "1px solid var(--panel-border-strong)",
                   background: order.side === "buy" ? "#dcfce7" : "#fff"
                 }}>Buy</button>
                 <button onClick={() => setOrder({ ...order, side: "sell" })} style={{
                   flex: 1,
                   padding: "6px 0",
                   borderRadius: 8,
-                  border: order.side === "sell" ? "2px solid #ef4444" : "1px solid #cbd5f5",
+                  border: order.side === "sell" ? "2px solid #ef4444" : "1px solid var(--panel-border-strong)",
                   background: order.side === "sell" ? "#fee2e2" : "#fff"
                 }}>Sell</button>
               </div>
@@ -3364,7 +3520,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <input
                   value={order.quantity}
                   onChange={(e) => setOrder({ ...order, quantity: e.target.value })}
-                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
               <label>
@@ -3372,7 +3528,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <select
                   value={order.orderType}
                   onChange={(e) => setOrder({ ...order, orderType: e.target.value })}
-                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="market">Market</option>
                   <option value="limit">Limit</option>
@@ -3384,7 +3540,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <input
                     value={order.limitPrice}
                     onChange={(e) => setOrder({ ...order, limitPrice: e.target.value })}
-                    style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                    style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
               )}
@@ -3393,7 +3549,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <select
                   value={order.mode}
                   onChange={(e) => setOrder({ ...order, mode: e.target.value })}
-                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="paper">Paper</option>
                   <option value="live">Live</option>
@@ -3401,18 +3557,18 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               </label>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button onClick={handlePropose} style={{ flex: 1, padding: "8px 10px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+              <button onClick={handlePropose} style={{ flex: 1, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                 Propose Trade
               </button>
               <button onClick={handleApproveExecute} disabled={!approvalId} style={{ flex: 1, padding: "8px 10px", borderRadius: 10, border: "1px solid #0f172a", background: "#0f172a", color: "#fff" }}>
                 Approve + Execute
               </button>
             </div>
-            <div style={{ fontSize: 11, color: "#64748b", marginTop: 8 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
               {tradeStatus || "All trades require approval by default."}
             </div>
-            {approvalId && <div style={{ fontSize: 11, color: "#2563eb" }}>Approval ID: {approvalId}</div>}
-            {orderId && <div style={{ fontSize: 11, color: "#2563eb" }}>Order ID: {orderId}</div>}
+            {approvalId && <div style={{ fontSize: 11, color: "var(--accent)" }}>Approval ID: {approvalId}</div>}
+            {orderId && <div style={{ fontSize: 11, color: "var(--accent)" }}>Order ID: {orderId}</div>}
             <label style={{ marginTop: 8, fontSize: 12, display: "block" }}>
               Trading API Base URL
               <input
@@ -3421,12 +3577,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   setTradeApiUrl(e.target.value);
                   try { window.localStorage.setItem("trading_api_url", e.target.value); } catch {}
                 }}
-                style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5", marginTop: 4 }}
+                style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", marginTop: 4 }}
               />
             </label>
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Post-Trade Outcome</div>
             <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
               <label>
@@ -3435,7 +3591,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={outcome.pnl}
                   onChange={(e) => setOutcome({ ...outcome, pnl: e.target.value })}
                   placeholder="-120.50"
-                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
               <label>
@@ -3444,7 +3600,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={outcome.pnlPct}
                   onChange={(e) => setOutcome({ ...outcome, pnlPct: e.target.value })}
                   placeholder="-1.8"
-                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
               <label>
@@ -3453,17 +3609,214 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={outcome.notes}
                   onChange={(e) => setOutcome({ ...outcome, notes: e.target.value })}
                   rows={3}
-                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #cbd5f5" }}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
-              <button onClick={recordOutcome} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+              <button onClick={recordOutcome} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                 Record Outcome
               </button>
-              {lessonStatus && <div style={{ fontSize: 11, color: "#2563eb" }}>{lessonStatus}</div>}
+              {lessonStatus && <div style={{ fontSize: 11, color: "var(--accent)" }}>{lessonStatus}</div>}
             </div>
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontWeight: 600 }}>Manual Trade Tracker</div>
+              <button
+                onClick={() => setManualTradeForm(prev => ({ ...prev, symbol, assetClass }))}
+                style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg-soft)", fontSize: 11 }}
+              >
+                Use Current
+              </button>
+            </div>
+            {manualTradeSummary && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 10, fontSize: 11 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 8, background: "var(--panel-bg-soft)" }}>
+                  <div style={{ color: "var(--text-muted)" }}>Total PnL</div>
+                  <div style={{ fontWeight: 700, color: manualTradeSummary.totalPnl >= 0 ? "#16a34a" : "#dc2626" }}>
+                    {formatNumber(manualTradeSummary.totalPnl)}
+                  </div>
+                </div>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 8, background: "var(--panel-bg-soft)" }}>
+                  <div style={{ color: "var(--text-muted)" }}>Win Rate</div>
+                  <div style={{ fontWeight: 700 }}>
+                    {formatNumber(manualTradeSummary.winRate, 1)}%
+                  </div>
+                </div>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 8, background: "var(--panel-bg-soft)" }}>
+                  <div style={{ color: "var(--text-muted)" }}>Avg PnL %</div>
+                  <div style={{ fontWeight: 700 }}>
+                    {formatNumber(manualTradeSummary.avgPnlPct, 2)}%
+                  </div>
+                </div>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 8, background: "var(--panel-bg-soft)" }}>
+                  <div style={{ color: "var(--text-muted)" }}>Closed / Open</div>
+                  <div style={{ fontWeight: 700 }}>
+                    {manualTradeSummary.closed} / {manualTradeSummary.open}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, fontSize: 12 }}>
+              <label>
+                Symbol
+                <input
+                  value={manualTradeForm.symbol}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, symbol: e.target.value.toUpperCase() })}
+                  placeholder="AAPL"
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label>
+                Asset
+                <select
+                  value={manualTradeForm.assetClass}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, assetClass: e.target.value })}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                >
+                  <option value="stock">Stock</option>
+                  <option value="crypto">Crypto</option>
+                </select>
+              </label>
+              <label>
+                Side
+                <select
+                  value={manualTradeForm.side}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, side: e.target.value })}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                >
+                  <option value="buy">Buy / Long</option>
+                  <option value="sell">Sell / Short</option>
+                </select>
+              </label>
+              <label>
+                Quantity
+                <input
+                  value={manualTradeForm.quantity}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, quantity: e.target.value })}
+                  placeholder="10"
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label>
+                Entry Price
+                <input
+                  value={manualTradeForm.entryPrice}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, entryPrice: e.target.value })}
+                  placeholder="150.00"
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label>
+                Exit Price
+                <input
+                  value={manualTradeForm.exitPrice}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, exitPrice: e.target.value })}
+                  placeholder="162.50"
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label>
+                Fees
+                <input
+                  value={manualTradeForm.fees}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, fees: e.target.value })}
+                  placeholder="1.50"
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label>
+                Opened At
+                <input
+                  type="datetime-local"
+                  value={manualTradeForm.openedAt}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, openedAt: e.target.value })}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label>
+                Closed At
+                <input
+                  type="datetime-local"
+                  value={manualTradeForm.closedAt}
+                  onChange={(e) => setManualTradeForm({ ...manualTradeForm, closedAt: e.target.value })}
+                  style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+            </div>
+            <label style={{ display: "block", marginTop: 8, fontSize: 12 }}>
+              Notes
+              <textarea
+                value={manualTradeForm.notes}
+                onChange={(e) => setManualTradeForm({ ...manualTradeForm, notes: e.target.value })}
+                rows={2}
+                style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", marginTop: 4 }}
+              />
+            </label>
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button
+                onClick={submitManualTrade}
+                disabled={manualTradeSaving}
+                style={{ flex: 1, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
+              >
+                {manualTradeEditingId ? "Update Trade" : "Save Trade"}
+              </button>
+              {manualTradeEditingId && (
+                <button
+                  onClick={resetManualTradeForm}
+                  style={{ flex: 1, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg)", fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            {manualTradeStatus && <div style={{ fontSize: 11, color: "var(--accent)", marginTop: 6 }}>{manualTradeStatus}</div>}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Recent Trades</div>
+              {manualTradeLoading && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading trades...</div>}
+              {!manualTradeLoading && manualTrades.length === 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No manual trades yet.</div>
+              )}
+              <div style={{ display: "grid", gap: 8, maxHeight: 220, overflowY: "auto" }}>
+                {manualTrades.map(trade => {
+                  const pnl = trade.pnl;
+                  const pnlPct = trade.pnlPct;
+                  const pnlColor = pnl == null ? "#475569" : (pnl >= 0 ? "#16a34a" : "#dc2626");
+                  return (
+                    <div key={trade.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, background: "var(--panel-bg-soft)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12 }}>
+                          {trade.symbol} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>{trade.side?.toUpperCase()}</span>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: pnlColor }}>
+                          {pnl == null ? "Open" : `${formatNumber(pnl)} (${formatNumber(pnlPct, 2)}%)`}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                        Qty {trade.quantity} · Entry {formatNumber(trade.entryPrice)} · Exit {trade.exitPrice != null ? formatNumber(trade.exitPrice) : "--"} · Fees {formatNumber(trade.fees || 0)}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                        <button
+                          onClick={() => editManualTrade(trade)}
+                          style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg)", fontSize: 11 }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => removeManualTrade(trade.id)}
+                          style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #fecaca", background: "#fee2e2", fontSize: 11, color: "#b91c1c" }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Glossary</div>
             <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
               {GLOSSARY.map(item => (
@@ -3476,14 +3829,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 12, border: "1px solid var(--panel-border)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div style={{ fontWeight: 600 }}>Price Action</div>
               <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   Pattern: {latestSignal?.pattern || "--"} {latestSignal?.bias ? `(${latestSignal.bias})` : ""}
                 </div>
-                {liveStatus && <div style={{ fontSize: 11, color: "#0ea5e9" }}>{liveStatus}</div>}
+                {liveStatus && <div style={{ fontSize: 11, color: "var(--accent)" }}>{liveStatus}</div>}
               </div>
             </div>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8, fontSize: 11, alignItems: "center" }}>
@@ -3499,14 +3852,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} />
                 MACD
               </label>
-              <span style={{ color: "#94a3b8" }}>Scroll to zoom • Drag to pan</span>
+              <span style={{ color: "var(--text-muted)" }}>Scroll to zoom • Drag to pan</span>
               {assetClass === "stock" && (
                 <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   Alpaca feed
                   <select
                     value={alpacaFeed}
                     onChange={(e) => setAlpacaFeed(e.target.value)}
-                    style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #cbd5f5" }}
+                    style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                   >
                     <option value="iex">IEX (default)</option>
                     <option value="sip">SIP (paid)</option>
@@ -3525,20 +3878,20 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <button
                   key={range.label}
                   onClick={() => applyRangeDays(range.days)}
-                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}
                 >
                   {range.label}
                 </button>
               ))}
               <button
                 onClick={() => updateChartView({ window: Math.max(20, viewRange.total), offset: 0 })}
-                style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+                style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)", fontSize: 11 }}
               >
                 All
               </button>
               <button
                 onClick={resetChartView}
-                style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+                style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)", fontSize: 11 }}
               >
                 Reset
               </button>
@@ -3597,11 +3950,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 12, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Signal Highlights</div>
               {latestSignal ? (
-                <div style={{ marginBottom: 10, padding: 8, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase" }}>Latest signal</div>
+                <div style={{ marginBottom: 10, padding: 8, borderRadius: 10, background: "var(--panel-bg-soft)", border: "1px solid var(--panel-border)" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" }}>Latest signal</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                     <span style={{
                       fontSize: 10,
@@ -3614,7 +3967,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     </span>
                     <div style={{ fontWeight: 600, fontSize: 12 }}>{latestSignal.pattern}</div>
                   </div>
-                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                     {latestSignal.note}
                   </div>
                 </div>
@@ -3629,38 +3982,38 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         borderRadius: 999,
                         background: signal.bias === "bullish" ? "#22c55e" : signal.bias === "bearish" ? "#ef4444" : "#94a3b8"
                       }} />
-                      <div style={{ fontSize: 12, color: "#334155" }}>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                         {signal.pattern} · {signal.bias}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div style={{ fontSize: 12, color: "#64748b" }}>Not enough data.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Not enough data.</div>
               )}
             </div>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 12, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Market Depth</div>
-              <div style={{ fontSize: 12, color: "#64748b" }}>Connect a broker WS feed to render live depth.</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Connect a broker WS feed to render live depth.</div>
               <div style={{ marginTop: 8, height: 120, background: "linear-gradient(180deg, #e0f2fe 0%, #fef3c7 100%)", borderRadius: 10 }} />
             </div>
           </div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 12, border: "1px solid var(--panel-border)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <div style={{ fontWeight: 600 }}>Watchlists</div>
-              {watchlistSaving && <span style={{ fontSize: 10, color: "#94a3b8" }}>Saving...</span>}
+              {watchlistSaving && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Saving...</span>}
             </div>
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
               Search tickers and add to your tracked stocks or crypto lists (used for scenarios and recommendations).
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
               <select
                 value={watchlistAssetClass}
                 onChange={(e) => setWatchlistAssetClass(e.target.value)}
-                style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #cbd5f5", fontSize: 12 }}
+                style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid var(--panel-border-strong)", fontSize: 12 }}
               >
                 <option value="stock">Stocks</option>
                 <option value="crypto">Crypto</option>
@@ -3669,20 +4022,20 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 value={watchlistQuery}
                 onChange={(e) => setWatchlistQuery(e.target.value)}
                 placeholder="Search ticker or name"
-                style={{ flex: 1, minWidth: 180, padding: "6px 8px", borderRadius: 8, border: "1px solid #cbd5f5", fontSize: 12 }}
+                style={{ flex: 1, minWidth: 180, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--panel-border-strong)", fontSize: 12 }}
               />
             </div>
             {watchlistResults.length > 0 && (
               <div style={{ display: "grid", gap: 6, maxHeight: 160, overflow: "auto", marginBottom: 8 }}>
                 {watchlistResults.map((item, idx) => (
-                  <div key={`${item.symbol}-${idx}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 10, padding: 6 }}>
+                  <div key={`${item.symbol}-${idx}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid var(--panel-border)", borderRadius: 10, padding: 6 }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 12 }}>{item.symbol}</div>
-                      <div style={{ fontSize: 10, color: "#64748b" }}>{item.name || item.exchange || item.assetClass}</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{item.name || item.exchange || item.assetClass}</div>
                     </div>
                     <button
                       onClick={() => addToWatchlist(item)}
-                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 11 }}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontSize: 11 }}
                     >
                       Add
                     </button>
@@ -3694,14 +4047,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <div>
                 <div style={{ fontWeight: 600, marginBottom: 4 }}>Tracked Stocks</div>
                 {(trackedStocks || []).length === 0 ? (
-                  <div style={{ color: "#94a3b8" }}>No stocks tracked yet.</div>
+                  <div style={{ color: "var(--text-muted)" }}>No stocks tracked yet.</div>
                 ) : (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {trackedStocks.map(symbolValue => (
                       <button
                         key={`stock-${symbolValue}`}
                         onClick={() => removeFromWatchlist(symbolValue, "stock")}
-                        style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)", fontSize: 11 }}
                       >
                         {symbolValue} ×
                       </button>
@@ -3712,14 +4065,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <div>
                 <div style={{ fontWeight: 600, marginBottom: 4 }}>Tracked Crypto</div>
                 {(trackedCryptos || []).length === 0 ? (
-                  <div style={{ color: "#94a3b8" }}>No crypto tracked yet.</div>
+                  <div style={{ color: "var(--text-muted)" }}>No crypto tracked yet.</div>
                 ) : (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {trackedCryptos.map(symbolValue => (
                       <button
                         key={`crypto-${symbolValue}`}
                         onClick={() => removeFromWatchlist(symbolValue, "crypto")}
-                        style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)", fontSize: 11 }}
                       >
                         {symbolValue} ×
                       </button>
@@ -3728,14 +4081,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 )}
               </div>
             </div>
-            {watchlistStatus && <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>{watchlistStatus}</div>}
+            {watchlistStatus && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>{watchlistStatus}</div>}
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 12, border: "1px solid var(--panel-border)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <div style={{ fontWeight: 600 }}>Recommendations</div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase" }}>
+                <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase" }}>
                   {recommendationsSource || "llm"}
                 </span>
                 <button onClick={loadRecommendations} style={{ padding: "4px 8px", borderRadius: 8 }}>
@@ -3743,7 +4096,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 </button>
               </div>
             </div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                 Ranked picks with rationale (LLM + trading knowledge).
               </div>
             {recommendationsWarnings.length > 0 && (
@@ -3752,23 +4105,23 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               </div>
             )}
             {weeklyPlan.length > 0 && (
-              <div style={{ marginTop: 8, padding: 8, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+              <div style={{ marginTop: 8, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)" }}>
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>Weekly Action Plan</div>
-                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
                   Designed for slower, weekly reviews (not intraday trading).
                 </div>
                 <div style={{ display: "grid", gap: 6 }}>
                   {weeklyPlan.map((item, idx) => (
                     <div key={`${item.symbol}-${idx}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11 }}>
                       <div style={{ fontWeight: 600 }}>{item.symbol}</div>
-                      <div style={{ color: "#475569" }}>{item.signal?.action || "HOLD"} · score {item.signal?.score}</div>
+                      <div style={{ color: "var(--text-muted)" }}>{item.signal?.action || "HOLD"} · score {item.signal?.score}</div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
             {recommendationsLoading && (
-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Loading picks…</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Loading picks…</div>
             )}
             {recommendationsError && (
               <div style={{ fontSize: 11, color: "#b91c1c", marginTop: 6 }}>{recommendationsError}</div>
@@ -3776,12 +4129,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Crypto</div>
-                {cryptoRecs.length === 0 && <div style={{ fontSize: 11, color: "#94a3b8" }}>No crypto picks.</div>}
+                {cryptoRecs.length === 0 && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No crypto picks.</div>}
                   {cryptoRecs.slice(0, 6).map((item, idx) => (
                     <div
                       key={`${item.symbol}-${idx}`}
                       onClick={() => handleRecommendationAnalyze(item)}
-                      style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, marginBottom: 6, cursor: "pointer" }}
+                      style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, marginBottom: 6, cursor: "pointer" }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <div style={{ fontWeight: 600 }}>{idx + 1}. {item.symbol}</div>
@@ -3816,34 +4169,34 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                           )}
                           <button
                             onClick={(e) => { e.stopPropagation(); handleRecommendationAnalyze(item); }}
-                            style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 10 }}
+                            style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontSize: 10 }}
                           >
                             Analyze
                           </button>
                         </div>
                       </div>
                       {Number.isFinite(item.confidence) && (
-                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                        <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                           Confidence: {(Number(item.confidence) * 100).toFixed(0)}%
                         </div>
                     )}
                     {item.signal?.score != null && (
-                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                         Signal score: {item.signal.score} (horizon {item.signal.horizonDays}d)
                       </div>
                     )}
-                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{item.abstract}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{item.abstract}</div>
                   </div>
                 ))}
               </div>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Stocks</div>
-                {stockRecs.length === 0 && <div style={{ fontSize: 11, color: "#94a3b8" }}>No stock picks.</div>}
+                {stockRecs.length === 0 && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No stock picks.</div>}
                   {stockRecs.slice(0, 6).map((item, idx) => (
                     <div
                       key={`${item.symbol}-${idx}`}
                       onClick={() => handleRecommendationAnalyze(item)}
-                      style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, marginBottom: 6, cursor: "pointer" }}
+                      style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, marginBottom: 6, cursor: "pointer" }}
                     >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div style={{ fontWeight: 600 }}>{idx + 1}. {item.symbol}</div>
@@ -3878,32 +4231,32 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         )}
                           <button
                             onClick={(e) => { e.stopPropagation(); handleRecommendationAnalyze(item); }}
-                            style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 10 }}
+                            style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontSize: 10 }}
                           >
                             Analyze
                           </button>
                       </div>
                     </div>
                     {Number.isFinite(item.confidence) && (
-                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                         Confidence: {(Number(item.confidence) * 100).toFixed(0)}%
                       </div>
                     )}
                     {item.signal?.score != null && (
-                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                         Signal score: {item.signal.score} (horizon {item.signal.horizonDays}d)
                       </div>
                     )}
-                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{item.abstract}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{item.abstract}</div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb", height: "100%" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 12, border: "1px solid var(--panel-border)", height: "100%" }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Aika Trader</div>
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
               Educational only. Ask for scenarios, risks, or ticker checks.
             </div>
             {tradingProfileError && (
@@ -3916,7 +4269,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <div key={`${m.role}-${idx}`} style={{
                   padding: 8,
                   borderRadius: 10,
-                  background: m.role === "assistant" ? "#f1f5f9" : "#e0f2fe",
+                  background: m.role === "assistant" ? "#f1f5f9" : "var(--chip-bg)",
                   alignSelf: m.role === "assistant" ? "flex-start" : "flex-end",
                   maxWidth: "95%"
                 }}>
@@ -3929,9 +4282,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 value={assistantInput}
                 onChange={(e) => setAssistantInput(e.target.value)}
                 placeholder={`Ask about ${symbol}...`}
-                style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
               />
-              <button onClick={() => sendAssistant()} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+              <button onClick={() => sendAssistant()} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                 Ask
               </button>
             </div>
@@ -3946,7 +4299,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <button
                     key={prompt}
                     onClick={() => { sendAssistant(prompt); }}
-                    style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", textAlign: "left", fontSize: 11 }}
+                    style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", textAlign: "left", fontSize: 11 }}
                   >
                     {prompt}
                   </button>
@@ -3954,28 +4307,28 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             </div>
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 12, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 12, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Loss Lessons (RAG)</div>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <input
                 value={lessonQuery}
                 onChange={(e) => setLessonQuery(e.target.value)}
                 placeholder={`Ask about past losses on ${symbol}`}
-                style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
               />
-              <button onClick={fetchLessons} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+              <button onClick={fetchLessons} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                 Fetch
               </button>
             </div>
             {lessons.length === 0 ? (
-              <div style={{ fontSize: 12, color: "#64748b" }}>No lessons fetched yet.</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No lessons fetched yet.</div>
             ) : (
               <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
                 {lessons.map((lesson, idx) => (
-                  <div key={`${lesson.outcome_id || idx}`} style={{ padding: 8, borderRadius: 10, background: "#f8fafc" }}>
+                  <div key={`${lesson.outcome_id || idx}`} style={{ padding: 8, borderRadius: 10, background: "var(--panel-bg-soft)" }}>
                     <div style={{ fontWeight: 600 }}>{lesson.symbol || symbol}</div>
                     <div>{lesson.summary || "Loss lesson recorded."}</div>
-                    {lesson.tags && <div style={{ fontSize: 11, color: "#475569" }}>Tags: {lesson.tags.join(", ")}</div>}
+                    {lesson.tags && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Tags: {lesson.tags.join(", ")}</div>}
                   </div>
                 ))}
               </div>
@@ -3988,18 +4341,18 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       {tradingTab === "paper" && (
         <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.5fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Beginner Checklist</div>
-              <div style={{ fontSize: 12, color: "#64748b", display: "grid", gap: 6 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", display: "grid", gap: 6 }}>
                 <div>1) Decide direction: bullish, bearish, or neutral.</div>
                 <div>2) Pick your max loss first. Never size from profit.</div>
                 <div>3) Check breakeven and probability ITM.</div>
                 <div>4) Keep position size small while learning.</div>
               </div>
             </div>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Paper Runner</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Deterministic synthetic data runs through the core strategy stack and logs fills.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
@@ -4007,13 +4360,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={coreSymbols}
                   onChange={(e) => setCoreSymbols(e.target.value)}
                   placeholder="Symbols (comma-separated)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <select
                     value={coreStrategy}
                     onChange={(e) => setCoreStrategy(e.target.value)}
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   >
                     {CORE_STRATEGIES.map(item => (
                       <option key={item.value} value={item.value}>{item.label}</option>
@@ -4022,7 +4375,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <select
                     value={coreTimeframe}
                     onChange={(e) => setCoreTimeframe(e.target.value)}
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   >
                     {INTERVALS.map(item => (
                       <option key={item.value} value={item.value}>{item.label}</option>
@@ -4032,37 +4385,37 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
                     onClick={runCorePaper}
-                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                   >
                     Run Paper Cycle
                   </button>
                   <button
                     onClick={() => { fetchCoreDashboard(); fetchCoreTrades(); }}
-                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontWeight: 600 }}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontWeight: 600 }}
                   >
                     Refresh
                   </button>
                 </div>
-                {coreStatus && <div style={{ fontSize: 12, color: "#475569" }}>{coreStatus}</div>}
+                {coreStatus && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{coreStatus}</div>}
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Trade Log</div>
               {coreTrades.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No fills yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No fills yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 8, maxHeight: 320, overflow: "auto" }}>
                   {coreTrades.map((fill, idx) => (
-                    <div key={`${fill.order_id || idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                    <div key={`${fill.order_id || idx}`} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <div style={{ fontWeight: 600 }}>{fill.symbol}</div>
                         <span style={{ fontSize: 10, color: fill.side === "buy" ? "#16a34a" : "#dc2626" }}>{fill.side}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         Qty {Number(fill.quantity || 0).toFixed(4)} @ {formatNumber(fill.price || 0, 4)}
                       </div>
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
                         Fee {formatNumber(fill.fee || 0, 4)} | {fill.filled_at || ""}
                       </div>
                     </div>
@@ -4073,10 +4426,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Latest Run</div>
               {!coreDashboard ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No paper runs yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No paper runs yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
                   <div><strong>Run:</strong> {coreDashboard.run_id}</div>
@@ -4097,10 +4450,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Risk Flags</div>
               {(coreDashboard?.risk_flags || []).length === 0 ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No risk flags.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No risk flags.</div>
               ) : (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {(coreDashboard.risk_flags || []).map(flag => (
@@ -4112,7 +4465,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Equity Curve</div>
               <IndicatorPanel
                 title="Equity"
@@ -4130,32 +4483,32 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Regime Mix</div>
               {regimeSummary.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No regime labels yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No regime labels yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 6 }}>
                   {regimeSummary.map(item => (
                     <div key={item.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                       <span>{item.label}</span>
-                      <span style={{ color: "#64748b" }}>{(item.pct * 100).toFixed(1)}%</span>
+                      <span style={{ color: "var(--text-muted)" }}>{(item.pct * 100).toFixed(1)}%</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Ensemble Weights</div>
               {Object.keys(ensembleWeights).length === 0 ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No weights available.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No weights available.</div>
               ) : (
                 <div style={{ display: "grid", gap: 6 }}>
                   {Object.entries(ensembleWeights).map(([name, weight]) => (
                     <div key={name} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                       <span>{name}</span>
-                      <span style={{ color: "#64748b" }}>{(Number(weight) * 100).toFixed(1)}%</span>
+                      <span style={{ color: "var(--text-muted)" }}>{(Number(weight) * 100).toFixed(1)}%</span>
                     </div>
                   ))}
                 </div>
@@ -4168,9 +4521,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       {tradingTab === "backtest" && (
         <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.5fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Backtest Wizard</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Paste a symbol, pick a strategy, and click Run. Grid search is optional.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
@@ -4178,13 +4531,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={backtestSymbol}
                   onChange={(e) => setBacktestSymbol(e.target.value.toUpperCase())}
                   placeholder="Symbol (e.g., AAPL)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <select
                     value={backtestStrategy}
                     onChange={(e) => setBacktestStrategy(e.target.value)}
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   >
                     {CORE_STRATEGIES.map(item => (
                       <option key={item.value} value={item.value}>{item.label}</option>
@@ -4193,7 +4546,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <select
                     value={backtestTimeframe}
                     onChange={(e) => setBacktestTimeframe(e.target.value)}
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   >
                     {INTERVALS.map(item => (
                       <option key={item.value} value={item.value}>{item.label}</option>
@@ -4205,24 +4558,24 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   onChange={(e) => setBacktestGrid(e.target.value)}
                   rows={5}
                   placeholder='Grid JSON (optional) e.g. {"lookback":[20,50,80]}'
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5", fontFamily: "'IBM Plex Mono', monospace" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", fontFamily: "'IBM Plex Mono', monospace" }}
                 />
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     onClick={runBacktest}
-                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                   >
                     Run Backtest
                   </button>
                 </div>
-                {backtestStatus && <div style={{ fontSize: 12, color: "#475569" }}>{backtestStatus}</div>}
+                {backtestStatus && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{backtestStatus}</div>}
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Grid Search</div>
               {!backtestResult?.grid?.best ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>Run a backtest to see best params.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Run a backtest to see best params.</div>
               ) : (
                 <div style={{ fontSize: 12, display: "grid", gap: 6 }}>
                   <div><strong>Objective:</strong> {backtestResult.grid.objective}</div>
@@ -4234,10 +4587,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Backtest Metrics</div>
               {!backtestResult ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No backtest yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No backtest yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
                   <div><strong>Run ID:</strong> {backtestResult.run_id}</div>
@@ -4251,18 +4604,18 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Artifacts (Direct)</div>
                 <button
                   onClick={() => loadBacktestArtifacts(backtestResult?.run_id, backtestResult?.grid?.run_id)}
-                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}
                 >
                   Reload
                 </button>
               </div>
               {!backtestArtifacts ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>Run a backtest to load artifacts.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Run a backtest to load artifacts.</div>
               ) : (
                 <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
                   <div><strong>Folder:</strong> {backtestArtifacts.base_dir}</div>
@@ -4273,21 +4626,21 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 </div>
               )}
               {backtestArtifactsStatus && (
-                <div style={{ marginTop: 8, fontSize: 12, color: "#475569" }}>{backtestArtifactsStatus}</div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>{backtestArtifactsStatus}</div>
               )}
-              <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>
+              <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
                 Includes config.json, metrics.json, equity_curve.json, trades.csv, grid_results.json, walk_forward.json.
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Walk-Forward Windows</div>
               {!backtestResult?.walk_forward?.length ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No walk-forward output yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No walk-forward output yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 6, maxHeight: 240, overflow: "auto" }}>
                   {backtestResult.walk_forward.slice(0, 6).map((item, idx) => (
-                    <div key={`${item.test_start}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, fontSize: 11 }}>
+                    <div key={`${item.test_start}-${idx}`} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, fontSize: 11 }}>
                       <div><strong>Test:</strong> {item.test_start} to {item.test_end}</div>
                       <div>Sharpe: {formatNumber(item.metrics?.sharpe || 0, 2)} | MaxDD: {formatNumber(item.metrics?.max_drawdown || 0, 2)}</div>
                     </div>
@@ -4302,9 +4655,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       {tradingTab === "options" && (
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.4fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Options Search (Step 1)</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Type a ticker and load a simple options chain. Default provider is synthetic.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
@@ -4312,12 +4665,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={optionsSymbol}
                   onChange={(e) => setOptionsSymbol(e.target.value.toUpperCase())}
                   placeholder="Underlying symbol (e.g., AAPL)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <select
                   value={optionsProvider}
                   onChange={(e) => setOptionsProvider(e.target.value)}
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="synthetic">Synthetic (demo)</option>
                   <option value="polygon">Polygon (API key required)</option>
@@ -4327,13 +4680,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsChainMinDays}
                     onChange={(e) => setOptionsChainMinDays(e.target.value)}
                     placeholder="Min days (7)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsChainMaxDays}
                     onChange={(e) => setOptionsChainMaxDays(e.target.value)}
                     placeholder="Max days (60)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -4341,66 +4694,66 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsStrikeMin}
                     onChange={(e) => setOptionsStrikeMin(e.target.value)}
                     placeholder="Strike min"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsStrikeMax}
                     onChange={(e) => setOptionsStrikeMax(e.target.value)}
                     placeholder="Strike max"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
-                <div style={{ fontSize: 11, color: "#94a3b8" }}>Optional expiry range:</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Optional expiry range:</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <input
                     type="date"
                     value={optionsExpiryFrom}
                     onChange={(e) => setOptionsExpiryFrom(e.target.value)}
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     type="date"
                     value={optionsExpiryTo}
                     onChange={(e) => setOptionsExpiryTo(e.target.value)}
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <button
                   onClick={fetchOptionsChain}
-                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                 >
                   Load Chain
                 </button>
-                {optionsStatus && <div style={{ fontSize: 12, color: "#475569" }}>{optionsStatus}</div>}
+                {optionsStatus && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{optionsStatus}</div>}
                 {optionsUnderlying ? (
-                  <div style={{ fontSize: 12, color: "#475569" }}>Underlying price: {formatNumber(optionsUnderlying, 2)}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Underlying price: {formatNumber(optionsUnderlying, 2)}</div>
                 ) : null}
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Options Chain (Simplified)</div>
               <input
                 value={optionsFilter}
                 onChange={(e) => setOptionsFilter(e.target.value)}
                 placeholder="Filter by strike, expiry, call/put"
-                style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5", marginBottom: 8 }}
+                style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", marginBottom: 8 }}
               />
               {optionsChain.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>Load a chain to see contracts.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Load a chain to see contracts.</div>
               ) : (
                 <div style={{ display: "grid", gap: 6, maxHeight: 320, overflow: "auto" }}>
                   {filteredOptions.slice(0, 25).map((opt, idx) => (
-                    <div key={`${opt.symbol}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, fontSize: 11 }}>
+                    <div key={`${opt.symbol}-${idx}`} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, fontSize: 11 }}>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <div style={{ fontWeight: 600 }}>{opt.option_type.toUpperCase()} {opt.strike}</div>
-                        <div style={{ color: "#64748b" }}>{opt.expiration}</div>
+                        <div style={{ color: "var(--text-muted)" }}>{opt.expiration}</div>
                       </div>
-                      <div style={{ color: "#64748b" }}>
+                      <div style={{ color: "var(--text-muted)" }}>
                         Bid {formatNumber(opt.bid || 0, 2)} | Ask {formatNumber(opt.ask || 0, 2)} | IV {(Number(opt.iv || 0) * 100).toFixed(1)}%
                       </div>
                       {opt.greeks && (
-                        <div style={{ color: "#94a3b8" }}>
+                        <div style={{ color: "var(--text-muted)" }}>
                           Delta {formatNumber(opt.greeks.delta || 0, 2)} | Gamma {formatNumber(opt.greeks.gamma || 0, 3)} | Theta {formatNumber(opt.greeks.theta || 0, 2)} | P(ITM) {formatNumber((opt.greeks.prob_itm || 0) * 100, 1)}%
                         </div>
                       )}
@@ -4417,16 +4770,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Entry Assistant (Step 0)</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Answer 3 simple questions and get a suggested strategy.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
                 <select
                   value={optionsOutlook}
                   onChange={(e) => setOptionsOutlook(e.target.value)}
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="bullish">Bullish</option>
                   <option value="bearish">Bearish</option>
@@ -4435,7 +4788,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <select
                   value={optionsGoal}
                   onChange={(e) => setOptionsGoal(e.target.value)}
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="income">Income</option>
                   <option value="growth">Growth</option>
@@ -4443,33 +4796,33 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <select
                   value={optionsRisk}
                   onChange={(e) => setOptionsRisk(e.target.value)}
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="low">Low Risk</option>
                   <option value="medium">Medium Risk</option>
                   <option value="high">High Risk</option>
                 </select>
-                <div style={{ fontSize: 12, color: "#334155" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   <strong>Suggested:</strong> {optionsRecommendation.strategy.replace("_", " ")} — {optionsRecommendation.note}
                 </div>
                 <button
                   onClick={applyOptionsRecommendation}
-                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                 >
                   Use Suggested Strategy
                 </button>
               </div>
             </div>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Strategy Builder (Step 2)</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Pick a beginner-friendly strategy and fill in the fields below.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
                 <select
                   value={optionsStrategy}
                   onChange={(e) => setOptionsStrategy(e.target.value)}
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="covered_call">Covered Call</option>
                   <option value="cash_secured_put">Cash-Secured Put</option>
@@ -4482,33 +4835,33 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsInputs.spot}
                     onChange={(e) => setOptionsInputs(prev => ({ ...prev, spot: e.target.value }))}
                     placeholder="Spot price"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsInputs.strike}
                     onChange={(e) => setOptionsInputs(prev => ({ ...prev, strike: e.target.value }))}
                     placeholder="Strike"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <input
                   value={optionsInputs.premium}
                   onChange={(e) => setOptionsInputs(prev => ({ ...prev, premium: e.target.value }))}
                   placeholder="Premium (per share)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <input
                     value={optionsInputs.long_strike}
                     onChange={(e) => setOptionsInputs(prev => ({ ...prev, long_strike: e.target.value }))}
                     placeholder="Long strike"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsInputs.long_premium}
                     onChange={(e) => setOptionsInputs(prev => ({ ...prev, long_premium: e.target.value }))}
                     placeholder="Long premium"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -4516,23 +4869,23 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsInputs.short_strike}
                     onChange={(e) => setOptionsInputs(prev => ({ ...prev, short_strike: e.target.value }))}
                     placeholder="Short strike"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsInputs.short_premium}
                     onChange={(e) => setOptionsInputs(prev => ({ ...prev, short_premium: e.target.value }))}
                     placeholder="Short premium"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <button
                   onClick={runOptionsStrategy}
-                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                 >
                   Calculate Strategy
                 </button>
                 {optionsOutcome && (
-                  <div style={{ fontSize: 12, color: "#334155" }}>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     <div><strong>Max Profit:</strong> {formatNumber(optionsOutcome.max_profit || 0, 2)}</div>
                     <div><strong>Max Loss:</strong> {formatNumber(optionsOutcome.max_loss || 0, 2)}</div>
                     <div><strong>Breakeven:</strong> {(optionsOutcome.breakevens || []).map(v => formatNumber(v, 2)).join(", ")}</div>
@@ -4541,9 +4894,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Payoff Chart</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
                 Visualize P/L at expiration for the strategy above.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
@@ -4552,18 +4905,18 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsPayoffMin}
                     onChange={(e) => setOptionsPayoffMin(e.target.value)}
                     placeholder="Min price (optional)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsPayoffMax}
                     onChange={(e) => setOptionsPayoffMax(e.target.value)}
                     placeholder="Max price (optional)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <button
                   onClick={runOptionsPayoff}
-                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                 >
                   Show Payoff
                 </button>
@@ -4577,9 +4930,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Options Scanner (Step 3)</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Finds contracts with high IV rank, acceptable delta, and good POP for short premium.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
@@ -4588,13 +4941,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsScanMinDelta}
                     onChange={(e) => setOptionsScanMinDelta(e.target.value)}
                     placeholder="Min delta (0.2)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsScanMaxDelta}
                     onChange={(e) => setOptionsScanMaxDelta(e.target.value)}
                     placeholder="Max delta (0.4)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -4602,13 +4955,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsScanMinIVRank}
                     onChange={(e) => setOptionsScanMinIVRank(e.target.value)}
                     placeholder="Min IV rank (0.5)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsScanMinIVRankHist}
                     onChange={(e) => setOptionsScanMinIVRankHist(e.target.value)}
                     placeholder="Min IV rank hist (0.5)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -4616,13 +4969,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsScanMinPOP}
                     onChange={(e) => setOptionsScanMinPOP(e.target.value)}
                     placeholder="Min POP (0.6)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsScanMinDays}
                     onChange={(e) => setOptionsScanMinDays(e.target.value)}
                     placeholder="Min days (14)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -4630,24 +4983,24 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsScanMaxDays}
                     onChange={(e) => setOptionsScanMaxDays(e.target.value)}
                     placeholder="Max days (60)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
-                  <div style={{ fontSize: 11, color: "#94a3b8", alignSelf: "center" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", alignSelf: "center" }}>
                     Leave blank to ignore a filter.
                   </div>
                 </div>
                 <button
                   onClick={runOptionsScan}
-                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                 >
                   Run Scanner
                 </button>
                 {optionsScanResults.length > 0 && (
                   <div style={{ display: "grid", gap: 6, maxHeight: 200, overflow: "auto" }}>
                     {optionsScanResults.map((item, idx) => (
-                      <div key={`${item.symbol}-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, fontSize: 11 }}>
+                      <div key={`${item.symbol}-${idx}`} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, fontSize: 11 }}>
                         <div style={{ fontWeight: 600 }}>{item.option_type.toUpperCase()} {item.strike} - {item.expiration}</div>
-                        <div style={{ color: "#64748b" }}>
+                        <div style={{ color: "var(--text-muted)" }}>
                           IV Rank {((item.iv_rank || 0) * 100).toFixed(0)}% | IV Rank (Hist) {((item.iv_rank_hist || 0) * 100).toFixed(0)}% | Delta {formatNumber(item.delta, 2)} | POP {(item.pop * 100).toFixed(0)}%
                         </div>
                       </div>
@@ -4657,16 +5010,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Options Backtest (Step 4)</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Run a simple historical simulation (daily bars) for wheel, covered call, or vertical spreads.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
                 <select
                   value={optionsBacktestStrategy}
                   onChange={(e) => setOptionsBacktestStrategy(e.target.value)}
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="wheel">Wheel</option>
                   <option value="covered_call">Covered Call</option>
@@ -4678,13 +5031,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsBacktestHoldDays}
                     onChange={(e) => setOptionsBacktestHoldDays(e.target.value)}
                     placeholder="Hold days (30)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsBacktestInitialCash}
                     onChange={(e) => setOptionsBacktestInitialCash(e.target.value)}
                     placeholder="Initial cash (10000)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -4692,23 +5045,23 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     value={optionsBacktestOtmPct}
                     onChange={(e) => setOptionsBacktestOtmPct(e.target.value)}
                     placeholder="OTM % (0.05)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={optionsBacktestSpread}
                     onChange={(e) => setOptionsBacktestSpread(e.target.value)}
                     placeholder="Spread width % (0.05)"
-                    style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </div>
                 <button
                   onClick={runOptionsBacktest}
-                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                 >
                   Run Options Backtest
                 </button>
                 {optionsBacktestResult && (
-                  <div style={{ fontSize: 12, color: "#334155" }}>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     <div><strong>CAGR:</strong> {formatNumber(optionsBacktestResult.metrics?.cagr || 0, 3)}</div>
                     <div><strong>Sharpe:</strong> {formatNumber(optionsBacktestResult.metrics?.sharpe || 0, 2)}</div>
                     <div><strong>Max DD:</strong> {formatNumber(optionsBacktestResult.metrics?.max_drawdown || 0, 2)}</div>
@@ -4723,9 +5076,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       {tradingTab === "qa" && (
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Ask Trading Knowledge</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Using: {activeRagMeta?.title || activeRagModel || "Trading Knowledge"}. RAG is used first, then the LLM expands if needed.
               </div>
               <textarea
@@ -4733,7 +5086,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 onChange={(e) => setQaQuestion(e.target.value)}
                 rows={6}
                 placeholder="Ask about indicators, strategy, risk management, market structure..."
-                style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
               />
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
                 <input
@@ -4741,16 +5094,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   checked={qaAllowFallback}
                   onChange={(e) => setQaAllowFallback(e.target.checked)}
                 />
-                <span style={{ fontSize: 11, color: "#64748b" }}>Allow LLM fallback for more depth</span>
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Allow LLM fallback for more depth</span>
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                 <button
                   onClick={askTradingQa}
-                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                  style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                 >
                   Ask
                 </button>
-                {qaStatus && <div style={{ fontSize: 12, color: "#475569", alignSelf: "center" }}>{qaStatus}</div>}
+                {qaStatus && <div style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>{qaStatus}</div>}
               </div>
               <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
                 {[
@@ -4763,7 +5116,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <button
                     key={prompt}
                     onClick={() => { setQaQuestion(prompt); }}
-                    style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", textAlign: "left", fontSize: 11 }}
+                    style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", textAlign: "left", fontSize: 11 }}
                   >
                     {prompt}
                   </button>
@@ -4773,30 +5126,30 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb", minHeight: 280 }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)", minHeight: 280 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Answer</div>
                 {qaSource && (
-                  <span style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase" }}>{qaSource}</span>
+                  <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase" }}>{qaSource}</span>
                 )}
               </div>
                 {qaAnswer ? (
-                  <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
                     {qaAnswer}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>Ask a question to see a response.</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Ask a question to see a response.</div>
                 )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Citations</div>
               {qaCitations.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No citations yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No citations yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 8 }}>
                   {qaCitations.map((cite, idx) => (
-                    <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "#64748b", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                    <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "var(--text-muted)", background: "var(--panel-bg-soft)", padding: 8, borderRadius: 8 }}>
                       <div style={{ fontWeight: 600 }}>{cite.meeting_title}</div>
                       <div>{cite.chunk_id}</div>
                       <div>{cite.snippet}</div>
@@ -4813,20 +5166,20 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         <>
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.8fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Knowledge Model</div>
-                <button onClick={loadRagModels} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+                <button onClick={loadRagModels} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}>
                   Refresh
                 </button>
               </div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
                 Select the RAG model that powers the Knowledge Map, sources, and Q&A across the trading page.
               </div>
               <select
                 value={activeRagModel}
                 onChange={(e) => setActiveRagModel(e.target.value)}
-                style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid #cbd5f5", marginBottom: 8 }}
+                style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", marginBottom: 8 }}
               >
                 {ragModels.map(model => (
                   <option key={model.id} value={model.id}>
@@ -4834,39 +5187,39 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   </option>
                 ))}
               </select>
-              <div style={{ fontSize: 11, color: "#475569", marginBottom: 6 }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
                 {activeRagMeta?.description || "Personalized knowledge workspace."}
               </div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: "#64748b" }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)" }}>
                   <span>Docs: {knowledgeStats?.totalDocuments || 0}</span>
                 <span>Sources: {knowledgeSourceInventory.length}</span>
                   <span>Tags: {knowledgeStats?.totalTags || 0}</span>
                 </div>
-              {ragModelStatus && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>{ragModelStatus}</div>}
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+              {ragModelStatus && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>{ragModelStatus}</div>}
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--panel-border)" }}>
                 <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 12 }}>Create New RAG Model</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <input
                     value={newRagTopic}
                     onChange={(e) => setNewRagTopic(e.target.value)}
                     placeholder="Topic (e.g., energy markets, biotech)"
-                    style={{ flex: 1, minWidth: 180, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                    style={{ flex: 1, minWidth: 180, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <button
                     onClick={createRagModel}
-                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+                    style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}
                   >
                     Create
                   </button>
                 </div>
-                {newRagStatus && <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>{newRagStatus}</div>}
+                {newRagStatus && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>{newRagStatus}</div>}
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Create How-To</div>
               {activeRagModel === "fireflies" && (
-                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
                   Fireflies knowledge is read-only. Switch to Trading Knowledge or a custom model to add content.
                 </div>
               )}
@@ -4875,31 +5228,31 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={knowledgeTitle}
                   onChange={(e) => setKnowledgeTitle(e.target.value)}
                   placeholder="How-To title (e.g., Risk management checklist)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <input
                   value={knowledgeTags}
                   onChange={(e) => setKnowledgeTags(e.target.value)}
                   placeholder="Tags (comma-separated)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <textarea
                   value={knowledgeText}
                   onChange={(e) => setKnowledgeText(e.target.value)}
                   rows={6}
                   placeholder="Write the trading how-to or playbook here..."
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
-                <button onClick={saveHowTo} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                <button onClick={saveHowTo} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                   Save to Knowledge RAG
                 </button>
-                {knowledgeStatus && <div style={{ fontSize: 12, color: "#475569" }}>{knowledgeStatus}</div>}
+                {knowledgeStatus && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{knowledgeStatus}</div>}
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Import PDFs & Files</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Paste a PDF URL or upload a local file. OCR is used as a fallback for scanned PDFs.
               </div>
               <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
@@ -4907,21 +5260,21 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={knowledgeUrl}
                   onChange={(e) => setKnowledgeUrl(e.target.value)}
                   placeholder="https://example.com/report.pdf"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <input
                   value={knowledgeUrlTitle}
                   onChange={(e) => setKnowledgeUrlTitle(e.target.value)}
                   placeholder="Optional title override"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <input
                   value={knowledgeUrlTags}
                   onChange={(e) => setKnowledgeUrlTags(e.target.value)}
                   placeholder="Tags (comma-separated)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
-                <label style={{ fontSize: 11, color: "#64748b", display: "flex", alignItems: "center", gap: 6 }}>
+                <label style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
                   <input
                     type="checkbox"
                     checked={knowledgeUrlOcr}
@@ -4929,10 +5282,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   />
                   Use OCR fallback for scanned PDFs
                 </label>
-                <button onClick={ingestKnowledgeUrl} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                <button onClick={ingestKnowledgeUrl} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                   Ingest URL
                 </button>
-                {knowledgeUrlStatus && <div style={{ fontSize: 12, color: "#475569" }}>{knowledgeUrlStatus}</div>}
+                {knowledgeUrlStatus && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{knowledgeUrlStatus}</div>}
               </div>
 
               <div style={{ display: "grid", gap: 8 }}>
@@ -4946,15 +5299,15 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={knowledgeFileTitle}
                   onChange={(e) => setKnowledgeFileTitle(e.target.value)}
                   placeholder="Optional file title override"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <input
                   value={knowledgeFileTags}
                   onChange={(e) => setKnowledgeFileTags(e.target.value)}
                   placeholder="Tags (comma-separated)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
-                <label style={{ fontSize: 11, color: "#64748b", display: "flex", alignItems: "center", gap: 6 }}>
+                <label style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
                   <input
                     type="checkbox"
                     checked={knowledgeFileOcr}
@@ -4962,20 +5315,20 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   />
                   Use OCR fallback for scanned PDFs
                 </label>
-                <button onClick={uploadKnowledgeFile} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontWeight: 600 }}>
+                <button onClick={uploadKnowledgeFile} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontWeight: 600 }}>
                   Upload & Ingest
                 </button>
-                {knowledgeFileStatus && <div style={{ fontSize: 12, color: "#475569" }}>{knowledgeFileStatus}</div>}
+                {knowledgeFileStatus && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{knowledgeFileStatus}</div>}
               </div>
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Online Sources</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Sources are crawled in the background, saved locally, and refreshed on schedule.
               </div>
               {activeRagModel === "fireflies" ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   Fireflies sources are read-only. Switch to Trading Knowledge or a custom model to manage web sources.
                 </div>
               ) : (
@@ -4985,49 +5338,49 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={newSourceUrl}
                   onChange={(e) => setNewSourceUrl(e.target.value)}
                   placeholder="https://example.com/guide"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <input
                   value={newSourceTags}
                   onChange={(e) => setNewSourceTags(e.target.value)}
                   placeholder="Tags (comma-separated)"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button onClick={addSource} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                  <button onClick={addSource} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                     Add + Crawl
                   </button>
-                  <button onClick={syncKnowledgeSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontWeight: 600 }}>
+                  <button onClick={syncKnowledgeSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontWeight: 600 }}>
                     Crawl All
                   </button>
-                  <button onClick={loadSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff" }}>
+                  <button onClick={loadSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
                     Refresh List
                   </button>
                 </div>
               </div>
-              {sourceStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{sourceStatus}</div>}
-              {knowledgeSyncStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{knowledgeSyncStatus}</div>}
+              {sourceStatus && <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>{sourceStatus}</div>}
+              {knowledgeSyncStatus && <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>{knowledgeSyncStatus}</div>}
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
                 <input
                   type="checkbox"
                   checked={deleteKnowledgeOnRemove}
                   onChange={(e) => setDeleteKnowledgeOnRemove(e.target.checked)}
                 />
-                <span style={{ fontSize: 11, color: "#64748b" }}>
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                   Delete existing knowledge when removing a source
                 </span>
               </div>
               <div style={{ display: "grid", gap: 8, maxHeight: 220, overflow: "auto" }}>
                 {sourceList.length === 0 && (
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>No sources added yet.</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No sources added yet.</div>
                 )}
                 {sourceList.map(source => (
-                  <div key={source.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                  <div key={source.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{source.url}</div>
                     {source.tags?.length > 0 && (
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Tags: {source.tags.join(", ")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Tags: {source.tags.join(", ")}</div>
                     )}
-                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                       Status: {source.last_status || "idle"} {source.last_crawled_at ? `| ${source.last_crawled_at}` : ""}
                     </div>
                     {source.last_error && (
@@ -5036,19 +5389,19 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                       <button
                         onClick={() => toggleSource(source)}
-                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}
                       >
                         {source.enabled ? "Disable" : "Enable"}
                       </button>
                       <button
                         onClick={() => crawlSource(source)}
-                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontSize: 11 }}
                       >
                         Crawl
                       </button>
                       <button
                         onClick={() => removeSource(source)}
-                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #fee2e2", background: "#fff", color: "#b91c1c", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #fee2e2", background: "var(--panel-bg)", color: "#b91c1c", fontSize: 11 }}
                       >
                         Remove
                       </button>
@@ -5060,13 +5413,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>RSS Feeds (Daily AI Review)</div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Feeds are reviewed by AI before ingestion. Foreign-market feeds are disabled by default.
               </div>
               {activeRagModel === "fireflies" ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   RSS feeds are not available for Fireflies. Switch to Trading Knowledge or a custom model to manage RSS ingestion.
                 </div>
               ) : (
@@ -5076,30 +5429,30 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   value={rssSeedUrl}
                   onChange={(e) => setRssSeedUrl(e.target.value)}
                   placeholder="https://rss.feedspot.com/stock_market_news_rss_feeds/"
-                  style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button onClick={seedRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                  <button onClick={seedRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                     Seed Feedspot
                   </button>
-                  <button onClick={crawlRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontWeight: 600 }}>
+                  <button onClick={crawlRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontWeight: 600 }}>
                     Crawl Now
                   </button>
-                  <button onClick={loadRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff" }}>
+                  <button onClick={loadRssSources} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
                     Refresh
                   </button>
                 </div>
               </div>
-              {rssStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{rssStatus}</div>}
+              {rssStatus && <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>{rssStatus}</div>}
               <div style={{ display: "grid", gap: 8, maxHeight: 220, overflow: "auto" }}>
                 {rssSources.length === 0 && (
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>No RSS feeds added yet.</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No RSS feeds added yet.</div>
                 )}
                 {rssSources.map(source => (
-                  <div key={source.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                  <div key={source.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{source.title || source.url}</div>
-                    <div style={{ fontSize: 11, color: "#64748b" }}>{source.url}</div>
-                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{source.url}</div>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                       Status: {source.last_status || "idle"} {source.last_crawled_at ? `| ${source.last_crawled_at}` : ""}
                     </div>
                     {source.last_error && (
@@ -5108,19 +5461,19 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                       <button
                         onClick={() => toggleRssSource(source)}
-                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}
                       >
                         {source.enabled ? "Disable" : "Enable"}
                       </button>
                       <button
                         onClick={() => crawlRssSource(source)}
-                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontSize: 11 }}
                       >
                         Crawl
                       </button>
                       <button
                         onClick={() => removeRssSource(source)}
-                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #fee2e2", background: "#fff", color: "#b91c1c", fontSize: 11 }}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #fee2e2", background: "var(--panel-bg)", color: "#b91c1c", fontSize: 11 }}
                       >
                         Remove
                       </button>
@@ -5134,28 +5487,28 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Ask Trading Knowledge</div>
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                 <input
                   value={knowledgeQuestion}
                   onChange={(e) => setKnowledgeQuestion(e.target.value)}
                   placeholder="Ask about strategies, risk, setups..."
-                  style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                  style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
                 />
-                <button onClick={askKnowledge} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+                <button onClick={askKnowledge} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                   Ask
                 </button>
               </div>
               {knowledgeAnswer && (
-                <div style={{ fontSize: 12, color: "#334155", marginBottom: 8, whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8, whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
                   {knowledgeAnswer}
                 </div>
               )}
               {knowledgeCitations.length > 0 && (
                 <div style={{ display: "grid", gap: 6 }}>
                   {knowledgeCitations.map((cite, idx) => (
-                    <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "#64748b", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                    <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "var(--text-muted)", background: "var(--panel-bg-soft)", padding: 8, borderRadius: 8 }}>
                       <div style={{ fontWeight: 600 }}>{cite.meeting_title}</div>
                       <div>{cite.chunk_id}</div>
                       <div>{cite.snippet}</div>
@@ -5165,30 +5518,30 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Knowledge Map</div>
                 <button
                   onClick={loadKnowledgeStats}
-                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                  style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}
                 >
                   Refresh
                 </button>
               </div>
-              {knowledgeStatsStatus && <div style={{ fontSize: 11, color: "#475569", marginBottom: 6 }}>{knowledgeStatsStatus}</div>}
+              {knowledgeStatsStatus && <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>{knowledgeStatsStatus}</div>}
               {!knowledgeStats ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No stats yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No stats yet.</div>
               ) : (
                 <>
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: "#64748b", marginBottom: 10 }}>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
                     <span>Docs: {knowledgeStats.totalDocuments || 0}</span>
                     <span>Sources: {(knowledgeStats.sources || []).length}</span>
                     <span>Tags: {knowledgeStats.totalTags || 0}</span>
                     {knowledgeStats.latest && <span>Latest: {knowledgeStats.latest}</span>}
                   </div>
-                  <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 8, background: "#f8fafc" }}>
+                  <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 8, background: "var(--panel-bg-soft)" }}>
                     {!knowledgeGraph?.nodes?.length ? (
-                      <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                         No knowledge graph nodes yet. Add or crawl sources to see the map populate.
                       </div>
                     ) : (
@@ -5199,17 +5552,17 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                       />
                     )}
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
                     Nodes represent tags and sources; size reflects how often they appear. Click a node for details.
                   </div>
                   {(knowledgeSelectedTag || knowledgeSelectedSource) && (
-                    <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
+                    <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
                       Selected {knowledgeSelectedTag ? "tag" : "source"}:{" "}
                       <strong>{knowledgeSelectedTag ? `#${knowledgeSelectedTag}` : formatSourceLabel(knowledgeSelectedSource)}</strong>
                     </div>
                   )}
                   {(knowledgeStats?.tags?.length || knowledgeStats?.topSources?.length) && (
-                    <div style={{ display: "grid", gap: 6, marginTop: 10, fontSize: 11, color: "#64748b" }}>
+                    <div style={{ display: "grid", gap: 6, marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
                       {knowledgeStats?.tags?.length ? (
                         <div>
                           Top tags: {knowledgeStats.tags.slice(0, 6).map(item => `#${item.tag} (${item.count})`).join(", ")}
@@ -5226,19 +5579,19 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Sources & Age</div>
               {knowledgeSourceInventory.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No sources indexed yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No sources indexed yet.</div>
               ) : (
                 <div style={{ display: "grid", gap: 8, maxHeight: 220, overflow: "auto" }}>
                   {knowledgeSourceInventory.map((source, idx) => (
-                    <div key={`${source.key}-${idx}`} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 8 }}>
+                    <div key={`${source.key}-${idx}`} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8 }}>
                       <div style={{ fontSize: 12, fontWeight: 600 }}>{source.title || formatSourceLabel(source.source_url || source.key, 30)}</div>
                       {source.source_url && (
-                        <div style={{ fontSize: 10, color: "#64748b" }}>{source.source_url}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{source.source_url}</div>
                       )}
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
                         {source.kind ? `${source.kind.toUpperCase()} | ` : ""}
                         Docs: {source.count || 0}
                         {Number.isFinite(source.age_days)
@@ -5253,19 +5606,19 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               )}
             </div>
 
-            <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+            <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Knowledge Library</div>
                 {(knowledgeSelectedTag || knowledgeSelectedSource) && (
                     <button
                       onClick={clearKnowledgeFilter}
-                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}
                     >
                       Clear Filter
                     </button>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
                 {knowledgeSelectedTag
                   ? `Filtered by tag: #${knowledgeSelectedTag}`
                   : knowledgeSelectedSource
@@ -5273,23 +5626,23 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     : "Recent indexed trading notes and sources."}
               </div>
               {knowledgeLibrary.mode === "sources" && (
-                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
                   Showing configured sources that have not been indexed yet.
                 </div>
               )}
               <div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto" }}>
-                {knowledgeLibrary.items.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No knowledge indexed yet.</div>}
+                {knowledgeLibrary.items.length === 0 && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No knowledge indexed yet.</div>}
                 {knowledgeLibrary.items.map(item => (
-                  <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                  <div key={item.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8 }}>
                     <div style={{ fontWeight: 600 }}>{item.title}</div>
                     {item.source_url && (
-                      <div style={{ fontSize: 11, color: "#64748b" }}>{item.source_url}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.source_url}</div>
                     )}
                     {item.occurred_at && (
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>{item.occurred_at}</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{item.occurred_at}</div>
                     )}
                     {item.isSource && (
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>Source registered (awaiting crawl/index).</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>Source registered (awaiting crawl/index).</div>
                     )}
                   </div>
                 ))}
@@ -5313,10 +5666,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               width: "min(760px, 92vw)",
               maxHeight: "80vh",
               overflow: "auto",
-              background: "#ffffff",
+              background: "var(--panel-bg)",
               borderRadius: 14,
               padding: 16,
-              border: "1px solid #e2e8f0",
+              border: "1px solid var(--panel-border)",
               boxShadow: "0 24px 60px rgba(15,23,42,0.25)"
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -5327,28 +5680,28 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   {(knowledgeSelectedTag || knowledgeSelectedSource) && (
                     <button
                       onClick={clearKnowledgeFilter}
-                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}
                     >
                       Clear Filter
                     </button>
                   )}
-                  <button onClick={() => setKnowledgeNodeDetail(null)} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+                  <button onClick={() => setKnowledgeNodeDetail(null)} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}>
                     Close
                   </button>
                 </div>
               </div>
               {knowledgeNodeDetail.type === "source" && knowledgeNodeDetail.source_url && (
-                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>{knowledgeNodeDetail.source_url}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>{knowledgeNodeDetail.source_url}</div>
               )}
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 Appears in {knowledgeNodeDetail.count || 0} knowledge item(s).
                 {knowledgeNodeDetail.last_seen ? ` Latest: ${knowledgeNodeDetail.last_seen}` : ""}
               </div>
               {knowledgeNodeStatus && (
-                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>{knowledgeNodeStatus}</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>{knowledgeNodeStatus}</div>
               )}
               {knowledgeNodeDetail.summary && (
-                <div style={{ fontSize: 12, color: "#334155", marginBottom: 10 }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                   {knowledgeNodeDetail.summary}
                 </div>
               )}
@@ -5357,7 +5710,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Top sources</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {knowledgeNodeDetail.sources.map(source => (
-                      <span key={source.key} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                      <span key={source.key} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)" }}>
                         {formatSourceLabel(source.title || source.key, 24)} ({source.count})
                       </span>
                     ))}
@@ -5369,7 +5722,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Related tags</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {knowledgeNodeDetail.related_tags.map(tag => (
-                      <span key={tag.tag} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f1f5f9" }}>
+                      <span key={tag.tag} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid var(--panel-border)", background: "#f1f5f9" }}>
                         #{tag.tag} ({tag.count})
                       </span>
                     ))}
@@ -5381,7 +5734,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Top tags</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {knowledgeNodeDetail.tags.map(tag => (
-                      <span key={tag.tag} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid #e2e8f0", background: "#f1f5f9" }}>
+                      <span key={tag.tag} style={{ fontSize: 11, padding: "4px 8px", borderRadius: 999, border: "1px solid var(--panel-border)", background: "#f1f5f9" }}>
                         #{tag.tag} ({tag.count})
                       </span>
                     ))}
@@ -5393,11 +5746,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Top snippets</div>
                   <div style={{ display: "grid", gap: 8 }}>
                     {knowledgeNodeDetail.snippets.map(snippet => (
-                      <div key={snippet.chunk_id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
-                        <div style={{ fontSize: 11, color: "#475569", fontWeight: 600 }}>
+                      <div key={snippet.chunk_id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>
                           {snippet.meeting_title || "Knowledge"} {snippet.occurred_at ? `- ${snippet.occurred_at}` : ""}
                         </div>
-                        <div style={{ fontSize: 11, color: "#94a3b8" }}>{snippet.chunk_id}</div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{snippet.chunk_id}</div>
                         <div style={{ marginTop: 6, fontSize: 12 }}>{snippet.text}</div>
                       </div>
                     ))}
@@ -5406,16 +5759,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               ) : null}
               <div style={{ display: "grid", gap: 8 }}>
                 {(knowledgeNodeDetail.docs || []).slice(0, 8).map(item => (
-                  <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+                  <div key={item.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                     <div style={{ fontWeight: 600 }}>{item.title || "Knowledge"}</div>
                     <div style={{ fontSize: 11, color: "#6b7280" }}>{item.occurred_at || "Unknown date"}</div>
                     {item.source_url && (
-                      <div style={{ fontSize: 11, color: "#64748b" }}>{item.source_url}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.source_url}</div>
                     )}
                   </div>
                 ))}
                 {(knowledgeNodeDetail.docs || []).length === 0 && (
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>No knowledge items match this node yet.</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No knowledge items match this node yet.</div>
                 )}
               </div>
             </div>
@@ -5426,13 +5779,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
       {tradingTab === "scenarios" && (
         <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Scenario Runner</div>
             <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               <select
                 value={scenarioAssetClass}
                 onChange={(e) => setScenarioAssetClass(e.target.value)}
-                style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
               >
                 <option value="all">All assets</option>
                 <option value="stock">Stocks</option>
@@ -5441,31 +5794,31 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <select
                 value={scenarioWindow}
                 onChange={(e) => setScenarioWindow(Number(e.target.value))}
-                style={{ padding: 8, borderRadius: 10, border: "1px solid #cbd5f5" }}
+                style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)" }}
               >
                 <option value={7}>7 days</option>
                 <option value={30}>30 days</option>
                 <option value={90}>90 days</option>
                 <option value={180}>180 days</option>
               </select>
-              <button onClick={runScenario} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}>
+              <button onClick={runScenario} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
                 Run Scenarios
               </button>
             </div>
-            {scenarioStatus && <div style={{ fontSize: 12, color: "#475569", marginBottom: 8 }}>{scenarioStatus}</div>}
+            {scenarioStatus && <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>{scenarioStatus}</div>}
             <div style={{ display: "grid", gap: 6 }}>
-              {scenarioResults.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Run a scenario to see results.</div>}
+              {scenarioResults.length === 0 && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Run a scenario to see results.</div>}
               {scenarioResults.map(result => (
                 <button
                   key={`${result.symbol}-${result.windowDays}`}
                   type="button"
                   onClick={() => openScenarioDetail(result)}
                   style={{
-                    border: "1px solid #e5e7eb",
+                    border: "1px solid var(--panel-border)",
                     borderRadius: 10,
                     padding: 8,
                     textAlign: "left",
-                    background: "#fff",
+                    background: "var(--panel-bg)",
                     cursor: "pointer"
                   }}
                 >
@@ -5478,7 +5831,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   {result.error ? (
                     <div style={{ fontSize: 11, color: "#b91c1c" }}>{result.error}</div>
                   ) : (
-                    <div style={{ fontSize: 11, color: "#64748b" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                       Start {formatNumber(result.start)} to End {formatNumber(result.end)} | {result.points} points
                     </div>
                   )}
@@ -5487,15 +5840,15 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             </div>
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 14, padding: 14, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Scenario History</div>
             <div style={{ display: "grid", gap: 8, maxHeight: 360, overflow: "auto" }}>
-              {scenarioHistory.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>No scenario runs yet.</div>}
+              {scenarioHistory.length === 0 && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No scenario runs yet.</div>}
               {scenarioHistory.map(item => (
-                <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8 }}>
+                <div key={item.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8 }}>
                   <div style={{ fontWeight: 600 }}>{item.asset_class} - {item.window_days} days</div>
-                  <div style={{ fontSize: 11, color: "#64748b" }}>{item.run_at}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>{(item.results || []).length} assets</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.run_at}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{(item.results || []).length} assets</div>
                 </div>
               ))}
             </div>
@@ -5518,10 +5871,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             width: "min(980px, 94vw)",
             maxHeight: "85vh",
             overflow: "auto",
-            background: "#ffffff",
+            background: "var(--panel-bg)",
             borderRadius: 16,
             padding: 18,
-            border: "1px solid #e2e8f0",
+            border: "1px solid var(--panel-border)",
             boxShadow: "0 24px 60px rgba(15,23,42,0.25)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -5529,7 +5882,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <div style={{ fontWeight: 700, fontSize: 16 }}>
                   {recommendationDetail.symbol || "Recommendation"} {recommendationDetail.assetClass ? `(${recommendationDetail.assetClass})` : ""}
                 </div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   Bias: {recommendationDetail.bias || "WATCH"} {recommendationDetail.provider ? `· Provider: ${recommendationDetail.provider}` : ""} {recommendationDetail.generatedAt ? `· ${recommendationDetail.generatedAt}` : ""}
                 </div>
               </div>
@@ -5544,20 +5897,20 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     }
                     setTradingTab("terminal");
                   }}
-                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #0ea5e9", background: "#e0f2fe", color: "#0ea5e9", fontSize: 12 }}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--chip-bg)", color: "var(--accent)", fontSize: 12 }}
                 >
                   Use in Terminal
                 </button>
                 <button
                   onClick={() => { setRecommendationDetail(null); setRecommendationDetailStatus(""); }}
-                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12 }}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 12 }}
                 >
                   Close
                 </button>
               </div>
             </div>
             {recommendationDetailStatus && (
-              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>{recommendationDetailStatus}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>{recommendationDetailStatus}</div>
             )}
             {recommendationDetail.error ? (
               <div style={{ fontSize: 12, color: "#b91c1c" }}>
@@ -5567,16 +5920,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <>
                 {recommendationDetail.metrics && (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 12 }}>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Last Close</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Last Close</div>
                       <div style={{ fontWeight: 600 }}>{recommendationDetail.metrics.lastClose ?? "n/a"}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>ATR (14)</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>ATR (14)</div>
                       <div style={{ fontWeight: 600 }}>{recommendationDetail.metrics.atr ?? "n/a"}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Max Drawdown</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Max Drawdown</div>
                       <div style={{ fontWeight: 600 }}>{recommendationDetail.metrics.maxDrawdownPct ?? "n/a"}%</div>
                     </div>
                   </div>
@@ -5584,17 +5937,17 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 {recommendationDetail.narrative && (
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>Scenario Narrative</div>
-                    <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap" }}>{recommendationDetail.narrative}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>{recommendationDetail.narrative}</div>
                   </div>
                 )}
                 {(recommendationDetail.sections || []).map((section, idx) => (
-                  <div key={`${section.title}-${idx}`} style={{ marginBottom: 12, border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#f8fafc" }}>
+                  <div key={`${section.title}-${idx}`} style={{ marginBottom: 12, border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg-soft)" }}>
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>{section.title}</div>
                     {section.body && (
-                      <div style={{ fontSize: 12, color: "#334155" }}>{section.body}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{section.body}</div>
                     )}
                     {section.bullets?.length ? (
-                      <div style={{ display: "grid", gap: 6, fontSize: 12, color: "#475569", marginTop: 6 }}>
+                      <div style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>
                         {section.bullets.map((bullet, bIdx) => (
                           <div key={`${section.title}-bullet-${bIdx}`}>• {bullet}</div>
                         ))}
@@ -5607,7 +5960,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>Knowledge Citations</div>
                     <div style={{ display: "grid", gap: 8 }}>
                       {recommendationDetail.citations.slice(0, 8).map((cite, idx) => (
-                        <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "#64748b", background: "#f1f5f9", padding: 8, borderRadius: 8 }}>
+                        <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "var(--text-muted)", background: "#f1f5f9", padding: 8, borderRadius: 8 }}>
                           <div style={{ fontWeight: 600 }}>{cite.meeting_title || "Knowledge"}</div>
                           <div>{cite.chunk_id}</div>
                           <div>{cite.snippet}</div>
@@ -5637,10 +5990,10 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             width: "min(920px, 94vw)",
             maxHeight: "82vh",
             overflow: "auto",
-            background: "#ffffff",
+            background: "var(--panel-bg)",
             borderRadius: 16,
             padding: 18,
-            border: "1px solid #e2e8f0",
+            border: "1px solid var(--panel-border)",
             boxShadow: "0 24px 60px rgba(15,23,42,0.25)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -5648,16 +6001,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <div style={{ fontWeight: 700, fontSize: 16 }}>
                   {scenarioDetail.symbol || "Scenario Detail"} {scenarioDetail.assetClass ? `(${scenarioDetail.assetClass})` : ""}
                 </div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   Window: {scenarioDetail.windowDays || scenarioWindow} days · Provider: {scenarioDetail.provider || "unknown"} · Bars: {scenarioDetail.points || "n/a"}
                 </div>
               </div>
-              <button onClick={() => { setScenarioDetail(null); setScenarioDetailStatus(""); }} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12 }}>
+              <button onClick={() => { setScenarioDetail(null); setScenarioDetailStatus(""); }} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 12 }}>
                 Close
               </button>
             </div>
             {scenarioDetailStatus && (
-              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>{scenarioDetailStatus}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>{scenarioDetailStatus}</div>
             )}
             {scenarioDetail.error ? (
               <div style={{ fontSize: 12, color: "#b91c1c" }}>
@@ -5667,82 +6020,82 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <>
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>Verbose Analysis</div>
-                  <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap" }}>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
                     {scenarioDetail.narrative || "No analysis generated yet."}
                   </div>
                 </div>
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>Key Metrics</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Return</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Return</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.returnPct, "%")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         Start {formatScenarioValue(scenarioDetail.startPrice, "")} · End {formatScenarioValue(scenarioDetail.endPrice, "")}
                       </div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Range</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Range</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.rangePct, "%")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         {formatScenarioValue(scenarioDetail.rangeLow, "")} to {formatScenarioValue(scenarioDetail.rangeHigh, "")}
                       </div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Trend</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Trend</div>
                       <div style={{ fontWeight: 600 }}>{scenarioDetail.trendLabel || "Not enough data"}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Slope {formatScenarioValue(scenarioDetail.trendSlopePct, "%/day")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Slope {formatScenarioValue(scenarioDetail.trendSlopePct, "%/day")}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Volatility</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Volatility</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.annualVol, "%")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Daily {formatScenarioValue(scenarioDetail.dailyVol, "%")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Daily {formatScenarioValue(scenarioDetail.dailyVol, "%")}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Drawdown</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Drawdown</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.maxDrawdownPct, "%")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Best {formatScenarioValue(scenarioDetail.bestDayPct, "%")} · Worst {formatScenarioValue(scenarioDetail.worstDayPct, "%")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Best {formatScenarioValue(scenarioDetail.bestDayPct, "%")} · Worst {formatScenarioValue(scenarioDetail.worstDayPct, "%")}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Momentum</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Momentum</div>
                       <div style={{ fontWeight: 600 }}>RSI {formatScenarioValue(scenarioDetail.rsi14, "")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         5d {formatScenarioValue(scenarioDetail.momentum5, "%")} · 10d {formatScenarioValue(scenarioDetail.momentum10, "%")} · 20d {formatScenarioValue(scenarioDetail.momentum20, "%")}
                       </div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Moving Averages</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Moving Averages</div>
                       <div style={{ fontWeight: 600 }}>10d {formatScenarioValue(scenarioDetail.ma10, "")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>20d {formatScenarioValue(scenarioDetail.ma20, "")} · 50d {formatScenarioValue(scenarioDetail.ma50, "")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>20d {formatScenarioValue(scenarioDetail.ma20, "")} · 50d {formatScenarioValue(scenarioDetail.ma50, "")}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Long-Term Trend</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Long-Term Trend</div>
                       <div style={{ fontWeight: 600 }}>200d {formatScenarioValue(scenarioDetail.ma200, "")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Trend strength {formatScenarioValue(scenarioDetail.trendStrengthPct, "%")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Trend strength {formatScenarioValue(scenarioDetail.trendStrengthPct, "%")}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Win / Loss Tape</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Win / Loss Tape</div>
                       <div style={{ fontWeight: 600 }}>Win rate {formatScenarioValue(scenarioDetail.winRate, "%")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         Avg up {formatScenarioValue(scenarioDetail.avgUp, "%")} · Avg down {formatScenarioValue(scenarioDetail.avgDown, "%")}
                       </div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>ATR & Vol Regime</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>ATR & Vol Regime</div>
                       <div style={{ fontWeight: 600 }}>ATR {formatScenarioValue(scenarioDetail.atr14, "")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         {scenarioDetail.volRegime || "Vol regime n/a"} · 10d {formatScenarioValue(scenarioDetail.volShort, "%")} · 30d {formatScenarioValue(scenarioDetail.volLong, "%")}
                       </div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Liquidity</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Liquidity</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.avgVolume, "")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Recent {formatScenarioValue(scenarioDetail.recentVolume, "")} · Last {formatScenarioValue(scenarioDetail.lastVolume, "")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Recent {formatScenarioValue(scenarioDetail.recentVolume, "")} · Last {formatScenarioValue(scenarioDetail.lastVolume, "")}</div>
                     </div>
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Support/Resistance</div>
+                    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Support/Resistance</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.support, "")}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>Resistance {formatScenarioValue(scenarioDetail.resistance, "")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Resistance {formatScenarioValue(scenarioDetail.resistance, "")}</div>
                     </div>
                   </div>
                 </div>
@@ -5760,3 +6113,9 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     </div>
   );
 }
+
+
+
+
+
+
