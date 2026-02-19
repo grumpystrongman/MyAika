@@ -70,6 +70,7 @@ export const defaultPolicy = policySchema.parse({
     "todos.updateList",
     "todos.update",
     "todos.complete",
+    "todo.reminder",
     "meeting.summarize",
     "calendar.proposeHold",
     "email.draftReply",

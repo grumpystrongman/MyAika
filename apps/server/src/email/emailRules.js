@@ -9,12 +9,21 @@ const DEFAULT_FOLLOWUP_DAYS = 2;
 const DEFAULT_REMINDER_OFFSET_HOURS = 4;
 const DEFAULT_DEDUP_HOURS = 72;
 const DEFAULT_MAX_PROCESSED = 400;
+const DEFAULT_PRIORITY = "medium";
 
 function parseList(value) {
   return String(value || "")
     .split(",")
     .map(item => item.trim())
     .filter(Boolean);
+}
+
+function normalizeListInput(value, fallback = []) {
+  if (Array.isArray(value)) {
+    return value.map(item => String(item || "").trim()).filter(Boolean);
+  }
+  if (value === undefined || value === null) return Array.isArray(fallback) ? fallback : parseList(fallback);
+  return parseList(value);
 }
 
 function toNumber(value, fallback) {
@@ -80,25 +89,17 @@ export function matchEmailRule(provider, email, rules) {
   return true;
 }
 
-export function getEmailRulesConfig() {
-  const enabled = String(process.env.EMAIL_RULES_ENABLED || "0") === "1";
-  const lookbackDays = toNumber(process.env.EMAIL_RULES_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS);
-  const limit = toNumber(process.env.EMAIL_RULES_LIMIT, DEFAULT_LIMIT);
-  const followUpDays = toNumber(process.env.EMAIL_RULES_FOLLOWUP_DAYS, DEFAULT_FOLLOWUP_DAYS);
-  const followUpHours = toNumber(process.env.EMAIL_RULES_FOLLOWUP_HOURS, 0);
-  const reminderOffsetHours = toNumber(process.env.EMAIL_RULES_REMINDER_OFFSET_HOURS, DEFAULT_REMINDER_OFFSET_HOURS);
-  const dedupHours = toNumber(process.env.EMAIL_RULES_DEDUP_HOURS, DEFAULT_DEDUP_HOURS);
-  const maxProcessed = toNumber(process.env.EMAIL_RULES_MAX_PROCESSED, DEFAULT_MAX_PROCESSED);
+function buildDefaultsFromEnv() {
   return {
-    enabled,
-    lookbackDays,
-    limit,
-    followUpDays,
-    followUpHours,
-    reminderOffsetHours,
-    dedupHours,
-    maxProcessed,
-    priority: String(process.env.EMAIL_RULES_PRIORITY || "medium"),
+    enabled: String(process.env.EMAIL_RULES_ENABLED || "0") === "1",
+    lookbackDays: toNumber(process.env.EMAIL_RULES_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS),
+    limit: toNumber(process.env.EMAIL_RULES_LIMIT, DEFAULT_LIMIT),
+    followUpDays: toNumber(process.env.EMAIL_RULES_FOLLOWUP_DAYS, DEFAULT_FOLLOWUP_DAYS),
+    followUpHours: toNumber(process.env.EMAIL_RULES_FOLLOWUP_HOURS, 0),
+    reminderOffsetHours: toNumber(process.env.EMAIL_RULES_REMINDER_OFFSET_HOURS, DEFAULT_REMINDER_OFFSET_HOURS),
+    dedupHours: toNumber(process.env.EMAIL_RULES_DEDUP_HOURS, DEFAULT_DEDUP_HOURS),
+    maxProcessed: toNumber(process.env.EMAIL_RULES_MAX_PROCESSED, DEFAULT_MAX_PROCESSED),
+    priority: String(process.env.EMAIL_RULES_PRIORITY || DEFAULT_PRIORITY),
     listId: String(process.env.EMAIL_RULES_LIST_ID || "").trim(),
     tags: parseList(process.env.EMAIL_RULES_TAGS),
     providers: {
@@ -112,6 +113,49 @@ export function getEmailRulesConfig() {
       }
     }
   };
+}
+
+function normalizeRulesInput(value, defaults) {
+  const cfg = value || {};
+  const providers = cfg.providers || {};
+  const gmail = providers.gmail || {};
+  const outlook = providers.outlook || {};
+  return {
+    enabled: cfg.enabled !== undefined ? Boolean(cfg.enabled) : defaults.enabled,
+    lookbackDays: toNumber(cfg.lookbackDays, defaults.lookbackDays),
+    limit: toNumber(cfg.limit, defaults.limit),
+    followUpDays: toNumber(cfg.followUpDays, defaults.followUpDays),
+    followUpHours: toNumber(cfg.followUpHours, defaults.followUpHours),
+    reminderOffsetHours: toNumber(cfg.reminderOffsetHours, defaults.reminderOffsetHours),
+    dedupHours: toNumber(cfg.dedupHours, defaults.dedupHours),
+    maxProcessed: toNumber(cfg.maxProcessed, defaults.maxProcessed),
+    priority: String(cfg.priority || defaults.priority || DEFAULT_PRIORITY),
+    listId: String(cfg.listId || defaults.listId || "").trim(),
+    tags: normalizeListInput(cfg.tags, defaults.tags),
+    providers: {
+      gmail: {
+        senders: normalizeListInput(gmail.senders, defaults.providers?.gmail?.senders || []),
+        labelIds: normalizeListInput(gmail.labelIds, defaults.providers?.gmail?.labelIds || [])
+      },
+      outlook: {
+        senders: normalizeListInput(outlook.senders, defaults.providers?.outlook?.senders || []),
+        folderIds: normalizeListInput(outlook.folderIds, defaults.providers?.outlook?.folderIds || [])
+      }
+    }
+  };
+}
+
+export function getEmailRulesConfig(userId = "local") {
+  const defaults = buildDefaultsFromEnv();
+  const stored = getProvider("email_rules_config", userId) || {};
+  return normalizeRulesInput(stored, defaults);
+}
+
+export function saveEmailRulesConfig(config, userId = "local") {
+  const defaults = buildDefaultsFromEnv();
+  const normalized = normalizeRulesInput(config, defaults);
+  setProvider("email_rules_config", normalized, userId);
+  return normalized;
 }
 
 function computeFollowUpTimes(baseTime, config) {
@@ -152,7 +196,7 @@ function pruneProcessed(entries, dedupMs, maxEntries) {
 }
 
 export async function runEmailRules({ userId = "local", providers = ["gmail", "outlook"], lookbackDays, config, fetchers = {}, scheduleFollowUpFn } = {}) {
-  const rules = config || getEmailRulesConfig();
+  const rules = config || getEmailRulesConfig(userId);
   if (!rules.enabled) return { ok: false, disabled: true };
   const effectiveLookback = Number.isFinite(lookbackDays) ? Number(lookbackDays) : rules.lookbackDays;
   const state = loadRuleState(userId);
@@ -234,24 +278,24 @@ let rulesTimer = null;
 
 export function startEmailRulesLoop() {
   if (rulesTimer) return;
-  const config = getEmailRulesConfig();
+  const config = getEmailRulesConfig("local");
   if (!config.enabled) return;
   const intervalMinutes = toNumber(process.env.EMAIL_RULES_INTERVAL_MINUTES, 0);
   const runOnStartup = String(process.env.EMAIL_RULES_ON_STARTUP || "0") === "1";
   if (!intervalMinutes || intervalMinutes <= 0) {
-    if (runOnStartup) runEmailRules().catch(() => {});
+    if (runOnStartup) runEmailRules({ userId: "local" }).catch(() => {});
     return;
   }
   const intervalMs = Math.max(60000, intervalMinutes * 60_000);
   rulesTimer = setInterval(() => {
-    runEmailRules().catch(() => {});
+    runEmailRules({ userId: "local" }).catch(() => {});
   }, intervalMs);
-  if (runOnStartup) runEmailRules().catch(() => {});
+  if (runOnStartup) runEmailRules({ userId: "local" }).catch(() => {});
 }
 
 export function getEmailRulesStatus(userId = "local") {
   const state = loadRuleState(userId);
-  const config = getEmailRulesConfig();
+  const config = getEmailRulesConfig(userId);
   return {
     enabled: config.enabled,
     lastRunAt: state.lastRunAt || null,

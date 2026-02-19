@@ -74,6 +74,10 @@ function normalizeTodoRow(row, userId = "local") {
     notes: row.notes || "",
     due: row.due || null,
     reminderAt: row.reminder_at || null,
+    reminderSentAt: row.reminder_sent_at || null,
+    reminderStatus: row.reminder_status || null,
+    reminderError: row.reminder_error || null,
+    reminderApprovalId: row.reminder_approval_id || null,
     repeatRule: row.repeat_rule || "",
     priority: row.priority || "medium",
     tags: row.tags_json ? safeJsonParse(row.tags_json, []) : [],
@@ -251,6 +255,22 @@ export function updateTodoRecord({ id, userId = "local", ...updates }) {
     fields.push("reminder_at = ?");
     params.push(normalizeDateInput(updates.reminderAt));
   }
+  if (updates.reminderSentAt !== undefined) {
+    fields.push("reminder_sent_at = ?");
+    params.push(normalizeDateInput(updates.reminderSentAt));
+  }
+  if (updates.reminderStatus !== undefined) {
+    fields.push("reminder_status = ?");
+    params.push(updates.reminderStatus || null);
+  }
+  if (updates.reminderError !== undefined) {
+    fields.push("reminder_error = ?");
+    params.push(updates.reminderError || null);
+  }
+  if (updates.reminderApprovalId !== undefined) {
+    fields.push("reminder_approval_id = ?");
+    params.push(updates.reminderApprovalId || null);
+  }
   if (updates.repeatRule !== undefined) {
     fields.push("repeat_rule = ?");
     params.push(updates.repeatRule || "");
@@ -385,5 +405,22 @@ export function listTodosRecord({
     LIMIT ?
   `).all(...params, Number(limit || 200));
 
+  return rows.map(row => normalizeTodoRow(row, userId)).filter(Boolean);
+}
+
+export function listDueReminders({ userId = "local", limit = 50, now = null } = {}) {
+  const db = getDb();
+  const cutoff = now || nowIso();
+  const rows = db.prepare(`
+    SELECT * FROM todos
+    WHERE user_id = ?
+      AND status = 'open'
+      AND reminder_at IS NOT NULL
+      AND reminder_at <= ?
+      AND (reminder_sent_at IS NULL OR reminder_sent_at = '')
+      AND (reminder_approval_id IS NULL OR reminder_approval_id = '')
+    ORDER BY reminder_at ASC
+    LIMIT ?
+  `).all(userId, cutoff, Number(limit || 50));
   return rows.map(row => normalizeTodoRow(row, userId)).filter(Boolean);
 }

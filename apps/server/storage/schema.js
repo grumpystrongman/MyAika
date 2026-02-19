@@ -430,6 +430,17 @@ const migrations = [
     CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
     CREATE INDEX IF NOT EXISTS idx_todos_due ON todos(due);
     `
+  },
+  {
+    id: 12,
+    sql: `
+    ALTER TABLE todos ADD COLUMN reminder_sent_at TEXT;
+    ALTER TABLE todos ADD COLUMN reminder_status TEXT;
+    ALTER TABLE todos ADD COLUMN reminder_error TEXT;
+    ALTER TABLE todos ADD COLUMN reminder_approval_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_todos_reminder
+      ON todos(reminder_at, reminder_sent_at);
+    `
   }
 ];
 

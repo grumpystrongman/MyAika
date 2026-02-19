@@ -176,7 +176,8 @@ import {
   syncConfluenceConnector
 } from "./src/connectors/index.js";
 import { getEmailInbox } from "./src/connectors/emailInbox.js";
-import { runEmailRules, startEmailRulesLoop, getEmailRulesStatus } from "./src/email/emailRules.js";
+import { runEmailRules, startEmailRulesLoop, getEmailRulesStatus, getEmailRulesConfig, saveEmailRulesConfig } from "./src/email/emailRules.js";
+import { startTodoReminderLoop, runTodoReminders, getTodoReminderStatus } from "./src/todos/reminders.js";
 import {
   startTradingYoutubeLoop,
   crawlTradingYoutubeSources,
@@ -274,6 +275,7 @@ startSlackSyncLoop();
 startOutlookSyncLoop();
 startGmailSyncLoop();
 startEmailRulesLoop();
+startTodoReminderLoop();
 startJiraSyncLoop();
 startConfluenceSyncLoop();
 startDailyPicksLoop();
@@ -7340,12 +7342,46 @@ app.get("/api/email/rules/status", rateLimit, async (req, res) => {
   }
 });
 
+app.get("/api/email/rules/config", rateLimit, async (req, res) => {
+  try {
+    res.json({ ok: true, config: getEmailRulesConfig(getUserId(req)) });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_config_failed" });
+  }
+});
+
+app.post("/api/email/rules/config", rateLimit, async (req, res) => {
+  try {
+    const config = saveEmailRulesConfig(req.body || {}, getUserId(req));
+    res.json({ ok: true, config });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_config_save_failed" });
+  }
+});
+
 app.post("/api/email/rules/run", rateLimit, async (req, res) => {
   try {
     const result = await runEmailRules({ userId: getUserId(req) });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err?.message || "email_rules_run_failed" });
+  }
+});
+
+app.get("/api/todos/reminders/status", rateLimit, async (req, res) => {
+  try {
+    res.json({ ok: true, status: getTodoReminderStatus(getUserId(req)) });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "todo_reminder_status_failed" });
+  }
+});
+
+app.post("/api/todos/reminders/run", rateLimit, async (req, res) => {
+  try {
+    const result = await runTodoReminders({ userId: getUserId(req) });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "todo_reminder_run_failed" });
   }
 });
 

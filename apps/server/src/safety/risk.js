@@ -11,6 +11,7 @@ const BASE_RISK = {
   "todos.updateList": 5,
   "todos.update": 10,
   "todos.complete": 5,
+  "todo.reminder": 45,
   "meeting.summarize": 15,
   "calendar.proposeHold": 35,
   "email.draftReply": 25,

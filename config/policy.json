@@ -9,6 +9,7 @@
     "notes.search",
     "todos.create",
     "todos.list",
+    "todo.reminder",
     "meeting.summarize",
     "calendar.proposeHold",
     "email.draftReply",

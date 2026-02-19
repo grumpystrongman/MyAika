@@ -53,6 +53,11 @@ const TOOL_HELP = {
     why: "Turn messages into tasks, follow-ups, and contextual replies.",
     how: "Select an email, then create a todo, schedule a follow-up, or draft a reply with context."
   },
+  emailRules: {
+    title: "Email Rules",
+    why: "Automate follow-ups based on senders and labels.",
+    how: "Enable rules, set senders/labels, and save. Run once to validate."
+  },
   emailSend: {
     title: "Send Email",
     why: "Send a vetted draft after review and approval.",
@@ -190,6 +195,9 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailSyncing, setEmailSyncing] = useState(false);
   const [emailRulesResult, setEmailRulesResult] = useState(null);
   const [emailRulesRunning, setEmailRulesRunning] = useState(false);
+  const [emailRulesForm, setEmailRulesForm] = useState(null);
+  const [emailRulesStatus, setEmailRulesStatus] = useState(null);
+  const [emailRulesSaving, setEmailRulesSaving] = useState(false);
   const [emailTodoForm, setEmailTodoForm] = useState({ title: "", due: "", reminderAt: "", priority: "medium", tags: "", listId: "", notes: "" });
   const [emailFollowUpForm, setEmailFollowUpForm] = useState({
     followUpAt: "",
@@ -229,6 +237,27 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
   function toTagText(tags = []) {
     return Array.isArray(tags) ? tags.join(", ") : "";
+  }
+
+  function mapRulesConfigToForm(config) {
+    if (!config) return null;
+    return {
+      enabled: Boolean(config.enabled),
+      lookbackDays: config.lookbackDays ?? 7,
+      limit: config.limit ?? 40,
+      followUpDays: config.followUpDays ?? 2,
+      followUpHours: config.followUpHours ?? 0,
+      reminderOffsetHours: config.reminderOffsetHours ?? 4,
+      dedupHours: config.dedupHours ?? 72,
+      maxProcessed: config.maxProcessed ?? 400,
+      priority: config.priority || "medium",
+      listId: config.listId || "",
+      tags: toTagText(config.tags || []),
+      gmailSenders: toTagText(config.providers?.gmail?.senders || []),
+      gmailLabelIds: toTagText(config.providers?.gmail?.labelIds || []),
+      outlookSenders: toTagText(config.providers?.outlook?.senders || []),
+      outlookFolderIds: toTagText(config.providers?.outlook?.folderIds || [])
+    };
   }
 
   function mapTodoToEditor(todo) {
@@ -479,10 +508,76 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || "email_rules_failed");
       setEmailRulesResult(data);
+      await loadEmailRulesStatus();
     } catch (err) {
       setEmailRulesResult({ ok: false, error: err?.message || "email_rules_failed" });
     } finally {
       setEmailRulesRunning(false);
+    }
+  }
+
+  async function loadEmailRulesConfig() {
+    try {
+      const resp = await fetch(`${serverUrl}/api/email/rules/config`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_config_failed");
+      setEmailRulesForm(mapRulesConfigToForm(data.config));
+    } catch {
+      setEmailRulesForm(null);
+    }
+  }
+
+  async function loadEmailRulesStatus() {
+    try {
+      const resp = await fetch(`${serverUrl}/api/email/rules/status`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_status_failed");
+      setEmailRulesStatus(data.status || null);
+    } catch {
+      setEmailRulesStatus(null);
+    }
+  }
+
+  async function saveEmailRules() {
+    if (!emailRulesForm) return;
+    setEmailRulesSaving(true);
+    try {
+      const payload = {
+        enabled: Boolean(emailRulesForm.enabled),
+        lookbackDays: Number(emailRulesForm.lookbackDays || 0),
+        limit: Number(emailRulesForm.limit || 0),
+        followUpDays: Number(emailRulesForm.followUpDays || 0),
+        followUpHours: Number(emailRulesForm.followUpHours || 0),
+        reminderOffsetHours: Number(emailRulesForm.reminderOffsetHours || 0),
+        dedupHours: Number(emailRulesForm.dedupHours || 0),
+        maxProcessed: Number(emailRulesForm.maxProcessed || 0),
+        priority: emailRulesForm.priority || "medium",
+        listId: emailRulesForm.listId || "",
+        tags: parseTagList(emailRulesForm.tags || ""),
+        providers: {
+          gmail: {
+            senders: parseTagList(emailRulesForm.gmailSenders || ""),
+            labelIds: parseTagList(emailRulesForm.gmailLabelIds || "")
+          },
+          outlook: {
+            senders: parseTagList(emailRulesForm.outlookSenders || ""),
+            folderIds: parseTagList(emailRulesForm.outlookFolderIds || "")
+          }
+        }
+      };
+      const resp = await fetch(`${serverUrl}/api/email/rules/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_save_failed");
+      setEmailRulesForm(mapRulesConfigToForm(data.config));
+      await loadEmailRulesStatus();
+    } catch (err) {
+      setError(err?.message || "email_rules_save_failed");
+    } finally {
+      setEmailRulesSaving(false);
     }
   }
 
@@ -550,6 +645,12 @@ export default function AikaToolsWorkbench({ serverUrl }) {
     if (active !== "email") return;
     loadEmailInbox();
   }, [active, emailProvider, emailLookbackDays]);
+
+  useEffect(() => {
+    if (active !== "email") return;
+    loadEmailRulesConfig();
+    loadEmailRulesStatus();
+  }, [active]);
 
   useEffect(() => {
     if (active !== "email") return;
@@ -1480,6 +1581,107 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                 <pre style={{ marginTop: 10, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(emailActionResult, null, 2)}
                 </pre>
+              )}
+            </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+              <SectionHeader title="Rules & Automation" helpKey="emailRules" />
+              {!emailRulesForm && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading rules...</div>
+              )}
+              {emailRulesForm && (
+                <>
+                  <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={emailRulesForm.enabled}
+                      onChange={(e) => setEmailRulesForm({ ...emailRulesForm, enabled: e.target.checked })}
+                    />
+                    Enable rules
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                    <label style={{ fontSize: 12 }}>
+                      Lookback days
+                      <input value={emailRulesForm.lookbackDays} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, lookbackDays: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Limit
+                      <input value={emailRulesForm.limit} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, limit: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Follow-up days
+                      <input value={emailRulesForm.followUpDays} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, followUpDays: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Follow-up hours
+                      <input value={emailRulesForm.followUpHours} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, followUpHours: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Reminder offset hours
+                      <input value={emailRulesForm.reminderOffsetHours} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, reminderOffsetHours: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Dedup hours
+                      <input value={emailRulesForm.dedupHours} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, dedupHours: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Max processed
+                      <input value={emailRulesForm.maxProcessed} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, maxProcessed: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      Priority
+                      <select value={emailRulesForm.priority} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, priority: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                        <option value="urgent">urgent</option>
+                      </select>
+                    </label>
+                    <label style={{ fontSize: 12 }}>
+                      List ID
+                      <input value={emailRulesForm.listId} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, listId: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                  </div>
+                  <label style={{ fontSize: 12, marginTop: 6 }}>
+                    Tags (comma)
+                    <input value={emailRulesForm.tags} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                  </label>
+                  <div style={{ marginTop: 10, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Gmail Rules</div>
+                    <label style={{ fontSize: 12 }}>
+                      Senders (comma)
+                      <input value={emailRulesForm.gmailSenders} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, gmailSenders: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12, marginTop: 6 }}>
+                      Label IDs (comma)
+                      <input value={emailRulesForm.gmailLabelIds} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, gmailLabelIds: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 10, borderTop: "1px solid var(--panel-border-subtle)", paddingTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Outlook Rules</div>
+                    <label style={{ fontSize: 12 }}>
+                      Senders (comma)
+                      <input value={emailRulesForm.outlookSenders} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, outlookSenders: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                    <label style={{ fontSize: 12, marginTop: 6 }}>
+                      Folder IDs (comma)
+                      <input value={emailRulesForm.outlookFolderIds} onChange={(e) => setEmailRulesForm({ ...emailRulesForm, outlookFolderIds: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
+                    </label>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                    <button onClick={saveEmailRules} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={emailRulesSaving}>
+                      {emailRulesSaving ? "Saving..." : "Save Rules"}
+                    </button>
+                    <button onClick={runEmailRules} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={emailRulesRunning}>
+                      {emailRulesRunning ? "Running..." : "Run Rules Now"}
+                    </button>
+                  </div>
+                  {emailRulesStatus && (
+                    <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
+                      Status: {emailRulesStatus.enabled ? "enabled" : "disabled"} | Last run: {emailRulesStatus.lastRunAt || "never"}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

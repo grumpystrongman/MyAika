@@ -1,6 +1,6 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
-import { matchEmailRule, runEmailRules } from "../src/email/emailRules.js";
+import { matchEmailRule, runEmailRules, getEmailRulesConfig, saveEmailRulesConfig } from "../src/email/emailRules.js";
 import { setProvider } from "../integrations/store.js";
 
 const baseConfig = {
@@ -50,4 +50,19 @@ test("runEmailRules creates follow-ups and dedups", async () => {
   assert.equal(created, 1);
 
   setProvider("email_rules", null, userId);
+});
+
+test("email rules config saves and loads", () => {
+  const userId = "email-rules-config";
+  setProvider("email_rules_config", null, userId);
+  const saved = saveEmailRulesConfig({
+    enabled: true,
+    lookbackDays: 3,
+    providers: { gmail: { senders: ["vip@example.com"] } }
+  }, userId);
+  assert.equal(saved.enabled, true);
+  const loaded = getEmailRulesConfig(userId);
+  assert.equal(loaded.enabled, true);
+  assert.ok(loaded.providers.gmail.senders.includes("vip@example.com"));
+  setProvider("email_rules_config", null, userId);
 });
