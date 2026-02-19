@@ -203,6 +203,8 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailRulesForm, setEmailRulesForm] = useState(null);
   const [emailRulesStatus, setEmailRulesStatus] = useState(null);
   const [emailRulesSaving, setEmailRulesSaving] = useState(false);
+  const [emailRulesPreview, setEmailRulesPreview] = useState(null);
+  const [emailRulesPreviewing, setEmailRulesPreviewing] = useState(false);
   const [todoReminderForm, setTodoReminderForm] = useState(null);
   const [todoReminderStatus, setTodoReminderStatus] = useState(null);
   const [todoReminderResult, setTodoReminderResult] = useState(null);
@@ -550,6 +552,21 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       setEmailRulesResult({ ok: false, error: err?.message || "email_rules_failed" });
     } finally {
       setEmailRulesRunning(false);
+    }
+  }
+
+  async function previewEmailRules() {
+    setEmailRulesPreviewing(true);
+    setEmailRulesPreview(null);
+    try {
+      const resp = await fetch(`${serverUrl}/api/email/rules/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_preview_failed");
+      setEmailRulesPreview(data);
+    } catch (err) {
+      setEmailRulesPreview({ ok: false, error: err?.message || "email_rules_preview_failed" });
+    } finally {
+      setEmailRulesPreviewing(false);
     }
   }
 
@@ -1799,11 +1816,47 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                     <button onClick={runEmailRules} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={emailRulesRunning}>
                       {emailRulesRunning ? "Running..." : "Run Rules Now"}
                     </button>
+                    <button onClick={previewEmailRules} style={{ padding: "6px 10px", borderRadius: 8 }} disabled={emailRulesPreviewing}>
+                      {emailRulesPreviewing ? "Previewing..." : "Preview Rules"}
+                    </button>
                   </div>
                   {emailRulesStatus && (
                     <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)" }}>
                       Status: {emailRulesStatus.enabled ? "enabled" : "disabled"} | Last run: {emailRulesStatus.lastRunAt || "never"}
                     </div>
+                  )}
+                  {emailRulesPreview?.preview && (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
+                        Preview: {emailRulesPreview.wouldCreate || 0} follow-ups would be created.
+                      </div>
+                      {emailRulesPreview.preview.length === 0 && (
+                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No matches for the current rules.</div>
+                      )}
+                      {emailRulesPreview.preview.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                          {emailRulesPreview.preview.slice(0, 10).map(item => (
+                            <div key={`${item.provider}-${item.id}`} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 8, padding: 8 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600 }}>{item.subject || "(no subject)"}</div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{item.from || ""} | {item.provider}</div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                                Follow-up: {item.followUpAt || "n/a"} | Reminder: {item.reminderAt || "n/a"}
+                              </div>
+                            </div>
+                          ))}
+                          {emailRulesPreview.preview.length > 10 && (
+                            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                              Showing 10 of {emailRulesPreview.preview.length} matches.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {emailRulesPreview && !emailRulesPreview.preview && (
+                    <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+{JSON.stringify(emailRulesPreview, null, 2)}
+                    </pre>
                   )}
                 </>
               )}

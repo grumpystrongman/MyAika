@@ -176,7 +176,7 @@ import {
   syncConfluenceConnector
 } from "./src/connectors/index.js";
 import { getEmailInbox } from "./src/connectors/emailInbox.js";
-import { runEmailRules, startEmailRulesLoop, getEmailRulesStatus, getEmailRulesConfig, saveEmailRulesConfig } from "./src/email/emailRules.js";
+import { runEmailRules, startEmailRulesLoop, getEmailRulesStatus, getEmailRulesConfig, saveEmailRulesConfig, previewEmailRules } from "./src/email/emailRules.js";
 import { startTodoReminderLoop, runTodoReminders, getTodoReminderStatus, getTodoReminderConfig, saveTodoReminderConfig } from "./src/todos/reminders.js";
 import {
   startTradingYoutubeLoop,
@@ -7365,6 +7365,20 @@ app.post("/api/email/rules/run", rateLimit, async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err?.message || "email_rules_run_failed" });
+  }
+});
+
+app.post("/api/email/rules/preview", rateLimit, async (req, res) => {
+  try {
+    const { providers, lookbackDays } = req.body || {};
+    const result = await previewEmailRules({
+      userId: getUserId(req),
+      providers: Array.isArray(providers) && providers.length ? providers : ["gmail", "outlook"],
+      lookbackDays
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_preview_failed" });
   }
 });
 

@@ -1,7 +1,7 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { matchEmailRule, runEmailRules, getEmailRulesConfig, saveEmailRulesConfig } from "../src/email/emailRules.js";
-import { setProvider } from "../integrations/store.js";
+import { getProvider, setProvider } from "../integrations/store.js";
 
 const baseConfig = {
   enabled: true,
@@ -50,6 +50,27 @@ test("runEmailRules creates follow-ups and dedups", async () => {
   assert.equal(created, 1);
 
   setProvider("email_rules", null, userId);
+});
+
+test("runEmailRules dry run previews matches without creating", async () => {
+  const userId = "email-rules-preview";
+  setProvider("email_rules", null, userId);
+  let created = 0;
+  const scheduleFollowUpFn = async () => {
+    created += 1;
+    return { todo: { id: `todo-${created}` } };
+  };
+  const fetchers = {
+    gmail: async () => ([
+      { id: "msg-preview-1", from: "ceo@example.com", subject: "Preview", receivedAt: "2026-02-19T12:00:00Z", labelIds: ["IMPORTANT"] }
+    ])
+  };
+  const result = await runEmailRules({ userId, providers: ["gmail"], config: baseConfig, fetchers, scheduleFollowUpFn, dryRun: true });
+  assert.equal(result.dryRun, true);
+  assert.equal(result.wouldCreate, 1);
+  assert.equal(created, 0);
+  const state = getProvider("email_rules", userId);
+  assert.equal(state, null);
 });
 
 test("email rules config saves and loads", () => {

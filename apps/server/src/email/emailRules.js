@@ -199,12 +199,12 @@ function pruneProcessed(entries, dedupMs, maxEntries) {
   return Object.fromEntries(cleaned);
 }
 
-export async function runEmailRules({ userId = "local", providers = ["gmail", "outlook"], lookbackDays, config, fetchers = {}, scheduleFollowUpFn } = {}) {
+export async function runEmailRules({ userId = "local", providers = ["gmail", "outlook"], lookbackDays, config, fetchers = {}, scheduleFollowUpFn, dryRun = false } = {}) {
   const rules = config || getEmailRulesConfig(userId);
   if (!rules.enabled) return { ok: false, disabled: true };
   const effectiveLookback = Number.isFinite(lookbackDays) ? Number(lookbackDays) : rules.lookbackDays;
   const state = loadRuleState(userId);
-  const summary = { ok: true, created: 0, skipped: 0, matched: 0, providers: {}, errors: [] };
+  const summary = { ok: true, created: 0, skipped: 0, matched: 0, providers: {}, errors: [], dryRun: Boolean(dryRun), wouldCreate: 0, preview: [] };
   const dedupMs = rules.dedupHours * 3600000;
   const maxProcessed = Math.max(100, rules.maxProcessed);
 
@@ -212,6 +212,7 @@ export async function runEmailRules({ userId = "local", providers = ["gmail", "o
     const providerRules = rules.providers?.[provider] || {};
     if (!providerHasRules(providerRules)) continue;
     const providerState = state.processed?.[provider] || {};
+    const nextProviderState = { ...providerState };
     const listFn = provider === "gmail"
       ? (fetchers.gmail || listGmailPreview)
       : (fetchers.outlook || listOutlookPreview);
@@ -238,6 +239,7 @@ export async function runEmailRules({ userId = "local", providers = ["gmail", "o
     }
 
     let processed = 0;
+    let previewed = 0;
     let matched = 0;
     for (const email of items || []) {
       if (!matchEmailRule(provider, email, rules)) continue;
@@ -250,32 +252,57 @@ export async function runEmailRules({ userId = "local", providers = ["gmail", "o
       }
       const { followUpAt, reminderAt } = computeFollowUpTimes(email?.receivedAt || "", rules);
       try {
-        const followUpFn = scheduleFollowUpFn || scheduleEmailFollowUp;
-        await followUpFn({
-          email,
-          followUpAt,
-          reminderAt,
-          priority: rules.priority || "medium",
-          tags: ["auto-followup", ...rules.tags],
-          listId: rules.listId || null,
-          notes: "Auto-created from email rule"
-        }, { userId });
-        providerState[key] = Date.now();
-        summary.created += 1;
-        processed += 1;
+        if (dryRun) {
+          summary.wouldCreate += 1;
+          previewed += 1;
+          summary.preview.push({
+            provider,
+            id: email?.id || "",
+            subject: email?.subject || "",
+            from: email?.from || "",
+            receivedAt: email?.receivedAt || "",
+            followUpAt,
+            reminderAt
+          });
+          processed += 1;
+        } else {
+          const followUpFn = scheduleFollowUpFn || scheduleEmailFollowUp;
+          await followUpFn({
+            email,
+            followUpAt,
+            reminderAt,
+            priority: rules.priority || "medium",
+            tags: ["auto-followup", ...rules.tags],
+            listId: rules.listId || null,
+            notes: "Auto-created from email rule"
+          }, { userId });
+          nextProviderState[key] = Date.now();
+          summary.created += 1;
+          processed += 1;
+        }
       } catch (err) {
         summary.errors.push({ provider, id: email?.id || "", error: err?.message || "followup_failed" });
       }
     }
 
-    state.processed[provider] = pruneProcessed(providerState, dedupMs, maxProcessed);
-    summary.providers[provider] = { matched, created: processed };
+    if (!dryRun) {
+      state.processed[provider] = pruneProcessed(nextProviderState, dedupMs, maxProcessed);
+    }
+    summary.providers[provider] = dryRun
+      ? { matched, previewed }
+      : { matched, created: processed };
     summary.matched += matched;
   }
 
-  state.lastRunAt = new Date().toISOString();
-  setProvider("email_rules", state, userId);
+  if (!dryRun) {
+    state.lastRunAt = new Date().toISOString();
+    setProvider("email_rules", state, userId);
+  }
   return summary;
+}
+
+export async function previewEmailRules(options = {}) {
+  return runEmailRules({ ...options, dryRun: true });
 }
 
 let rulesTimer = null;

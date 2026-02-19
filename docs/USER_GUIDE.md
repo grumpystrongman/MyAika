@@ -218,6 +218,7 @@ Key functions
 - `Enable rules`: Turns automation on/off without editing env vars.
 - `Interval minutes`: How often the rule engine runs automatically.
 - `Run on startup`: Executes rules once when the server boots.
+- `Preview Rules`: Shows which emails would create follow-ups without writing todos.
 - `Gmail Rules`: Match by sender or label IDs.
 - `Outlook Rules`: Match by sender or folder IDs.
 - `Dedup hours`: Prevents repeated follow-ups for the same message.
@@ -227,7 +228,8 @@ How to use
 1. Open `Rules & Automation`.
 2. Add senders and label/folder IDs.
 3. Choose follow-up timing, priority, tags, and list ID.
-4. Click `Save Rules`, then `Run Rules Now` to validate.
+4. Click `Save Rules`, then `Preview Rules` to validate matches.
+5. Click `Run Rules Now` when you are ready to create follow-ups.
 
 ### Reminder Delivery (Slack/Telegram/Email/In-app)
 ![Reminder delivery](user-guide/screenshots/tools_reminders.png)
