@@ -17,6 +17,7 @@ const BASE_RISK = {
   "email.convertToTodo": 15,
   "email.scheduleFollowUp": 35,
   "email.replyWithContext": 30,
+  "email.sendWithContext": 75,
   "email.send": 70,
   "file.read": 20,
   "file.write": 50,

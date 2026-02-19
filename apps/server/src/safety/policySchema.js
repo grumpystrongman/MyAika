@@ -76,6 +76,7 @@ export const defaultPolicy = policySchema.parse({
     "email.convertToTodo",
     "email.scheduleFollowUp",
     "email.replyWithContext",
+    "email.sendWithContext",
     "email.send",
     "spreadsheet.applyChanges",
     "memory.search",
@@ -120,6 +121,7 @@ export const defaultPolicy = policySchema.parse({
   ],
   requires_approval: [
     "email.send",
+    "email.sendWithContext",
     "file.delete",
     "system.modify",
     "install.software",

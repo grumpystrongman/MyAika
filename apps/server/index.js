@@ -176,6 +176,7 @@ import {
   syncConfluenceConnector
 } from "./src/connectors/index.js";
 import { getEmailInbox } from "./src/connectors/emailInbox.js";
+import { runEmailRules, startEmailRulesLoop, getEmailRulesStatus } from "./src/email/emailRules.js";
 import {
   startTradingYoutubeLoop,
   crawlTradingYoutubeSources,
@@ -272,6 +273,7 @@ startNotionSyncLoop();
 startSlackSyncLoop();
 startOutlookSyncLoop();
 startGmailSyncLoop();
+startEmailRulesLoop();
 startJiraSyncLoop();
 startConfluenceSyncLoop();
 startDailyPicksLoop();
@@ -7327,6 +7329,23 @@ app.get("/api/email/inbox", rateLimit, async (req, res) => {
     res.json({ ok: true, items });
   } catch (err) {
     res.status(500).json({ error: err?.message || "email_inbox_failed" });
+  }
+});
+
+app.get("/api/email/rules/status", rateLimit, async (req, res) => {
+  try {
+    res.json({ ok: true, status: getEmailRulesStatus(getUserId(req)) });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_status_failed" });
+  }
+});
+
+app.post("/api/email/rules/run", rateLimit, async (req, res) => {
+  try {
+    const result = await runEmailRules({ userId: getUserId(req) });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_rules_run_failed" });
   }
 });
 

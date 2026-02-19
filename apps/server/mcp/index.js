@@ -4,7 +4,7 @@ import { createNote, searchNotesTool } from "./tools/notes.js";
 import { createTodo, listTodos, updateTodo, completeTodo, createTodoList, listTodoLists, updateTodoList } from "./tools/todos.js";
 import { summarizeMeeting } from "./tools/meeting.js";
 import { proposeHold } from "./tools/calendar.js";
-import { draftReply, sendEmail, convertEmailToTodo, scheduleFollowUp, replyWithContextTool } from "./tools/email.js";
+import { draftReply, sendEmail, convertEmailToTodo, scheduleFollowUp, replyWithContextTool, sendWithContext } from "./tools/email.js";
 import { applyChanges } from "./tools/spreadsheet.js";
 import { writeMemoryTool, searchMemoryTool, rotateKeyTool } from "./tools/memory.js";
 import { actionRun } from "./tools/actionRunner.js";
@@ -223,6 +223,19 @@ registry.register(
     riskLevel: "medium"
   },
   replyWithContextTool
+);
+
+registry.register(
+  {
+    name: "email.sendWithContext",
+    description: "Send a context-aware reply (approval required).",
+    paramsSchema: { email: "object", tone: "string", signOffName: "string", ragTopK: "number", ragModel: "string", sendTo: "string[]", cc: "string[]", bcc: "string[]" },
+    requiresApproval: true,
+    outbound: true,
+    riskLevel: "high",
+    humanSummary: params => `Send context-aware reply to ${params?.email?.from || "recipient"}`
+  },
+  sendWithContext
 );
 
 registry.register(

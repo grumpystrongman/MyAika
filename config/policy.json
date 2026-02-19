@@ -15,6 +15,7 @@
     "email.convertToTodo",
     "email.scheduleFollowUp",
     "email.replyWithContext",
+    "email.sendWithContext",
     "email.send",
     "spreadsheet.applyChanges",
     "memory.search",
@@ -59,6 +60,7 @@
   ],
   "requires_approval": [
     "email.send",
+    "email.sendWithContext",
     "file.delete",
     "system.modify",
     "install.software",

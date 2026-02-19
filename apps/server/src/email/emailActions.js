@@ -51,6 +51,26 @@ function normalizeEmail(email = {}) {
   };
 }
 
+function extractEmailAddress(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  const match = text.match(/<([^>]+)>/);
+  if (match) return match[1].trim();
+  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  if (emailMatch) return emailMatch[0];
+  return text;
+}
+
+export function normalizeRecipients(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => extractEmailAddress(item)).map(item => item.trim()).filter(Boolean);
+  }
+  return String(value || "")
+    .split(",")
+    .map(item => extractEmailAddress(item).trim())
+    .filter(Boolean);
+}
+
 function buildEmailDetails(email, extraNotes = "") {
   const lines = [];
   if (email.from) lines.push(`From: ${email.from}`);
@@ -107,7 +127,7 @@ ${signOff}`;
     bcc: [],
     userId
   });
-  return { id: draft.id, subject, body };
+  return { id: draft.id, subject, body, to: originalEmail.to || [] };
 }
 
 export function buildEmailContextPrompt(email) {
@@ -199,12 +219,13 @@ export async function replyWithContext({ email, tone = "friendly", signOffName =
     filters: { meetingIdPrefix: "rag:" }
   });
   const contextText = rag?.answer || "";
+  const replyTo = normalizeRecipients(normalized.from || normalized.to || []);
   const draft = buildDraftReply({
     originalEmail: {
       subject: normalized.subject,
       body: normalized.body,
       from: normalized.from,
-      to: normalized.to
+      to: replyTo
     },
     tone,
     context: contextText,

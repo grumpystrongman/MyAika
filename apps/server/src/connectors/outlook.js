@@ -145,20 +145,28 @@ export function isOutlookConfigured(userId = "local") {
   return Boolean(stored?.access_token || stored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN);
 }
 
-export async function listOutlookPreview({ userId = "local", limit = 20, lookbackDays } = {}) {
+export async function listOutlookPreview({ userId = "local", limit = 20, lookbackDays, folderIds = [] } = {}) {
   const token = await getOutlookToken(userId);
   if (!token) return [];
-  const messages = await listMessages(token, { limit, lookbackDays });
-  return messages.map(msg => ({
-    provider: "outlook",
-    id: msg?.id || "",
-    subject: msg?.subject || "(no subject)",
-    from: msg?.from?.emailAddress?.address || msg?.from?.emailAddress?.name || "",
-    to: Array.isArray(msg?.toRecipients)
-      ? msg.toRecipients.map(r => r?.emailAddress?.address || r?.emailAddress?.name || "").filter(Boolean).join(", ")
-      : "",
-    receivedAt: msg?.receivedDateTime || "",
-    snippet: normalizeText(stripHtml(msg?.bodyPreview || "")),
-    webLink: msg?.webLink || ""
-  }));
+  const folders = Array.isArray(folderIds) && folderIds.length ? folderIds : [""];
+  const items = [];
+  for (const folderId of folders) {
+    const messages = await listMessages(token, { folderId, limit, lookbackDays });
+    items.push(...messages.map(msg => ({
+      provider: "outlook",
+      id: msg?.id || "",
+      subject: msg?.subject || "(no subject)",
+      from: msg?.from?.emailAddress?.address || msg?.from?.emailAddress?.name || "",
+      to: Array.isArray(msg?.toRecipients)
+        ? msg.toRecipients.map(r => r?.emailAddress?.address || r?.emailAddress?.name || "").filter(Boolean).join(", ")
+        : "",
+      receivedAt: msg?.receivedDateTime || "",
+      snippet: normalizeText(stripHtml(msg?.bodyPreview || "")),
+      webLink: msg?.webLink || "",
+      folderId: folderId || "inbox"
+    })));
+  }
+  return items
+    .sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0))
+    .slice(0, Number(limit || 20));
 }

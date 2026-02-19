@@ -4,7 +4,8 @@ import {
   buildDraftReply,
   createTodoFromEmail,
   scheduleEmailFollowUp,
-  replyWithContext
+  replyWithContext,
+  normalizeRecipients
 } from "../../src/email/emailActions.js";
 
 export function draftReply({ originalEmail, tone = "friendly", context = "", signOffName = "" }, contextData = {}) {
@@ -49,4 +50,15 @@ export async function scheduleFollowUp(params = {}, contextData = {}) {
 
 export async function replyWithContextTool(params = {}, contextData = {}) {
   return await replyWithContext(params, { userId: contextData.userId || "local" });
+}
+
+export async function sendWithContext(params = {}, contextData = {}, deps = {}) {
+  const replyFn = deps.replyWithContext || replyWithContext;
+  const sendFn = deps.sendEmail || sendEmail;
+  const { email, tone = "friendly", signOffName = "", ragTopK = 6, ragModel = "all", sendTo = null, cc = [], bcc = [] } = params;
+  const reply = await replyFn({ email, tone, signOffName, ragTopK, ragModel }, { userId: contextData.userId || "local" });
+  const fallbackTo = normalizeRecipients(email?.from || reply?.draft?.to || []);
+  const resolvedSendTo = Array.isArray(sendTo) && sendTo.length ? sendTo : fallbackTo;
+  const sendResult = await Promise.resolve(sendFn({ draftId: reply?.draft?.id, sendTo: resolvedSendTo, cc, bcc }, contextData));
+  return { ...reply, send: sendResult };
 }

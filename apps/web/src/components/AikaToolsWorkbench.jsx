@@ -188,6 +188,8 @@ export default function AikaToolsWorkbench({ serverUrl }) {
   const [emailContextLoading, setEmailContextLoading] = useState(false);
   const [emailSyncResult, setEmailSyncResult] = useState(null);
   const [emailSyncing, setEmailSyncing] = useState(false);
+  const [emailRulesResult, setEmailRulesResult] = useState(null);
+  const [emailRulesRunning, setEmailRulesRunning] = useState(false);
   const [emailTodoForm, setEmailTodoForm] = useState({ title: "", due: "", reminderAt: "", priority: "medium", tags: "", listId: "", notes: "" });
   const [emailFollowUpForm, setEmailFollowUpForm] = useState({
     followUpAt: "",
@@ -466,6 +468,21 @@ export default function AikaToolsWorkbench({ serverUrl }) {
       await loadEmailInbox();
     } finally {
       setEmailSyncing(false);
+    }
+  }
+
+  async function runEmailRules() {
+    setEmailRulesRunning(true);
+    setEmailRulesResult(null);
+    try {
+      const resp = await fetch(`${serverUrl}/api/email/rules/run`, { method: "POST" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_rules_failed");
+      setEmailRulesResult(data);
+    } catch (err) {
+      setEmailRulesResult({ ok: false, error: err?.message || "email_rules_failed" });
+    } finally {
+      setEmailRulesRunning(false);
     }
   }
 
@@ -1185,10 +1202,22 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                       ? "Sync Gmail + Outlook"
                       : `Sync ${emailProvider}`}
                 </button>
+                <button
+                  onClick={runEmailRules}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                  disabled={emailRulesRunning}
+                >
+                  {emailRulesRunning ? "Running Rules..." : "Run Auto Follow-ups"}
+                </button>
               </div>
               {emailSyncResult && (
                 <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(emailSyncResult, null, 2)}
+                </pre>
+              )}
+              {emailRulesResult && (
+                <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
+{JSON.stringify(emailRulesResult, null, 2)}
                 </pre>
               )}
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
@@ -1564,6 +1593,7 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                 BCC (comma)
                 <input value={emailSendForm.bcc} onChange={(e) => setEmailSendForm({ ...emailSendForm, bcc: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               <button
                 onClick={async () => {
                   const resp = await runTool("email.send", {
@@ -1574,10 +1604,31 @@ export default function AikaToolsWorkbench({ serverUrl }) {
                   });
                   setEmailSendResult(resp);
                 }}
-                style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}
+                style={{ padding: "6px 10px", borderRadius: 8 }}
               >
                 Send
               </button>
+              <button
+                onClick={async () => {
+                  if (!emailSelected) {
+                    setError("select_email_first");
+                    return;
+                  }
+                  const resp = await runTool("email.sendWithContext", {
+                    email: emailSelected,
+                    tone: emailDraftForm.tone,
+                    signOffName: emailDraftForm.signOffName,
+                    sendTo: parseTagList(emailSendForm.sendTo),
+                    cc: parseTagList(emailSendForm.cc),
+                    bcc: parseTagList(emailSendForm.bcc)
+                  });
+                  setEmailSendResult(resp);
+                }}
+                style={{ padding: "6px 10px", borderRadius: 8 }}
+              >
+                Send With Context
+              </button>
+            </div>
               {emailSendResult && (
                 <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
 {JSON.stringify(emailSendResult, null, 2)}

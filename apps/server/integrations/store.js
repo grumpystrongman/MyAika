@@ -13,6 +13,7 @@ const SENSITIVE_PROVIDERS = new Set([
   "notion",
   "outlook",
   "microsoft",
+  "email_rules",
   "jira",
   "confluence",
   "meta",

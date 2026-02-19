@@ -51,11 +51,11 @@ async function getMessage(token, messageId) {
   });
 }
 
-export async function listGmailPreview({ userId = "local", limit = 20, lookbackDays, query = "" } = {}) {
+export async function listGmailPreview({ userId = "local", limit = 20, lookbackDays, query = "", labelIds } = {}) {
   const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.readonly"], userId);
-  const labelIds = parseList(process.env.GMAIL_LABEL_IDS);
+  const resolvedLabels = Array.isArray(labelIds) && labelIds.length ? labelIds : parseList(process.env.GMAIL_LABEL_IDS);
   const q = buildQuery({ lookbackDays, query });
-  const ids = await listMessageIds(token, { limit, query: q, labelIds });
+  const ids = await listMessageIds(token, { limit, query: q, labelIds: resolvedLabels });
   const previews = [];
   for (const msg of ids) {
     const detail = await getMessage(token, msg.id);
@@ -74,7 +74,8 @@ export async function listGmailPreview({ userId = "local", limit = 20, lookbackD
       to,
       receivedAt,
       snippet: normalizeText(detail?.snippet || ""),
-      webLink: gmailWebLink(detail?.id || msg.id)
+      webLink: gmailWebLink(detail?.id || msg.id),
+      labelIds: detail?.labelIds || []
     });
   }
   return previews;
