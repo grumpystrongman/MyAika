@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function ConnectionsPanel({ serverUrl }) {
   const [connections, setConnections] = useState([]);
@@ -93,17 +93,17 @@ export default function ConnectionsPanel({ serverUrl }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Connections</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {connections.map(conn => (
-            <div key={conn.id} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10 }}>
+            <div key={conn.id} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>{conn.label}</div>
                   <div style={{ fontSize: 11, color: "#6b7280" }}>{conn.detail}</div>
                   {conn.method && (
-                    <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.6 }}>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>
                       {conn.method}
                     </div>
                   )}
@@ -147,7 +147,7 @@ export default function ConnectionsPanel({ serverUrl }) {
         </div>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Panic Switch</div>
         <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
           Disable all outbound tools that can send or modify external systems.
@@ -157,11 +157,11 @@ export default function ConnectionsPanel({ serverUrl }) {
         </button>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Pairing Requests</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {(pairings.pending || []).map(request => (
-            <div key={request.id} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10 }}>
+            <div key={request.id} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 10 }}>
               <div style={{ fontWeight: 600 }}>{request.channel} · {request.senderName || request.senderId}</div>
               <div style={{ fontSize: 11, color: "#6b7280" }}>Code: {request.code}</div>
               <div style={{ fontSize: 11, color: "#6b7280" }}>{request.preview}</div>
@@ -177,3 +177,5 @@ export default function ConnectionsPanel({ serverUrl }) {
     </div>
   );
 }
+
+

@@ -1,7 +1,90 @@
 import { getProvider, setProvider } from "./store.js";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
+import ffmpegPath from "ffmpeg-static";
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function getTelegramToken() {
+  const stored = getProvider("telegram") || {};
+  return stored.token || process.env.TELEGRAM_BOT_TOKEN || "";
+}
+
+function resolveFfmpeg() {
+  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH;
+  }
+  if (ffmpegPath && fs.existsSync(ffmpegPath)) {
+    return ffmpegPath;
+  }
+  return null;
+}
+
+function runFfmpeg(args) {
+  const exe = resolveFfmpeg();
+  if (!exe) return false;
+  const result = spawnSync(exe, args, { stdio: "ignore" });
+  return result.status === 0;
+}
+
+function guessAudioMimeType(filePath) {
+  const ext = path.extname(filePath || "").toLowerCase();
+  if (ext === ".ogg" || ext === ".oga") return "audio/ogg";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".wav") return "audio/wav";
+  if (ext === ".m4a") return "audio/mp4";
+  return "application/octet-stream";
+}
+
+function buildTelegramFileUrl(token, filePath) {
+  return `https://api.telegram.org/file/bot${token}/${filePath}`;
+}
+
+async function sendTelegramFile({ chatId, filePath, field, method, mimeType, filename, caption }) {
+  const token = getTelegramToken();
+  if (!token) throw new Error("telegram_token_missing");
+  const url = `https://api.telegram.org/bot${token}/${method}`;
+  const buffer = await fs.promises.readFile(filePath);
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  if (caption) form.append("caption", caption);
+  form.append(field, new Blob([buffer], { type: mimeType }), filename);
+  const r = await fetch(url, { method: "POST", body: form });
+  if (!r.ok) {
+    const msg = await r.text();
+    throw new Error(msg || "telegram_send_failed");
+  }
+  return await r.json();
+}
+
+async function ensureOggOpus(inputPath) {
+  const ext = path.extname(inputPath || "").toLowerCase();
+  if (ext === ".ogg" || ext === ".oga") {
+    return { path: inputPath, cleanup: false, mime: "audio/ogg" };
+  }
+  const exe = resolveFfmpeg();
+  if (!exe) return { path: "", cleanup: false, mime: "" };
+  const outPath = path.join(os.tmpdir(), `aika_voice_${Date.now()}_${Math.random().toString(36).slice(2)}.ogg`);
+  const ok = runFfmpeg([
+    "-y",
+    "-i",
+    inputPath,
+    "-c:a",
+    "libopus",
+    "-b:a",
+    "24k",
+    "-vbr",
+    "on",
+    "-application",
+    "voip",
+    outPath
+  ]);
+  if (!ok || !fs.existsSync(outPath)) return { path: "", cleanup: false, mime: "" };
+  return { path: outPath, cleanup: true, mime: "audio/ogg" };
 }
 
 export async function sendSlackMessage(channel, text) {
@@ -44,6 +127,78 @@ export async function sendTelegramMessage(chatId, text) {
     setProvider("telegram", { ...stored, lastUsedAt: nowIso() });
   }
   return await r.json();
+}
+
+export async function downloadTelegramFile({ fileId, destDir } = {}) {
+  const token = getTelegramToken();
+  if (!token) throw new Error("telegram_token_missing");
+  if (!fileId) throw new Error("telegram_file_id_missing");
+  const infoResp = await fetch(`https://api.telegram.org/bot${token}/getFile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_id: fileId })
+  });
+  const info = await infoResp.json().catch(() => ({}));
+  if (!infoResp.ok || !info?.ok || !info?.result?.file_path) {
+    throw new Error(info?.description || "telegram_get_file_failed");
+  }
+  const filePath = info.result.file_path;
+  const ext = path.extname(filePath || "") || ".dat";
+  const baseDir = destDir || path.join(os.tmpdir(), "aika_telegram");
+  if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+  const localPath = path.join(
+    baseDir,
+    `tg_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`
+  );
+  const fileUrl = buildTelegramFileUrl(token, filePath);
+  const fileResp = await fetch(fileUrl);
+  if (!fileResp.ok) throw new Error("telegram_file_download_failed");
+  const buffer = Buffer.from(await fileResp.arrayBuffer());
+  await fs.promises.writeFile(localPath, buffer);
+  return { path: localPath, size: buffer.length, filePath };
+}
+
+export async function sendTelegramVoiceNote(chatId, filePath, caption = "") {
+  const voice = await ensureOggOpus(filePath);
+  let cleanup = null;
+  try {
+    if (voice?.path) {
+      cleanup = voice.cleanup ? voice.path : null;
+      const result = await sendTelegramFile({
+        chatId,
+        filePath: voice.path,
+        field: "voice",
+        method: "sendVoice",
+        mimeType: voice.mime || "audio/ogg",
+        filename: "aika.ogg",
+        caption
+      });
+      const stored = getProvider("telegram") || {};
+      if (stored && Object.keys(stored).length) {
+        setProvider("telegram", { ...stored, lastUsedAt: nowIso() });
+      }
+      return result;
+    }
+    const mimeType = guessAudioMimeType(filePath);
+    const result = await sendTelegramFile({
+      chatId,
+      filePath,
+      field: "audio",
+      method: "sendAudio",
+      mimeType,
+      filename: `aika${path.extname(filePath) || ".wav"}`,
+      caption
+    });
+    const stored = getProvider("telegram") || {};
+    if (stored && Object.keys(stored).length) {
+      setProvider("telegram", { ...stored, lastUsedAt: nowIso() });
+    }
+    return result;
+  } finally {
+    if (cleanup) {
+      try { fs.unlinkSync(cleanup); } catch {}
+    }
+  }
 }
 
 export async function sendDiscordMessage(content) {

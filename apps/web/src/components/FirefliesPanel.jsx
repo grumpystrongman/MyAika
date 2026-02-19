@@ -273,7 +273,7 @@ function KnowledgeGraph({ graph, width = 520, height = 320, selectedId = "", onS
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <canvas ref={canvasRef} width={width} height={height} style={{ width: "100%", borderRadius: 12, background: "#0f172a" }} />
-      <div style={{ fontSize: 11, color: "#94a3b8" }}>
+      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
         {hovered ? `Hover: ${hovered.id} (${hovered.count || 0})` : "Drag to move, scroll to zoom, click a node for details."}
       </div>
     </div>
@@ -532,7 +532,7 @@ export default function FirefliesPanel({ serverUrl }) {
       <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>Fireflies RAG</div>
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Status</div>
         {status ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>
@@ -545,48 +545,48 @@ export default function FirefliesPanel({ serverUrl }) {
           <div style={{ fontSize: 12, color: "#6b7280" }}>{loading ? "Loading..." : "No status yet."}</div>
         )}
         {syncInfo?.lastResult && !syncInfo?.running && (
-          <div style={{ marginTop: 6, fontSize: 11, color: "#64748b" }}>
+          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
             Last sync: {syncInfo.lastResult.finishedAt || "unknown"} · Synced {syncInfo.lastResult.syncedMeetings || 0} · Skipped {syncInfo.lastResult.skippedMeetings || 0}
           </div>
         )}
       </div>
 
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Sync Fireflies</div>
           <label style={{ display: "block", fontSize: 12, color: "#6b7280" }}>Limit (0 = all)</label>
           <input
             type="number"
             value={syncLimit}
             onChange={(e) => setSyncLimit(e.target.value)}
-            style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db", marginTop: 6 }}
+            style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)", marginTop: 6 }}
           />
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12 }}>
             <input type="checkbox" checked={forceSync} onChange={(e) => setForceSync(e.target.checked)} />
             Force re-sync
           </label>
-          <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
             Existing meetings are skipped unless Force re-sync is enabled.
           </div>
           <button onClick={handleSync} style={{ marginTop: 10, padding: "6px 10px", borderRadius: 8 }}>
             Sync Fireflies
           </button>
-          {syncStatus && <div style={{ marginTop: 8, fontSize: 12, color: "#374151" }}>{syncStatus}</div>}
+          {syncStatus && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>{syncStatus}</div>}
           {syncResult && (
-            <pre style={{ marginTop: 8, fontSize: 11, background: "#f9fafb", padding: 8, borderRadius: 8, overflowX: "auto" }}>
+            <pre style={{ marginTop: 8, fontSize: 11, background: "var(--panel-bg-soft)", padding: 8, borderRadius: 8, overflowX: "auto" }}>
               {JSON.stringify(syncResult, null, 2)}
             </pre>
           )}
         </div>
 
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Ask Fireflies RAG</div>
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             rows={4}
             placeholder="Summarize my last week of recordings."
-            style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db" }}
+            style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
           />
           <button
             onClick={handleAsk}
@@ -596,43 +596,43 @@ export default function FirefliesPanel({ serverUrl }) {
             {asking ? "Asking..." : "Ask"}
           </button>
           {answer && (
-            <div style={{ marginTop: 10, fontSize: 12, color: "#334155", whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
               {answer}
             </div>
           )}
         </div>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>Fireflies Knowledge Map</div>
           <div style={{ display: "flex", gap: 8 }}>
             {meetingFilter && (
-              <button onClick={clearMeetingFilter} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+              <button onClick={clearMeetingFilter} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}>
                 Clear Filter
               </button>
             )}
-            <button onClick={loadGraph} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+            <button onClick={loadGraph} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}>
               Refresh
             </button>
           </div>
         </div>
-        {graphStatus && <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>{graphStatus}</div>}
+        {graphStatus && <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>{graphStatus}</div>}
         {!graphData?.nodes?.length ? (
-          <div style={{ fontSize: 12, color: "#94a3b8" }}>No Fireflies graph data yet.</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No Fireflies graph data yet.</div>
         ) : (
           <KnowledgeGraph graph={graphData} selectedId={selectedNode} onSelect={handleSelectNode} />
         )}
-        <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+        <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
           Nodes represent participants and #topics extracted from meeting titles. Click a node to see details.
         </div>
         {meetingFilter && (
-          <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
+          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
             Filtered by {meetingFilter.type}: <strong>{meetingFilter.label}</strong>
           </div>
         )}
         {graphData && (
-          <div style={{ display: "grid", gap: 8, marginTop: 10, fontSize: 11, color: "#64748b" }}>
+          <div style={{ display: "grid", gap: 8, marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
             {graphData.topParticipants?.length ? (
               <div>Top participants: {graphData.topParticipants.map(item => `${item.name} (${item.count})`).join(", ")}</div>
             ) : null}
@@ -658,10 +658,10 @@ export default function FirefliesPanel({ serverUrl }) {
             width: "min(720px, 92vw)",
             maxHeight: "80vh",
             overflow: "auto",
-            background: "#ffffff",
+            background: "var(--panel-bg)",
             borderRadius: 14,
             padding: 16,
-            border: "1px solid #e2e8f0",
+            border: "1px solid var(--panel-border)",
             boxShadow: "0 24px 60px rgba(15,23,42,0.25)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -670,23 +670,23 @@ export default function FirefliesPanel({ serverUrl }) {
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {meetingFilter && (
-                  <button onClick={clearMeetingFilter} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+                  <button onClick={clearMeetingFilter} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}>
                     Clear Filter
                   </button>
                 )}
-                <button onClick={() => setSelectedNode("")} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11 }}>
+                <button onClick={() => setSelectedNode("")} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 11 }}>
                   Close
                 </button>
               </div>
             </div>
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
               Occurs in {graphData?.nodes?.find(node => node.id === selectedNode)?.count || 0} meeting(s).
             </div>
             {nodeDetailsStatus && (
-              <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>{nodeDetailsStatus}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>{nodeDetailsStatus}</div>
             )}
             {nodeDetails?.summary && (
-              <div style={{ fontSize: 12, color: "#334155", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 {nodeDetails.summary}
               </div>
             )}
@@ -695,11 +695,11 @@ export default function FirefliesPanel({ serverUrl }) {
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Top snippets</div>
                 <div style={{ display: "grid", gap: 8 }}>
                   {nodeDetails.snippets.map(snippet => (
-                    <div key={snippet.chunk_id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, color: "#475569", fontWeight: 600 }}>
+                    <div key={snippet.chunk_id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>
                         {snippet.meeting_title || "Meeting"} · {snippet.occurred_at || ""}
                       </div>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>{snippet.chunk_id}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{snippet.chunk_id}</div>
                       <div style={{ marginTop: 6, fontSize: 12 }}>{snippet.text}</div>
                     </div>
                   ))}
@@ -710,7 +710,7 @@ export default function FirefliesPanel({ serverUrl }) {
               {(nodeDetails?.meetings || meetings).slice(0, 8).map(item => {
                 const summary = parseSummary(item.summary_json);
                 return (
-                  <div key={item.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+                  <div key={item.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                     <div style={{ fontWeight: 600 }}>{item.title || "Meeting"}</div>
                     <div style={{ fontSize: 11, color: "#6b7280" }}>{item.occurred_at || "Unknown date"}</div>
                     {summary && <div style={{ marginTop: 6, fontSize: 12 }}>{summary}</div>}
@@ -718,14 +718,14 @@ export default function FirefliesPanel({ serverUrl }) {
                 );
               })}
               {(nodeDetails?.meetings || meetings).length === 0 && (
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>No meetings match this filter yet.</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No meetings match this filter yet.</div>
               )}
             </div>
           </div>
         </div>
       )}
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Recent Meeting Summaries</div>
         {meetings.length === 0 ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>No meetings indexed yet.</div>
@@ -734,12 +734,12 @@ export default function FirefliesPanel({ serverUrl }) {
             {meetings.map(item => {
               const summary = parseSummary(item.summary_json);
               return (
-                <div key={item.id} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10 }}>
+                <div key={item.id} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 10 }}>
                   <div style={{ fontWeight: 600 }}>{item.title || "Meeting"}</div>
                   <div style={{ fontSize: 11, color: "#6b7280" }}>{item.occurred_at || "Unknown date"}</div>
                   {summary && <div style={{ marginTop: 6, fontSize: 12 }}>{summary}</div>}
                   {item.source_url && (
-                    <a href={item.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2563eb" }}>
+                    <a href={item.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--accent)" }}>
                       Open transcript
                     </a>
                   )}
@@ -750,7 +750,7 @@ export default function FirefliesPanel({ serverUrl }) {
         )}
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Local Recordings</div>
         {recordingEntries.length === 0 ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>No recordings indexed yet.</div>
@@ -759,12 +759,12 @@ export default function FirefliesPanel({ serverUrl }) {
             {recordingEntries.map(item => {
               const summary = parseSummary(item.summary_json);
               return (
-                <div key={item.id} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10 }}>
+                <div key={item.id} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 10 }}>
                   <div style={{ fontWeight: 600 }}>{item.title || "Recording"}</div>
                   <div style={{ fontSize: 11, color: "#6b7280" }}>{item.occurred_at || "Unknown date"}</div>
                   {summary && <div style={{ marginTop: 6, fontSize: 12 }}>{summary}</div>}
                   {item.source_url && (
-                    <a href={item.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#2563eb" }}>
+                    <a href={item.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--accent)" }}>
                       Open audio
                     </a>
                   )}
@@ -776,7 +776,7 @@ export default function FirefliesPanel({ serverUrl }) {
       </div>
 
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Memory indexed into RAG</div>
           {memoryEntries.length === 0 ? (
             <div style={{ fontSize: 12, color: "#6b7280" }}>No memory entries yet.</div>
@@ -792,7 +792,7 @@ export default function FirefliesPanel({ serverUrl }) {
           )}
         </div>
 
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Thumbs‑up feedback indexed</div>
           {feedbackEntries.length === 0 ? (
             <div style={{ fontSize: 12, color: "#6b7280" }}>No feedback entries yet.</div>
@@ -810,11 +810,11 @@ export default function FirefliesPanel({ serverUrl }) {
       </div>
 
       {citations.length > 0 && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Citations</div>
           <div style={{ display: "grid", gap: 8 }}>
             {citations.map((cite, idx) => (
-              <details key={`${cite.chunk_id}-${idx}`} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 8 }}>
+              <details key={`${cite.chunk_id}-${idx}`} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 8 }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>
                   {cite.meeting_title || "Meeting"} ({cite.occurred_at || "Unknown date"})
                 </summary>
@@ -828,3 +828,7 @@ export default function FirefliesPanel({ serverUrl }) {
     </div>
   );
 }
+
+
+
+

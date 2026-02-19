@@ -46,16 +46,53 @@ const THINKING_CUES = [
 
 const THEMES = [
   {
+    id: "aurora",
+    label: "Aurora Glass",
+    vars: {
+      "--app-bg": "#0c0f1d",
+      "--app-gradient": "radial-gradient(1200px 700px at 12% 8%, rgba(113, 125, 201, 0.35), transparent 60%), radial-gradient(900px 600px at 90% 12%, rgba(232, 176, 255, 0.28), transparent 55%), radial-gradient(1200px 800px at 50% 100%, rgba(117, 232, 255, 0.18), transparent 60%), linear-gradient(135deg, #0b0d18, #14172c 45%, #0f1122)",
+      "--panel-bg": "rgba(18, 20, 34, 0.82)",
+      "--panel-bg-soft": "rgba(255, 255, 255, 0.06)",
+      "--panel-border": "rgba(171, 185, 255, 0.22)",
+      "--panel-border-strong": "rgba(171, 185, 255, 0.4)",
+      "--panel-border-subtle": "rgba(171, 185, 255, 0.12)",
+      "--text-primary": "#edf0ff",
+      "--text-muted": "#b4bbd6",
+      "--accent": "#8ab4ff",
+      "--accent-2": "#f0b3ff",
+      "--accent-3": "#7bf0ff",
+      "--button-bg": "rgba(35, 38, 60, 0.7)",
+      "--button-bg-strong": "rgba(138, 180, 255, 0.22)",
+      "--chip-bg": "rgba(138, 180, 255, 0.2)",
+      "--chip-border": "rgba(138, 180, 255, 0.55)",
+      "--input-bg": "rgba(16, 18, 32, 0.72)",
+      "--code-bg": "rgba(9, 12, 22, 0.85)",
+      "--code-text": "#d7deff"
+    }
+  },
+  {
     id: "light",
     label: "Light",
     vars: {
       "--app-bg": "#f4f6fb",
-      "--panel-bg": "#ffffff",
+      "--app-gradient": "radial-gradient(1200px 700px at 10% 0%, rgba(147, 197, 253, 0.35), transparent 60%), radial-gradient(900px 600px at 90% 0%, rgba(251, 207, 232, 0.35), transparent 55%), linear-gradient(135deg, #f4f6fb, #eef2ff 45%, #f9fafb)",
+      "--panel-bg": "rgba(255, 255, 255, 0.92)",
+      "--panel-bg-soft": "rgba(15, 23, 42, 0.04)",
       "--panel-border": "#e5e7eb",
+      "--panel-border-strong": "#d1d5db",
+      "--panel-border-subtle": "#f3f4f6",
       "--text-primary": "#111827",
       "--text-muted": "#6b7280",
       "--accent": "#2563eb",
-      "--button-bg": "#f3f4f6"
+      "--accent-2": "#7c3aed",
+      "--accent-3": "#06b6d4",
+      "--button-bg": "#f3f4f6",
+      "--button-bg-strong": "#e0e7ff",
+      "--chip-bg": "var(--chip-bg)",
+      "--chip-border": "#c7ddff",
+      "--input-bg": "#ffffff",
+      "--code-bg": "#0b1220",
+      "--code-text": "#e5e7eb"
     }
   },
   {
@@ -63,12 +100,24 @@ const THEMES = [
     label: "Dracula",
     vars: {
       "--app-bg": "#0f1117",
-      "--panel-bg": "#1b1f2a",
+      "--app-gradient": "radial-gradient(1200px 700px at 15% 10%, rgba(189, 147, 249, 0.22), transparent 60%), radial-gradient(900px 600px at 85% 10%, rgba(139, 233, 253, 0.18), transparent 55%), linear-gradient(135deg, #0f1117, #141824 45%, #0b0d14)",
+      "--panel-bg": "rgba(27, 31, 42, 0.88)",
+      "--panel-bg-soft": "rgba(248, 248, 242, 0.06)",
       "--panel-border": "#2b3140",
+      "--panel-border-strong": "#3a4258",
+      "--panel-border-subtle": "#242a37",
       "--text-primary": "#f8f8f2",
       "--text-muted": "#b0b8d3",
       "--accent": "#bd93f9",
-      "--button-bg": "#2c3142"
+      "--accent-2": "#ff79c6",
+      "--accent-3": "#8be9fd",
+      "--button-bg": "#2c3142",
+      "--button-bg-strong": "rgba(189, 147, 249, 0.25)",
+      "--chip-bg": "rgba(189, 147, 249, 0.2)",
+      "--chip-border": "rgba(189, 147, 249, 0.45)",
+      "--input-bg": "rgba(20, 23, 34, 0.85)",
+      "--code-bg": "#0b1220",
+      "--code-text": "#e5e7eb"
     }
   },
   {
@@ -76,12 +125,24 @@ const THEMES = [
     label: "One Dark",
     vars: {
       "--app-bg": "#0f141b",
-      "--panel-bg": "#1a212b",
+      "--app-gradient": "radial-gradient(1200px 700px at 10% 0%, rgba(97, 175, 239, 0.2), transparent 60%), radial-gradient(900px 600px at 85% 5%, rgba(198, 120, 221, 0.18), transparent 55%), linear-gradient(135deg, #0f141b, #151b24 45%, #0e1218)",
+      "--panel-bg": "rgba(26, 33, 43, 0.88)",
+      "--panel-bg-soft": "rgba(230, 237, 247, 0.06)",
       "--panel-border": "#2b3442",
+      "--panel-border-strong": "#3a4558",
+      "--panel-border-subtle": "#232c38",
       "--text-primary": "#e6edf7",
       "--text-muted": "#9aa7bd",
       "--accent": "#61afef",
-      "--button-bg": "#2b3442"
+      "--accent-2": "#c678dd",
+      "--accent-3": "#56b6c2",
+      "--button-bg": "#2b3442",
+      "--button-bg-strong": "rgba(97, 175, 239, 0.22)",
+      "--chip-bg": "rgba(97, 175, 239, 0.2)",
+      "--chip-border": "rgba(97, 175, 239, 0.45)",
+      "--input-bg": "rgba(20, 26, 34, 0.82)",
+      "--code-bg": "#0b1220",
+      "--code-text": "#e5e7eb"
     }
   },
   {
@@ -89,12 +150,24 @@ const THEMES = [
     label: "Nord",
     vars: {
       "--app-bg": "#2e3440",
-      "--panel-bg": "#3b4252",
+      "--app-gradient": "radial-gradient(1200px 700px at 12% 0%, rgba(136, 192, 208, 0.22), transparent 60%), radial-gradient(900px 600px at 85% 0%, rgba(191, 209, 255, 0.18), transparent 55%), linear-gradient(135deg, #2e3440, #3b4252 45%, #2b313b)",
+      "--panel-bg": "rgba(59, 66, 82, 0.86)",
+      "--panel-bg-soft": "rgba(236, 239, 244, 0.08)",
       "--panel-border": "#4c566a",
+      "--panel-border-strong": "#5a657b",
+      "--panel-border-subtle": "#414a5c",
       "--text-primary": "#eceff4",
       "--text-muted": "#cbd5e1",
       "--accent": "#88c0d0",
-      "--button-bg": "#434c5e"
+      "--accent-2": "#b48ead",
+      "--accent-3": "#8fbcbb",
+      "--button-bg": "#434c5e",
+      "--button-bg-strong": "rgba(136, 192, 208, 0.22)",
+      "--chip-bg": "rgba(136, 192, 208, 0.2)",
+      "--chip-border": "rgba(136, 192, 208, 0.45)",
+      "--input-bg": "rgba(47, 54, 66, 0.85)",
+      "--code-bg": "#0b1220",
+      "--code-text": "#e5e7eb"
     }
   },
   {
@@ -102,12 +175,24 @@ const THEMES = [
     label: "Catppuccin Mocha",
     vars: {
       "--app-bg": "#1e1e2e",
-      "--panel-bg": "#24273a",
+      "--app-gradient": "radial-gradient(1200px 700px at 10% 0%, rgba(198, 160, 246, 0.22), transparent 60%), radial-gradient(900px 600px at 85% 10%, rgba(148, 226, 213, 0.18), transparent 55%), linear-gradient(135deg, #1e1e2e, #24273a 45%, #181826)",
+      "--panel-bg": "rgba(36, 39, 58, 0.9)",
+      "--panel-bg-soft": "rgba(244, 244, 246, 0.06)",
       "--panel-border": "#363a4f",
+      "--panel-border-strong": "#4b5069",
+      "--panel-border-subtle": "#2f3347",
       "--text-primary": "#f4f4f6",
       "--text-muted": "#b8c0e0",
       "--accent": "#c6a0f6",
-      "--button-bg": "#303446"
+      "--accent-2": "#f5bde6",
+      "--accent-3": "#94e2d5",
+      "--button-bg": "#303446",
+      "--button-bg-strong": "rgba(198, 160, 246, 0.22)",
+      "--chip-bg": "rgba(198, 160, 246, 0.2)",
+      "--chip-border": "rgba(198, 160, 246, 0.45)",
+      "--input-bg": "rgba(27, 29, 45, 0.86)",
+      "--code-bg": "#0b1220",
+      "--code-text": "#e5e7eb"
     }
   }
 ];
@@ -430,7 +515,7 @@ export default function Home() {
     const features = params.get("featuresView");
     if (features && VALID_FEATURES_VIEWS.has(features)) setFeaturesView(features);
   }, []);
-  const [themeId, setThemeId] = useState("light");
+  const [themeId, setThemeId] = useState("aurora");
   const [appBackground, setAppBackground] = useState("");
   const [avatarBackground, setAvatarBackground] = useState("none");
   const [meetingCommandListening, setMeetingCommandListening] = useState(false);
@@ -487,6 +572,7 @@ export default function Home() {
     Object.entries(theme.vars).forEach(([key, value]) => {
       document.documentElement.style.setProperty(key, value);
     });
+    document.body.dataset.aikaTheme = theme.id;
     document.body.style.backgroundColor = theme.vars["--app-bg"];
     if (appBackground) {
       document.body.style.backgroundImage = `url(${appBackground})`;
@@ -2067,7 +2153,7 @@ export default function Home() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#0b1220",
+        background: "var(--code-bg)",
         color: "#e5e7eb",
         padding: 24
       }}>
@@ -2083,7 +2169,7 @@ export default function Home() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#0b1220",
+        background: "var(--code-bg)",
         color: "#e5e7eb",
         padding: 24
       }}>
@@ -2105,16 +2191,16 @@ export default function Home() {
             style={{
               padding: "10px 16px",
               borderRadius: 10,
-              border: "1px solid #334155",
+              border: "1px solid var(--panel-border-strong)",
               background: "#1d4ed8",
-              color: "white",
+              color: "var(--panel-bg)",
               fontWeight: 600,
               cursor: "pointer"
             }}
           >
             Sign in with Google
           </button>
-          <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
+          <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
             After signing in, refresh this page to continue.
           </div>
         </div>
@@ -2788,14 +2874,17 @@ export default function Home() {
   }
 
     return (
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "1.15fr 0.85fr",
-        height: "100vh",
-        background: "var(--app-bg)",
-        color: "var(--text-primary)"
-      }}>
-        <div style={{ position: "relative" }}>
+      <div
+        className="app-shell"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.15fr 0.85fr",
+          height: "100vh",
+          background: "var(--app-gradient)",
+          color: "var(--text-primary)"
+        }}
+      >
+        <div className="avatar-stage" style={{ position: "relative" }}>
           {skillToasts.length > 0 && (
             <div style={{
               position: "absolute",
@@ -2809,7 +2898,7 @@ export default function Home() {
             }}>
               {skillToasts.map(t => (
                 <div key={t.id} style={{
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--panel-border-strong)",
                   background: "#fefce8",
                   color: "#92400e",
                   padding: "8px 10px",
@@ -2841,15 +2930,19 @@ export default function Home() {
           />
       </div>
 
-      <div style={{
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        background: "var(--panel-bg)",
-        color: "var(--text-primary)",
-        borderLeft: "1px solid var(--panel-border)"
-      }}>
+      <div
+        className="side-panel"
+        style={{
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          background: "var(--panel-bg)",
+          color: "var(--text-primary)",
+          borderLeft: "1px solid var(--panel-border-strong)",
+          backdropFilter: "blur(18px)"
+        }}
+      >
         {!audioUnlocked && (
           <div style={{
             border: "1px solid #f59e0b",
@@ -2905,8 +2998,8 @@ export default function Home() {
             style={{
               padding: "8px 12px",
               borderRadius: 10,
-              border: activeTab === "chat" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-              background: activeTab === "chat" ? "#e6f0ff" : "white"
+              border: activeTab === "chat" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+              background: activeTab === "chat" ? "var(--chip-bg)" : "var(--panel-bg)"
             }}
           >
             Chat
@@ -2916,8 +3009,8 @@ export default function Home() {
             style={{
               padding: "8px 12px",
               borderRadius: 10,
-              border: activeTab === "recordings" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-              background: activeTab === "recordings" ? "#e6f0ff" : "white"
+              border: activeTab === "recordings" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+              background: activeTab === "recordings" ? "var(--chip-bg)" : "var(--panel-bg)"
             }}
           >
             Recordings
@@ -2927,8 +3020,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "workbench" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "workbench" ? "#e6f0ff" : "white"
+                border: activeTab === "workbench" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "workbench" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Aika Tools
@@ -2938,8 +3031,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "tools" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "tools" ? "#e6f0ff" : "white"
+                border: activeTab === "tools" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "tools" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Tools
@@ -2949,8 +3042,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "actionRunner" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "actionRunner" ? "#e6f0ff" : "white"
+                border: activeTab === "actionRunner" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "actionRunner" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Action Runner
@@ -2960,8 +3053,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "teachMode" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "teachMode" ? "#e6f0ff" : "white"
+                border: activeTab === "teachMode" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "teachMode" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Teach Mode
@@ -2971,8 +3064,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "fireflies" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "fireflies" ? "#e6f0ff" : "white"
+                border: activeTab === "fireflies" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "fireflies" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Fireflies
@@ -2982,8 +3075,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "trading" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "trading" ? "#e6f0ff" : "white"
+                border: activeTab === "trading" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "trading" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Trading
@@ -2993,8 +3086,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "safety" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "safety" ? "#e6f0ff" : "white"
+                border: activeTab === "safety" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "safety" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Safety
@@ -3004,8 +3097,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "canvas" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "canvas" ? "#e6f0ff" : "white"
+                border: activeTab === "canvas" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "canvas" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Canvas
@@ -3015,8 +3108,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "features" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "features" ? "#e6f0ff" : "white"
+                border: activeTab === "features" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "features" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Features
@@ -3029,8 +3122,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-                border: activeTab === "settings" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                background: activeTab === "settings" ? "#e6f0ff" : "white"
+                border: activeTab === "settings" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "settings" ? "var(--chip-bg)" : "var(--panel-bg)"
               }}
             >
               Settings
@@ -3040,8 +3133,8 @@ export default function Home() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 10,
-              border: activeTab === "debug" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-              background: activeTab === "debug" ? "#e6f0ff" : "white"
+              border: activeTab === "debug" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+              background: activeTab === "debug" ? "var(--chip-bg)" : "var(--panel-bg)"
             }}
           >
             Debug
@@ -3051,8 +3144,8 @@ export default function Home() {
             style={{
               padding: "8px 12px",
               borderRadius: 10,
-              border: activeTab === "guide" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-              background: activeTab === "guide" ? "#e6f0ff" : "white"
+              border: activeTab === "guide" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+              background: activeTab === "guide" ? "var(--chip-bg)" : "var(--panel-bg)"
             }}
           >
             Guide
@@ -3068,8 +3161,8 @@ export default function Home() {
                 style={{
                   padding: "8px 12px",
                   borderRadius: 10,
-                  border: "1px solid #e5e7eb",
-                  background: "#fff"
+                  border: "1px solid var(--panel-border)",
+                  background: "var(--panel-bg)"
                 }}
               >
                 Sign in with Google
@@ -3093,8 +3186,8 @@ export default function Home() {
                   style={{
                     padding: "6px 10px",
                     borderRadius: 8,
-                    border: settingsTab === item.key ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                    background: settingsTab === item.key ? "#e6f0ff" : "white"
+                    border: settingsTab === item.key ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                    background: settingsTab === item.key ? "var(--chip-bg)" : "var(--panel-bg)"
                   }}
                 >
                   {item.label}
@@ -3113,13 +3206,13 @@ export default function Home() {
               const configured = integrations[item.key]?.configured;
               return (
                 <div key={item.key} style={{
-                  border: "1px solid #e5e7eb",
+                  border: "1px solid var(--panel-border)",
                   borderRadius: 12,
                   padding: 12,
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  background: "white"
+                  background: "var(--panel-bg)"
                 }}>
                   <div>
                     <div style={{ fontWeight: 600 }}>{item.label}</div>
@@ -3142,14 +3235,14 @@ export default function Home() {
               <div style={{ fontSize: 12, color: "#6b7280" }}>
                 Note: Real connections require API keys and OAuth setup. Configure them in `apps/server/.env`.
               </div>
-              <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "white" }}>
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Integration Actions</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <input
                     value={amazonQuery}
                     onChange={(e) => setAmazonQuery(e.target.value)}
                     placeholder="Search Amazon for..."
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 220 }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", minWidth: 220 }}
                   />
                   <button
                     onClick={runAmazonSearch}
@@ -3171,7 +3264,7 @@ export default function Home() {
                   </div>
                 )}
                 {integrationActionResult && (
-                  <pre style={{ fontSize: 11, marginTop: 8, whiteSpace: "pre-wrap", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                  <pre style={{ fontSize: 11, marginTop: 8, whiteSpace: "pre-wrap", background: "var(--panel-bg-soft)", padding: 8, borderRadius: 8 }}>
                     {integrationActionResult}
                   </pre>
                 )}
@@ -3192,10 +3285,10 @@ export default function Home() {
               </div>
               {skills.map(skill => (
                 <div key={skill.key} style={{
-                  border: "1px solid #e5e7eb",
+                  border: "1px solid var(--panel-border)",
                   borderRadius: 12,
                   padding: 12,
-                  background: "white",
+                  background: "var(--panel-bg)",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center"
@@ -3209,8 +3302,8 @@ export default function Home() {
                     style={{
                       padding: "6px 10px",
                       borderRadius: 8,
-                      border: skill.enabled ? "2px solid #10b981" : "1px solid #d1d5db",
-                      background: skill.enabled ? "#ecfdf3" : "white",
+                      border: skill.enabled ? "2px solid #10b981" : "1px solid var(--panel-border-strong)",
+                      background: skill.enabled ? "#ecfdf3" : "var(--panel-bg)",
                       color: skill.enabled ? "#047857" : "#6b7280",
                       fontWeight: 600
                     }}
@@ -3252,12 +3345,12 @@ export default function Home() {
                 <input
                   value={skillVaultInput}
                   onChange={(e) => setSkillVaultInput(e.target.value)}
-                  style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
               <div style={{ display: "grid", gap: 8 }}>
                 {skillVault.map(skill => (
-                  <div key={skill.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10, background: "white" }}>
+                  <div key={skill.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10, background: "var(--panel-bg)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <div style={{ fontWeight: 600 }}>{skill.name}</div>
@@ -3273,7 +3366,7 @@ export default function Home() {
               </div>
               {skillVaultError && <div style={{ color: "#b91c1c", fontSize: 12 }}>Skill Vault error: {skillVaultError}</div>}
               {skillVaultResult && (
-                <pre style={{ fontSize: 11, marginTop: 6, whiteSpace: "pre-wrap", background: "#f8fafc", padding: 8, borderRadius: 8 }}>
+                <pre style={{ fontSize: 11, marginTop: 6, whiteSpace: "pre-wrap", background: "var(--panel-bg-soft)", padding: 8, borderRadius: 8 }}>
                   {skillVaultResult}
                 </pre>
               )}
@@ -3318,19 +3411,19 @@ export default function Home() {
                   placeholder="Name (e.g., lights_on)"
                   value={webhookForm.name}
                   onChange={(e) => setWebhookForm(s => ({ ...s, name: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 160 }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", minWidth: 160 }}
                 />
                 <input
                   placeholder="Webhook URL"
                   value={webhookForm.url}
                   onChange={(e) => setWebhookForm(s => ({ ...s, url: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 280 }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", minWidth: 280 }}
                 />
                 <button onClick={addWebhook} style={{ padding: "6px 10px", borderRadius: 8 }}>
                   Add Webhook
                 </button>
               </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10, background: "white" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10, background: "var(--panel-bg)" }}>
                 {webhooks.length ? webhooks.map(h => (
                   <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <div>
@@ -3357,19 +3450,19 @@ export default function Home() {
                   placeholder="Scene name"
                   value={sceneForm.name}
                   onChange={(e) => setSceneForm(s => ({ ...s, name: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 160 }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", minWidth: 160 }}
                 />
                 <input
                   placeholder="Webhook names (comma-separated)"
                   value={sceneForm.hooks}
                   onChange={(e) => setSceneForm(s => ({ ...s, hooks: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 280 }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", minWidth: 280 }}
                 />
                 <button onClick={addScene} style={{ padding: "6px 10px", borderRadius: 8 }}>
                   Save Scene
                 </button>
               </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10, background: "white" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10, background: "var(--panel-bg)" }}>
                 {scenes.length ? scenes.map(s => (
                   <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <div>
@@ -3394,12 +3487,12 @@ export default function Home() {
                 Recent Skill Activity
               </div>
               <div style={{
-                border: "1px solid #e5e7eb",
+                border: "1px solid var(--panel-border)",
                 borderRadius: 12,
                 padding: 10,
-                background: "white",
+                background: "var(--panel-bg)",
                 fontSize: 12,
-                color: "#374151",
+                color: "var(--text-muted)",
                 maxHeight: 180,
                 overflow: "auto"
               }}>
@@ -3420,7 +3513,7 @@ export default function Home() {
                   value={meetingTitle}
                   onChange={(e) => setMeetingTitle(e.target.value)}
                   placeholder="Meeting title"
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
                 <div style={{ display: "flex", gap: 8 }}>
                   {!meetingRecording ? (
@@ -3441,7 +3534,7 @@ export default function Home() {
                   readOnly
                   rows={4}
                   placeholder="Transcript appears here..."
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #e5e7eb" }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border)" }}
                 />
                 {meetingStatus && (
                   <div style={{ fontSize: 12, color: "#6b7280" }}>{meetingStatus}</div>
@@ -3463,7 +3556,7 @@ export default function Home() {
             <div style={{ fontSize: 12, color: "#6b7280" }}>
               Configure daily picks delivery and the watchlists Aika uses. These are stored locally and persist across restarts.
             </div>
-            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "white" }}>
+            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
                 <input
                   type="checkbox"
@@ -3479,7 +3572,7 @@ export default function Home() {
                     type="time"
                     value={tradingEmailSettings.time}
                     onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, time: e.target.value }))}
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
                 <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
@@ -3487,7 +3580,7 @@ export default function Home() {
                   <input
                     value={tradingEmailSettings.subjectPrefix}
                     onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, subjectPrefix: e.target.value }))}
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
                 <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
@@ -3495,7 +3588,7 @@ export default function Home() {
                   <input
                     value={tradingEmailSettings.recipients}
                     onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, recipients: e.target.value }))}
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
               </div>
@@ -3506,7 +3599,7 @@ export default function Home() {
                     type="number"
                     value={tradingEmailSettings.stockCount}
                     onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, stockCount: e.target.value }))}
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
                 <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
@@ -3515,7 +3608,7 @@ export default function Home() {
                     type="number"
                     value={tradingEmailSettings.cryptoCount}
                     onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, cryptoCount: e.target.value }))}
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
                 <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
@@ -3524,7 +3617,7 @@ export default function Home() {
                     type="number"
                     value={tradingEmailSettings.minPicks}
                     onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, minPicks: e.target.value }))}
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
                 <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
@@ -3533,7 +3626,7 @@ export default function Home() {
                     type="number"
                     value={tradingEmailSettings.maxPicks}
                     onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, maxPicks: e.target.value }))}
-                    style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
               </div>
@@ -3542,7 +3635,7 @@ export default function Home() {
                 <input
                   value={tradingEmailSettings.stocks}
                   onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, stocks: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
               <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
@@ -3550,7 +3643,7 @@ export default function Home() {
                 <input
                   value={tradingEmailSettings.cryptos}
                   onChange={(e) => setTradingEmailSettings(prev => ({ ...prev, cryptos: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
             </div>
@@ -3561,14 +3654,14 @@ export default function Home() {
             <div style={{ fontSize: 12, color: "#6b7280" }}>
               These answers guide Aika's trading assistant and stay in memory until you overwrite them.
             </div>
-            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "white" }}>
+            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
               <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
                 Directives / Notes
                 <textarea
                   rows={3}
                   value={tradingNotes}
                   onChange={(e) => setTradingNotes(e.target.value)}
-                  style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -3582,13 +3675,13 @@ export default function Home() {
                   <div style={{ fontSize: 12, color: "#6b7280" }}>No questions added yet.</div>
                 )}
                 {tradingQuestions.map((q, idx) => (
-                  <div key={q.id || idx} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 8, background: "#f9fafb" }}>
+                  <div key={q.id || idx} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, background: "var(--panel-bg-soft)" }}>
                     <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
                       Question
                       <input
                         value={q.question || ""}
                         onChange={(e) => updateTradingQuestion(idx, "question", e.target.value)}
-                        style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                        style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                       />
                     </label>
                     <label style={{ display: "grid", gap: 4, fontSize: 12, marginTop: 6 }}>
@@ -3596,7 +3689,7 @@ export default function Home() {
                       <input
                         value={q.answer || ""}
                         onChange={(e) => updateTradingQuestion(idx, "answer", e.target.value)}
-                        style={{ padding: 6, borderRadius: 8, border: "1px solid #d1d5db" }}
+                        style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                       />
                     </label>
                     <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
@@ -3617,7 +3710,7 @@ export default function Home() {
                 Reload
               </button>
               {tradingSettingsLoading && <span style={{ fontSize: 12, color: "#6b7280" }}>Saving...</span>}
-              {tradingSettingsStatus && <span style={{ fontSize: 12, color: "#2563eb" }}>{tradingSettingsStatus}</span>}
+              {tradingSettingsStatus && <span style={{ fontSize: 12, color: "var(--accent)" }}>{tradingSettingsStatus}</span>}
             </div>
             {tradingSettingsError && <div style={{ fontSize: 12, color: "#b91c1c" }}>{tradingSettingsError}</div>}
           </div>
@@ -3628,19 +3721,19 @@ export default function Home() {
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 Appearance
               </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#374151", maxWidth: 260 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "var(--text-muted)", maxWidth: 260 }}>
                 Theme
                 <select
                   value={themeId}
                   onChange={(e) => setThemeId(e.target.value)}
-                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                 >
                   {THEMES.map(t => (
                     <option key={t.id} value={t.id}>{t.label}</option>
                   ))}
                 </select>
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#374151", maxWidth: 360 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "var(--text-muted)", maxWidth: 360 }}>
                 App background image (fills the borders, not the panels)
                 <input
                   type="file"
@@ -3654,19 +3747,19 @@ export default function Home() {
                   Clear background
                 </button>
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#374151", maxWidth: 260 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "var(--text-muted)", maxWidth: 260 }}>
                 Avatar background
                 <select
                   value={avatarBackground}
                   onChange={(e) => setAvatarBackground(e.target.value)}
-                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                 >
                   {AVATAR_BACKGROUNDS.map(bg => (
                     <option key={bg.id} value={bg.id}>{bg.label}</option>
                   ))}
                 </select>
               </label>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
                 <input
                   type="checkbox"
                   checked={meetingCommandListening}
@@ -3691,7 +3784,7 @@ export default function Home() {
               >
                 Open Voice Settings
               </button>
-              <label style={{ display: "grid", gap: 4, maxWidth: 360, fontSize: 12, color: "#374151" }}>
+              <label style={{ display: "grid", gap: 4, maxWidth: 360, fontSize: 12, color: "var(--text-muted)" }}>
                 Send after silence: {(sttSilenceMs / 1000).toFixed(1)}s
                 <input
                   type="range"
@@ -3715,14 +3808,14 @@ export default function Home() {
                 gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                 gap: 10
               }}>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Server</div>
                 <div style={{ fontWeight: 600, color: statusInfo?.server?.ok ? "#059669" : "#b91c1c" }}>
                   {statusInfo?.server?.ok ? "Online" : "Offline"}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Uptime: {statusInfo?.server?.uptimeSec ?? "—"}s</div>
               </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>TTS</div>
                   <div style={{ fontWeight: 600, color: "#111827" }}>
                     Active: {statusInfo?.tts?.selected || "default"}
@@ -3735,7 +3828,7 @@ export default function Home() {
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>Model: {statusInfo?.openai?.model || "—"}</div>
                 </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Audio</div>
                 <div style={{ fontWeight: 600, color: audioUnlocked ? "#059669" : "#b45309" }}>
                   {audioUnlocked ? "Enabled" : "Locked"}
@@ -3751,19 +3844,19 @@ export default function Home() {
                   TTS: {lastTtsMetrics ? `${lastTtsMetrics.ms}ms | ${lastTtsMetrics.bytes} bytes` : "-"}
                 </div>
               </div>
-                <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>Integrations</div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
                     {Object.keys(integrations || {}).length ? "Loaded" : "—"}
                   </div>
                 </div>
-                <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>Live2D</div>
                   <div style={{ fontWeight: 600, color: "#111827" }}>
                     {avatarModels.filter(m => m.available).length}/{avatarModels.length || 0} available
                   </div>
                 </div>
-                <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>Skills</div>
                   <div style={{ fontWeight: 600, color: statusInfo?.skills?.enabled ? "#059669" : "#6b7280" }}>
                     {statusInfo?.skills?.enabled ?? 0}/{statusInfo?.skills?.total ?? 0} enabled
@@ -3777,7 +3870,7 @@ export default function Home() {
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 Voice Pipeline Check
               </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white", fontSize: 12, color: "#374151" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)", fontSize: 12, color: "var(--text-muted)" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <div>
                     <div style={{ fontWeight: 600, color: voiceFullTest?.ok ? "#059669" : "#111827" }}>
@@ -3814,7 +3907,7 @@ export default function Home() {
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 TTS Diagnostics
               </div>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white", fontSize: 12, color: "#374151" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)", fontSize: 12, color: "var(--text-muted)" }}>
                 {ttsDiagnostics ? (
                   <>
                     <div>Engine: <b>{ttsDiagnostics.engine}</b></div>
@@ -3841,9 +3934,9 @@ export default function Home() {
               placeholder="Filter logs..."
               value={logFilter}
               onChange={(e) => setLogFilter(e.target.value)}
-              style={{ padding: 8, borderRadius: 10, border: "1px solid #e5e7eb" }}
+              style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border)" }}
             />
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 8, height: 220, overflow: "auto", background: "#0b1220", color: "#e5e7eb", fontFamily: "monospace", fontSize: 11 }}>
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 8, height: 220, overflow: "auto", background: "var(--code-bg)", color: "#e5e7eb", fontFamily: "monospace", fontSize: 11 }}>
               {logLines.filter(l => !logFilter || l.text.toLowerCase().includes(logFilter.toLowerCase())).map((l, idx) => (
                 <div key={idx} style={{ color: l.level === "error" ? "#fca5a5" : l.level === "warn" ? "#facc15" : "#e5e7eb" }}>
                   [{l.time}] {l.level.toUpperCase()}: {l.text}
@@ -3859,7 +3952,7 @@ export default function Home() {
               MCP-lite Tools
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Tool List</div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
                   {toolsList.length} tools available
@@ -3875,24 +3968,24 @@ export default function Home() {
                 </div>
               </div>
 
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Call Tool</div>
-                <label style={{ fontSize: 12, color: "#374151" }}>
+                <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   Tool name
                   <input
                     value={toolCallName}
                     onChange={(e) => setToolCallName(e.target.value)}
                     placeholder="meeting.summarize"
-                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: "1px solid #d1d5db" }}
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                   />
                 </label>
-                <label style={{ fontSize: 12, color: "#374151", marginTop: 8 }}>
+                <label style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
                   Params (JSON)
                   <textarea
                     value={toolCallParams}
                     onChange={(e) => setToolCallParams(e.target.value)}
                     rows={6}
-                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 12 }}
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)", fontFamily: "monospace", fontSize: 12 }}
                   />
                 </label>
                 <button onClick={callTool} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
@@ -3900,21 +3993,21 @@ export default function Home() {
                 </button>
                 {toolsError && <div style={{ fontSize: 12, color: "#b91c1c" }}>{toolsError}</div>}
                 {toolCallResult && (
-                  <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+                  <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
 {toolCallResult}
                   </pre>
                 )}
               </div>
             </div>
 
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Approvals</div>
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
                 Pending approvals: {approvals.filter(a => a.status === "pending").length}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
                 {approvals.map(a => (
-                  <div key={a.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 8 }}>
+                  <div key={a.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 8 }}>
                     <div style={{ fontWeight: 600 }}>{a.toolName}</div>
                     <div>Status: {a.status}</div>
                     <div>Summary: {a.humanSummary}</div>
@@ -3940,7 +4033,7 @@ export default function Home() {
               {approvalsError && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{approvalsError}</div>}
             </div>
 
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontWeight: 600 }}>Tool History</div>
                 <button onClick={refreshToolHistory} style={{ padding: "4px 8px", borderRadius: 6 }}>
@@ -3952,7 +4045,7 @@ export default function Home() {
               </div>
               <div style={{ maxHeight: 220, overflow: "auto", fontSize: 11 }}>
                 {toolHistory.map(h => (
-                  <div key={h.id} style={{ borderBottom: "1px solid #f3f4f6", padding: "6px 0" }}>
+                  <div key={h.id} style={{ borderBottom: "1px solid var(--panel-border-subtle)", padding: "6px 0" }}>
                     <div style={{ fontWeight: 600 }}>{h.tool}</div>
                     <div>Status: {h.status}</div>
                     <div style={{ color: "#6b7280" }}>{h.ts}</div>
@@ -4012,8 +4105,8 @@ export default function Home() {
                   style={{
                     padding: "6px 10px",
                     borderRadius: 8,
-                    border: featuresView === "mcp" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                    background: featuresView === "mcp" ? "#e6f0ff" : "white"
+                    border: featuresView === "mcp" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                    background: featuresView === "mcp" ? "var(--chip-bg)" : "var(--panel-bg)"
                   }}
                 >
                   MCP Features
@@ -4023,8 +4116,8 @@ export default function Home() {
                   style={{
                     padding: "6px 10px",
                     borderRadius: 8,
-                    border: featuresView === "connections" ? "2px solid #2b6cb0" : "1px solid #e5e7eb",
-                    background: featuresView === "connections" ? "#e6f0ff" : "white"
+                    border: featuresView === "connections" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                    background: featuresView === "connections" ? "var(--chip-bg)" : "var(--panel-bg)"
                   }}
                 >
                   Connections
@@ -4047,14 +4140,14 @@ export default function Home() {
                 {featuresError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{featuresError}</div>}
 
             <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1.3fr", gap: 12 }}>
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>Services</div>
                 {featuresServices.map(s => (
                   <div
                     key={s.id}
                     onClick={() => setFeaturesSelected(s.id)}
                     style={{
-                      border: s.id === featuresSelected ? "2px solid #2563eb" : "1px solid #e5e7eb",
+                      border: s.id === featuresSelected ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
                       borderRadius: 10,
                       padding: 8,
                       marginBottom: 8,
@@ -4094,12 +4187,12 @@ export default function Home() {
                 {featuresServices.length === 0 && <div>No services discovered.</div>}
               </div>
 
-              <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>Tools</div>
                 {featuresServices
                   .find(s => s.id === featuresSelected)
                   ?.tools.map(tool => (
-                    <div key={tool.name} style={{ borderBottom: "1px solid #f3f4f6", padding: "6px 0" }}>
+                    <div key={tool.name} style={{ borderBottom: "1px solid var(--panel-border-subtle)", padding: "6px 0" }}>
                       <div style={{ fontWeight: 600 }}>{tool.name}</div>
                       <div style={{ fontSize: 12, color: "#6b7280" }}>{tool.description}</div>
                       <button
@@ -4131,12 +4224,12 @@ export default function Home() {
                 justifyContent: "center",
                 zIndex: 50
               }}>
-                <div style={{ width: 420, background: "white", borderRadius: 12, padding: 16 }}>
+                <div style={{ width: 420, background: "var(--panel-bg)", borderRadius: 12, padding: 16 }}>
                   <div style={{ fontWeight: 600, marginBottom: 8 }}>
                     Connect {connectModal.displayName}
                   </div>
                   {connectModal.connectSpec?.method === "oauth" && (
-                    <div style={{ fontSize: 12, color: "#374151" }}>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       OAuth flow will open a new window. Make sure your credentials are set in `.env`.
                       <button
                         onClick={() => runOAuth(connectModal)}
@@ -4147,7 +4240,7 @@ export default function Home() {
                     </div>
                   )}
                   {connectModal.connectSpec?.method === "api_key" && (
-                    <div style={{ fontSize: 12, color: "#374151" }}>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       Set the following env vars, then click “Mark Connected”:
                       <ul>
                         {connectModal.connectSpec.fields?.map(f => (
@@ -4163,10 +4256,10 @@ export default function Home() {
                     </div>
                   )}
                   {connectModal.connectSpec?.method === "none" && (
-                    <div style={{ fontSize: 12, color: "#374151" }}>No connection required.</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No connection required.</div>
                   )}
                   {connectModal.connectSpec?.method === "custom" && (
-                    <div style={{ fontSize: 12, color: "#374151" }}>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       Custom connection required. See docs/MCP_LITE.md.
                     </div>
                   )}
@@ -4201,7 +4294,7 @@ export default function Home() {
             <div key={m.id || i} style={{ marginBottom: 10 }}>
               <div><b>{m.role === "user" ? "You" : "Aika"}:</b> {m.text}</div>
               {m.memoryNote && (
-                <div style={{ marginTop: 4, fontSize: 12, color: "#2563eb" }}>{m.memoryNote}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "var(--accent)" }}>{m.memoryNote}</div>
               )}
               {Array.isArray(m.citations) && m.citations.length > 0 && (
                 <details style={{ marginTop: 6 }}>
@@ -4210,7 +4303,7 @@ export default function Home() {
                   </summary>
                   <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
                     {m.citations.map((cite, idx) => (
-                      <div key={`${cite.chunk_id || idx}-${idx}`} style={{ fontSize: 12, color: "#374151" }}>
+                      <div key={`${cite.chunk_id || idx}-${idx}`} style={{ fontSize: 12, color: "var(--text-muted)" }}>
                         <div style={{ fontWeight: 600 }}>{cite.meeting_title || "Meeting"} {cite.occurred_at ? `(${cite.occurred_at})` : ""}</div>
                         <div style={{ color: "#6b7280" }}>{cite.chunk_id}</div>
                         <div style={{ whiteSpace: "pre-wrap" }}>{cite.snippet}</div>
@@ -4226,8 +4319,8 @@ export default function Home() {
                     style={{
                       padding: "4px 8px",
                       borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: feedbackState[m.id] === "up" ? "#dcfce7" : "white",
+                      border: "1px solid var(--panel-border-strong)",
+                      background: feedbackState[m.id] === "up" ? "#dcfce7" : "var(--panel-bg)",
                       fontSize: 12
                     }}
                     title="Thumbs up"
@@ -4239,8 +4332,8 @@ export default function Home() {
                     style={{
                       padding: "4px 8px",
                       borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: feedbackState[m.id] === "down" ? "#fee2e2" : "white",
+                      border: "1px solid var(--panel-border-strong)",
+                      background: feedbackState[m.id] === "down" ? "#fee2e2" : "var(--panel-bg)",
                       fontSize: 12
                     }}
                     title="Thumbs down"
@@ -4268,14 +4361,14 @@ export default function Home() {
             onKeyDown={(e) => e.key === "Enter" && send()}
             placeholder={meetingLock ? "Recording in progress..." : "Type your message..."}
             disabled={meetingLock}
-            style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px solid #ccc", background: meetingLock ? "#e5e7eb" : "white" }}
+            style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border-strong)", background: meetingLock ? "var(--panel-bg-soft)" : "var(--panel-bg)" }}
           />
           <div style={{
             width: 10,
             height: 36,
             borderRadius: 8,
-            background: "#eef2ff",
-            border: "1px solid #c7d2fe",
+            background: "var(--panel-bg-soft)",
+            border: "1px solid var(--panel-border-strong)",
             display: "flex",
             alignItems: "flex-end",
             padding: 2
@@ -4284,7 +4377,7 @@ export default function Home() {
               width: "100%",
               height: `${Math.max(0.08, micLevel) * 100}%`,
               borderRadius: 6,
-              background: micState === "listening" ? "#4f46e5" : "#9ca3af",
+              background: micState === "listening" ? "var(--accent)" : "var(--text-muted)",
               transition: "height 60ms linear"
             }} />
           </div>
@@ -4295,16 +4388,16 @@ export default function Home() {
             gap: 6,
             padding: "6px 10px",
             borderRadius: 999,
-            border: "1px solid #ddd",
-            background: micEnabled && micState === "listening" ? "#ecfdf3" : "#f3f4f6",
-            color: micEnabled && micState === "listening" ? "#047857" : "#6b7280",
+            border: "1px solid var(--panel-border)",
+            background: micEnabled && micState === "listening" ? "rgba(123, 240, 255, 0.18)" : "var(--panel-bg-soft)",
+            color: micEnabled && micState === "listening" ? "var(--accent-3)" : "var(--text-muted)",
             fontSize: 12
           }}>
             <span style={{
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: micEnabled && micState === "listening" ? "#10b981" : "#9ca3af",
+              background: micEnabled && micState === "listening" ? "var(--accent-3)" : "var(--text-muted)",
               display: "inline-block"
             }} />
             {micEnabled ? (micState === "listening" ? "Mic active" : "Mic idle") : "Mic off"}
@@ -4315,8 +4408,8 @@ export default function Home() {
             style={{
               padding: "12px 16px",
               borderRadius: 12,
-              border: micEnabled && micState === "listening" ? "2px solid #2b6cb0" : "1px solid #ccc",
-              background: micEnabled && micState === "listening" ? "#e6f0ff" : "white"
+              border: micEnabled && micState === "listening" ? "1px solid var(--accent)" : "1px solid var(--panel-border-strong)",
+              background: micEnabled && micState === "listening" ? "var(--chip-bg)" : "var(--panel-bg)"
             }}
             title={micEnabled && micState === "listening" ? "Stop listening (Space)" : "Start listening (Space)"}
           >
@@ -4327,7 +4420,7 @@ export default function Home() {
           </button>
           <button
             onClick={() => setShowSettings(v => !v)}
-            style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #ddd", background: "#f9fafb" }}
+            style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)" }}
           >
             {showSettings ? "Close Settings" : "Settings"}
           </button>
@@ -4348,7 +4441,7 @@ export default function Home() {
             <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
               Voice + Input
             </div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
               <input
                 type="checkbox"
                 checked={autoSpeak}
@@ -4360,7 +4453,7 @@ export default function Home() {
               />
               Auto Speak
             </label>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
               <input
                 type="checkbox"
                 checked={fastReplies}
@@ -4368,7 +4461,7 @@ export default function Home() {
               />
               Fast replies (shorter, quicker)
             </label>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
             <input
               type="checkbox"
               checked={textOnly}
@@ -4389,19 +4482,19 @@ export default function Home() {
             <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginTop: 6 }}>
               Appearance
             </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               Theme
               <select
                 value={themeId}
                 onChange={(e) => setThemeId(e.target.value)}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               >
                 {THEMES.map(t => (
                   <option key={t.id} value={t.id}>{t.label}</option>
                 ))}
               </select>
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               App background image
               <input
                 type="file"
@@ -4415,12 +4508,12 @@ export default function Home() {
                 Clear background
               </button>
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               Avatar background
               <select
                 value={avatarBackground}
                 onChange={(e) => setAvatarBackground(e.target.value)}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               >
                 {AVATAR_BACKGROUNDS.map(bg => (
                   <option key={bg.id} value={bg.id}>{bg.label}</option>
@@ -4430,7 +4523,7 @@ export default function Home() {
             <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginTop: 6 }}>
               Meeting Copilot
             </div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
               <input
                 type="checkbox"
                 checked={meetingCommandListening}
@@ -4446,14 +4539,14 @@ export default function Home() {
             gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
             gap: 8,
             padding: 10,
-            border: "1px solid #e5e7eb",
+            border: "1px solid var(--panel-border)",
             borderRadius: 10,
             background: "#fafafa"
           }}>
-            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
               Aika Voice Settings
             </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151", gridColumn: "1 / -1" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)", gridColumn: "1 / -1" }}>
               Voice prompt text
               <textarea
                 rows={3}
@@ -4463,7 +4556,7 @@ export default function Home() {
                   setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: e.target.value } }));
                 }}
                 placeholder="Describe Aika's voice/persona..."
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
               <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
@@ -4474,24 +4567,24 @@ export default function Home() {
                   Test Voice
                 </button>
               </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
                 Style
                 <select
                   value={ttsSettings.style}
                   onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="brat_baddy">brat_baddy</option>
                   <option value="brat_soft">brat_soft</option>
                   <option value="brat_firm">brat_firm</option>
                 </select>
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
                 Engine
                 <select
                   value={ttsSettings.engine || statusInfo?.tts?.engine || ""}
                   onChange={(e) => setTtsSettings(s => ({ ...s, engine: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                 >
                   <option value="">default</option>
                   <option value="gptsovits">gptsovits</option>
@@ -4499,7 +4592,7 @@ export default function Home() {
                 </select>
               </label>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ fontSize: 12, color: "#374151" }}>Avatar Model</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Avatar Model</div>
                 {(() => {
                   const current = avatarModels.find(m => m.id === avatarModelId);
                   const thumb = current?.thumbnailAvailable ? current.thumbnail : "/assets/aika/live2d/placeholder.svg";
@@ -4509,7 +4602,7 @@ export default function Home() {
                       style={{
                         padding: "6px 10px",
                         borderRadius: 8,
-                        border: "1px solid #d1d5db",
+                        border: "1px solid var(--panel-border-strong)",
                         textAlign: "left",
                         display: "flex",
                         alignItems: "center",
@@ -4527,7 +4620,7 @@ export default function Home() {
                 })()}
                   {showAvatarPicker && (
                     <div style={{
-                      border: "1px solid #e5e7eb",
+                      border: "1px solid var(--panel-border)",
                       borderRadius: 10,
                       padding: 8,
                       display: "grid",
@@ -4551,10 +4644,10 @@ export default function Home() {
                             setShowAvatarPicker(false);
                           }}
                           style={{
-                            border: m.id === avatarModelId ? "2px solid #2563eb" : "1px solid #d1d5db",
+                            border: m.id === avatarModelId ? "1px solid var(--accent)" : "1px solid var(--panel-border-strong)",
                             borderRadius: 10,
                             padding: 6,
-                            background: "white",
+                            background: "var(--panel-bg)",
                             textAlign: "left",
                             display: "flex",
                             gap: 8,
@@ -4578,7 +4671,7 @@ export default function Home() {
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  <label style={{ fontSize: 12, color: "#374151" }}>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     Import Live2D zip
                     <input
                       type="file"
@@ -4588,10 +4681,10 @@ export default function Home() {
                       style={{ display: "block", marginTop: 4 }}
                     />
                   </label>
-                  <div style={{ fontSize: 12, color: "#374151" }}>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     Live2D core: {avatarCoreInfo.coreJs ? "Ready" : "Missing"}{avatarCoreInfo.coreWasm ? " + WASM" : ""}
                   </div>
-                  <label style={{ fontSize: 12, color: "#374151" }}>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
                     Upload live2dcubismcore.js / .wasm
                     <input
                       type="file"
@@ -4610,7 +4703,7 @@ export default function Home() {
                     <div style={{ fontSize: 12, color: "#6b7280" }}>Importing...</div>
                   )}
                   {avatarImportNotice && (
-                    <div style={{ fontSize: 12, color: "#2563eb" }}>{avatarImportNotice}</div>
+                    <div style={{ fontSize: 12, color: "var(--accent)" }}>{avatarImportNotice}</div>
                   )}
                   {avatarImportError && (
                     <div style={{ fontSize: 12, color: "#b91c1c" }}>{avatarImportError}</div>
@@ -4620,18 +4713,18 @@ export default function Home() {
                   )}
                 </div>
               </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               Format
               <select
                 value={ttsSettings.format}
                 onChange={(e) => setTtsSettings(s => ({ ...s, format: e.target.value }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               >
                 <option value="wav">wav</option>
                 <option value="mp3">mp3</option>
               </select>
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               Rate
               <input
                 type="number"
@@ -4640,10 +4733,10 @@ export default function Home() {
                 max="1.3"
                 value={ttsSettings.rate}
                 onChange={(e) => setTtsSettings(s => ({ ...s, rate: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               Pitch
               <input
                 type="number"
@@ -4652,10 +4745,10 @@ export default function Home() {
                 max="5"
                 value={ttsSettings.pitch}
                 onChange={(e) => setTtsSettings(s => ({ ...s, pitch: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               Energy
               <input
                 type="number"
@@ -4664,10 +4757,10 @@ export default function Home() {
                 max="1.5"
                 value={ttsSettings.energy}
                 onChange={(e) => setTtsSettings(s => ({ ...s, energy: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
               Pause
               <input
                 type="number"
@@ -4676,17 +4769,17 @@ export default function Home() {
                 max="1.8"
                 value={ttsSettings.pause}
                 onChange={(e) => setTtsSettings(s => ({ ...s, pause: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
               {(ttsSettings.engine || statusInfo?.tts?.engine) === "piper" ? (
                 <>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
                     Piper Voice
                     <select
                       value={ttsSettings.voice.name || ""}
                       onChange={(e) => setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: e.target.value } }))}
-                      style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                      style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                     >
                       {availableVoices.length === 0 && <option value="">(no voices found)</option>}
                       {availableVoices.map(v => (
@@ -4700,14 +4793,14 @@ export default function Home() {
                 </>
                 ) : (
                   <>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#374151" }}>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
                       Reference WAV (apps/server/voices)
                     <input
                       type="text"
                       placeholder="example.wav"
                       value={ttsSettings.voice.reference_wav_path}
                       onChange={(e) => setTtsSettings(s => ({ ...s, voice: { reference_wav_path: e.target.value } }))}
-                      style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                      style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                     />
                   </label>
                   <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
@@ -4734,7 +4827,7 @@ export default function Home() {
               Mic error: {micError}
             </div>
           )}
-          <div style={{ color: "#374151", fontSize: 12 }}>
+          <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
             {micStatus}
           </div>
           {showSettings && (
@@ -4818,7 +4911,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => setProductResearchOpen(false)}
-                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db" }}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 >
                   Close
                 </button>
@@ -4853,7 +4946,7 @@ export default function Home() {
                             href={productResearch.recommendationItem.url}
                             target="_blank"
                             rel="noreferrer"
-                            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", textDecoration: "none" }}
+                            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border-strong)", textDecoration: "none" }}
                           >
                             Open Listing
                           </a>
@@ -4861,7 +4954,7 @@ export default function Home() {
                         <button
                           onClick={() => addAmazonToCart(productResearch.recommendationItem)}
                           disabled={!productResearch.recommendationItem.asin || cartBusyAsin === productResearch.recommendationItem.asin}
-                          style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db" }}
+                          style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                         >
                           {cartBusyAsin === productResearch.recommendationItem.asin ? "Adding..." : "Add to Amazon Cart"}
                         </button>
@@ -4871,7 +4964,7 @@ export default function Home() {
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No top pick yet.</div>
                   )}
                   {productResearchNotice && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: "#2563eb" }}>{productResearchNotice}</div>
+                    <div style={{ marginTop: 8, fontSize: 12, color: "var(--accent)" }}>{productResearchNotice}</div>
                   )}
                 </div>
               </div>
@@ -4883,7 +4976,7 @@ export default function Home() {
                     <div
                       key={`${option.asin || "opt"}-${idx}`}
                       style={{
-                        border: "1px solid #e5e7eb",
+                        border: "1px solid var(--panel-border)",
                         borderRadius: 10,
                         padding: 8,
                         display: "flex",
@@ -4904,7 +4997,7 @@ export default function Home() {
                             href={option.url}
                             target="_blank"
                             rel="noreferrer"
-                            style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #d1d5db", textDecoration: "none", fontSize: 12 }}
+                            style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border-strong)", textDecoration: "none", fontSize: 12 }}
                           >
                             Open
                           </a>
@@ -4912,7 +5005,7 @@ export default function Home() {
                         <button
                           onClick={() => addAmazonToCart(option)}
                           disabled={!option.asin || cartBusyAsin === option.asin}
-                          style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: 12 }}
+                          style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid var(--panel-border-strong)", fontSize: 12 }}
                         >
                           {cartBusyAsin === option.asin ? "Adding..." : "Add to Cart"}
                         </button>
@@ -4928,6 +5021,168 @@ export default function Home() {
           </div>
         )}
       </div>
+      <style jsx global>{`
+        @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700&display=swap");
+
+        :root {
+          --font-body: "Manrope", "Segoe UI", sans-serif;
+          --font-display: "Space Grotesk", "Segoe UI", sans-serif;
+          --radius-lg: 18px;
+          --radius-md: 12px;
+          --radius-sm: 10px;
+          --shadow-elevated: 0 30px 70px rgba(7, 9, 20, 0.55);
+          --shadow-soft: 0 12px 30px rgba(6, 8, 18, 0.35);
+          --glow-accent: 0 0 30px rgba(138, 180, 255, 0.35);
+          --glow-warm: 0 0 40px rgba(240, 179, 255, 0.3);
+        }
+
+        html,
+        body,
+        #__next {
+          height: 100%;
+        }
+
+        body {
+          margin: 0;
+          font-family: var(--font-body);
+          color: var(--text-primary);
+          background: var(--app-bg);
+        }
+
+        .app-shell {
+          position: relative;
+          overflow: hidden;
+        }
+
+        .app-shell::before {
+          content: "";
+          position: absolute;
+          inset: -20% -10% -20% -10%;
+          background: radial-gradient(600px 400px at 12% 20%, rgba(138, 180, 255, 0.18), transparent 60%),
+            radial-gradient(700px 500px at 88% 15%, rgba(240, 179, 255, 0.18), transparent 60%),
+            radial-gradient(900px 600px at 50% 90%, rgba(123, 240, 255, 0.12), transparent 65%);
+          filter: blur(8px);
+          opacity: 0.9;
+          pointer-events: none;
+          animation: floatGlow 18s ease-in-out infinite;
+        }
+
+        .app-shell::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background-image: radial-gradient(rgba(255, 255, 255, 0.08) 0.5px, transparent 0.5px);
+          background-size: 3px 3px;
+          opacity: 0.08;
+          mix-blend-mode: screen;
+          pointer-events: none;
+        }
+
+        .app-shell > * {
+          position: relative;
+          z-index: 1;
+        }
+
+        .avatar-stage::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(500px 300px at 30% 10%, rgba(138, 180, 255, 0.12), transparent 60%),
+            radial-gradient(600px 400px at 80% 20%, rgba(240, 179, 255, 0.12), transparent 60%);
+          pointer-events: none;
+        }
+
+        .side-panel {
+          box-shadow: var(--shadow-elevated);
+        }
+
+        button,
+        input,
+        select,
+        textarea {
+          font-family: var(--font-body);
+          color: var(--text-primary);
+        }
+
+        button {
+          background: var(--button-bg);
+          border: 1px solid var(--panel-border);
+          border-radius: var(--radius-md);
+          transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+        }
+
+        button:hover {
+          border-color: var(--accent);
+          box-shadow: var(--glow-accent);
+          transform: translateY(-1px);
+        }
+
+        button:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+          box-shadow: none;
+          transform: none;
+        }
+
+        input,
+        select,
+        textarea {
+          background: var(--input-bg);
+          border: 1px solid var(--panel-border-strong);
+          border-radius: var(--radius-md);
+          outline: none;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 2px rgba(138, 180, 255, 0.2);
+        }
+
+        a {
+          color: var(--accent);
+        }
+
+        pre {
+          background: var(--code-bg);
+          color: var(--code-text);
+          border-radius: var(--radius-md);
+        }
+
+        .app-shell [style*="var(--panel-bg)"] {
+          backdrop-filter: blur(14px);
+          box-shadow: var(--shadow-soft);
+        }
+
+        .app-shell [style*="var(--panel-bg-soft)"] {
+          backdrop-filter: blur(10px);
+        }
+
+        .app-shell [style*="var(--chip-bg)"] {
+          border-color: var(--chip-border);
+        }
+
+        @keyframes floatGlow {
+          0% {
+            transform: translateY(0px) translateX(0px);
+          }
+          50% {
+            transform: translateY(12px) translateX(-8px);
+          }
+          100% {
+            transform: translateY(0px) translateX(0px);
+          }
+        }
+
+        @media (max-width: 1100px) {
+          .app-shell {
+            grid-template-columns: 1fr !important;
+            height: auto !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -4947,4 +5202,9 @@ async function requestMicStream(constraints) {
   if (reason) throw new Error(reason);
   return navigator.mediaDevices.getUserMedia(constraints);
 }
+
+
+
+
+
 

@@ -25,6 +25,20 @@ function getBaseUrl() {
   return `http://127.0.0.1:${port}`;
 }
 
+function getUiBaseUrl() {
+  return String(process.env.WEB_UI_URL || "http://localhost:3000").replace(/\/+$/, "");
+}
+
+function buildCallLink(meta = {}) {
+  const base = getUiBaseUrl();
+  const params = new URLSearchParams();
+  params.set("channel", meta.channel || "telegram");
+  if (meta.senderId) params.set("senderId", meta.senderId);
+  if (meta.senderName) params.set("senderName", meta.senderName);
+  if (meta.chatId) params.set("chatId", meta.chatId);
+  return `${base}/telegram-call?${params.toString()}`;
+}
+
 function parseCommand(raw) {
   const trimmed = String(raw || "").trim();
   if (!trimmed) return null;
@@ -402,6 +416,7 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
         handled: true,
         response: [
           "Remote commands:",
+          "/call",
           "/status",
           "/restart",
           "/resources",
@@ -412,6 +427,18 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
           "/macro list | /macro run <id>",
           "/approvals",
           "/approve <approvalId> [token]"
+        ].join("\n")
+      };
+    }
+
+    if (["call", "duplex", "voicecall", "voice"].includes(cmd)) {
+      const url = buildCallLink(meta);
+      return {
+        handled: true,
+        response: [
+          "Aika full-duplex call link:",
+          url,
+          "Tip: use headphones for best echo cancellation."
         ].join("\n")
       };
     }

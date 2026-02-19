@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 const BROWSER_STEP_TYPES = ["goto", "click", "type", "press", "waitFor", "extractText", "screenshot"];
 const DESKTOP_STEP_TYPES = ["launch", "wait", "type", "key", "mouseMove", "mouseClick", "clipboardSet", "screenshot", "visionOcr", "uiaClick", "uiaSetValue"];
@@ -188,26 +188,26 @@ export default function TeachModePanel({ serverUrl }) {
       <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>Teach Mode</div>
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Create Macro</div>
         <label style={{ fontSize: 12 }}>
           Name
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
         </label>
         <label style={{ fontSize: 12, marginTop: 8 }}>
           Description
-          <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+          <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
         </label>
         <label style={{ fontSize: 12, marginTop: 8 }}>
           Tags (comma)
-          <input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+          <input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
         </label>
         <label style={{ fontSize: 12, marginTop: 8 }}>
           Mode
           <select
             value={form.mode}
             onChange={(e) => handleModeChange(e.target.value)}
-            style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+            style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
           >
             <option value="browser">Browser</option>
             <option value="desktop">Desktop</option>
@@ -217,7 +217,7 @@ export default function TeachModePanel({ serverUrl }) {
         {!isDesktop && (
           <label style={{ fontSize: 12, marginTop: 8 }}>
             Start URL
-            <input value={form.startUrl} onChange={(e) => setForm({ ...form, startUrl: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+            <input value={form.startUrl} onChange={(e) => setForm({ ...form, startUrl: e.target.value })} style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
           </label>
         )}
 
@@ -227,7 +227,7 @@ export default function TeachModePanel({ serverUrl }) {
             <select
               value={form.approvalMode}
               onChange={(e) => setForm({ ...form, approvalMode: e.target.value })}
-              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
             >
               <option value="per_run">Per run</option>
               <option value="per_step">Per step</option>
@@ -237,13 +237,13 @@ export default function TeachModePanel({ serverUrl }) {
 
         <div style={{ marginTop: 10, fontWeight: 600, fontSize: 12 }}>Steps</div>
         {steps.map((step, idx) => (
-          <div key={idx} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10, marginTop: 8 }}>
+          <div key={idx} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 10, marginTop: 8 }}>
             <label style={{ fontSize: 12 }}>
               Type
               <select
                 value={step.type}
                 onChange={(e) => updateStep(idx, { type: e.target.value })}
-                style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+                style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
               >
                 {(isDesktop ? DESKTOP_STEP_TYPES : BROWSER_STEP_TYPES).map((type) => (
                   <option key={type} value={type}>{type}</option>
@@ -254,73 +254,73 @@ export default function TeachModePanel({ serverUrl }) {
             {!isDesktop && step.type === "goto" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 URL
-                <input value={step.url} onChange={(e) => updateStep(idx, { url: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.url} onChange={(e) => updateStep(idx, { url: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {!isDesktop && ["click", "type", "waitFor", "extractText"].includes(step.type) && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Selector
-                <input value={step.selector} onChange={(e) => updateStep(idx, { selector: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.selector} onChange={(e) => updateStep(idx, { selector: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {!isDesktop && step.type === "type" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Text
-                <input value={step.text} onChange={(e) => updateStep(idx, { text: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.text} onChange={(e) => updateStep(idx, { text: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {!isDesktop && step.type === "press" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Key
-                <input value={step.key} onChange={(e) => updateStep(idx, { key: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.key} onChange={(e) => updateStep(idx, { key: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {!isDesktop && step.type === "screenshot" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Name
-                <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {!isDesktop && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Timeout (ms)
-                <input value={step.timeoutMs} onChange={(e) => updateStep(idx, { timeoutMs: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.timeoutMs} onChange={(e) => updateStep(idx, { timeoutMs: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
 
             {isDesktop && step.type === "launch" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Target (exe/path)
-                <input value={step.target} onChange={(e) => updateStep(idx, { target: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.target} onChange={(e) => updateStep(idx, { target: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {isDesktop && step.type === "wait" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Wait (ms)
-                <input value={step.ms} onChange={(e) => updateStep(idx, { ms: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.ms} onChange={(e) => updateStep(idx, { ms: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {isDesktop && step.type === "type" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Text
-                <input value={step.text} onChange={(e) => updateStep(idx, { text: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.text} onChange={(e) => updateStep(idx, { text: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {isDesktop && step.type === "key" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Key combo
-                <input value={step.combo} onChange={(e) => updateStep(idx, { combo: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.combo} onChange={(e) => updateStep(idx, { combo: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {isDesktop && step.type === "mouseMove" && (
               <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
                 <label style={{ fontSize: 12 }}>
                   X
-                  <input value={step.x} onChange={(e) => updateStep(idx, { x: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.x} onChange={(e) => updateStep(idx, { x: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Y
-                  <input value={step.y} onChange={(e) => updateStep(idx, { y: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.y} onChange={(e) => updateStep(idx, { y: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
               </div>
             )}
@@ -328,46 +328,46 @@ export default function TeachModePanel({ serverUrl }) {
               <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
                 <label style={{ fontSize: 12 }}>
                   X
-                  <input value={step.x} onChange={(e) => updateStep(idx, { x: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.x} onChange={(e) => updateStep(idx, { x: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Y
-                  <input value={step.y} onChange={(e) => updateStep(idx, { y: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.y} onChange={(e) => updateStep(idx, { y: Number(e.target.value || 0) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Button
-                  <select value={step.button || "left"} onChange={(e) => updateStep(idx, { button: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+                  <select value={step.button || "left"} onChange={(e) => updateStep(idx, { button: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
                     <option value="left">left</option>
                     <option value="right">right</option>
                   </select>
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Click count
-                  <input value={step.count} onChange={(e) => updateStep(idx, { count: Number(e.target.value || 1) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.count} onChange={(e) => updateStep(idx, { count: Number(e.target.value || 1) })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
               </div>
             )}
             {isDesktop && step.type === "clipboardSet" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Clipboard text
-                <input value={step.text} onChange={(e) => updateStep(idx, { text: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.text} onChange={(e) => updateStep(idx, { text: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {isDesktop && step.type === "screenshot" && (
               <label style={{ fontSize: 12, marginTop: 6 }}>
                 Name
-                <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
               </label>
             )}
             {isDesktop && step.type === "visionOcr" && (
               <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
                 <label style={{ fontSize: 12 }}>
                   Name
-                  <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Language
-                  <input value={step.lang} onChange={(e) => updateStep(idx, { lang: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.lang} onChange={(e) => updateStep(idx, { lang: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
               </div>
             )}
@@ -375,19 +375,19 @@ export default function TeachModePanel({ serverUrl }) {
               <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
                 <label style={{ fontSize: 12 }}>
                   Name
-                  <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Automation ID
-                  <input value={step.automationId} onChange={(e) => updateStep(idx, { automationId: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.automationId} onChange={(e) => updateStep(idx, { automationId: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Class name
-                  <input value={step.className} onChange={(e) => updateStep(idx, { className: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.className} onChange={(e) => updateStep(idx, { className: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Control type
-                  <select value={step.controlType || ""} onChange={(e) => updateStep(idx, { controlType: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+                  <select value={step.controlType || ""} onChange={(e) => updateStep(idx, { controlType: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
                     {UIA_CONTROL_TYPES.map((ct) => (
                       <option key={ct} value={ct}>{ct || "(any)"}</option>
                     ))}
@@ -399,19 +399,19 @@ export default function TeachModePanel({ serverUrl }) {
               <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
                 <label style={{ fontSize: 12 }}>
                   Name
-                  <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.name} onChange={(e) => updateStep(idx, { name: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Automation ID
-                  <input value={step.automationId} onChange={(e) => updateStep(idx, { automationId: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.automationId} onChange={(e) => updateStep(idx, { automationId: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Class name
-                  <input value={step.className} onChange={(e) => updateStep(idx, { className: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.className} onChange={(e) => updateStep(idx, { className: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Control type
-                  <select value={step.controlType || ""} onChange={(e) => updateStep(idx, { controlType: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}>
+                  <select value={step.controlType || ""} onChange={(e) => updateStep(idx, { controlType: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}>
                     {UIA_CONTROL_TYPES.map((ct) => (
                       <option key={ct} value={ct}>{ct || "(any)"}</option>
                     ))}
@@ -419,7 +419,7 @@ export default function TeachModePanel({ serverUrl }) {
                 </label>
                 <label style={{ fontSize: 12 }}>
                   Value
-                  <input value={step.value} onChange={(e) => updateStep(idx, { value: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }} />
+                  <input value={step.value} onChange={(e) => updateStep(idx, { value: e.target.value })} style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }} />
                 </label>
               </div>
             )}
@@ -433,12 +433,12 @@ export default function TeachModePanel({ serverUrl }) {
         </button>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Run Macro</div>
         <select
           value={selectedMacro?.id || ""}
           onChange={(e) => handleSelectMacro(e.target.value)}
-          style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db" }}
+          style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
         >
           <option value="">Select a macro</option>
           {macros.map(macro => (
@@ -453,7 +453,7 @@ export default function TeachModePanel({ serverUrl }) {
                 <input
                   value={macroParams[param] || ""}
                   onChange={(e) => setMacroParams(prev => ({ ...prev, [param]: e.target.value }))}
-                  style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+                  style={{ width: "100%", padding: 6, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
                 />
               </label>
             ))}
@@ -473,7 +473,7 @@ export default function TeachModePanel({ serverUrl }) {
           </div>
         )}
         {runResult && (
-          <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+          <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
 {JSON.stringify(runResult, null, 2)}
           </pre>
         )}
@@ -481,3 +481,5 @@ export default function TeachModePanel({ serverUrl }) {
     </div>
   );
 }
+
+

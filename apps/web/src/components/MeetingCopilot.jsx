@@ -548,7 +548,7 @@ export default function MeetingCopilot({
           >
             {recordingStarting ? "Starting..." : recordingActive ? "Recording active" : "Start recording"}
           </button>
-          <input value={recordingTitle} onChange={(e) => setRecordingTitle(e.target.value)} style={{ padding: 8, borderRadius: 8, border: "1px solid #d1d5db", minWidth: 220 }} />
+          <input value={recordingTitle} onChange={(e) => setRecordingTitle(e.target.value)} style={{ padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)", minWidth: 220 }} />
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
             <input type="checkbox" checked={redactionEnabled} onChange={(e) => setRedactionEnabled(e.target.checked)} />
             Redaction enabled
@@ -570,7 +570,7 @@ export default function MeetingCopilot({
       )}
 
       {(recordingActive || recordingStarting || recordingError) && (
-        <div style={{ position: "fixed", right: 24, bottom: 24, width: 320, background: "#fff", borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,0.15)", padding: 16, zIndex: 40 }}>
+        <div style={{ position: "fixed", right: 24, bottom: 24, width: 320, background: "var(--panel-bg)", borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,0.15)", padding: 16, zIndex: 40 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div
               style={{
@@ -589,7 +589,7 @@ export default function MeetingCopilot({
             <div style={{ marginLeft: "auto", fontSize: 12 }}>{formatDuration(elapsed)}</div>
           </div>
           <div style={{ marginTop: 10 }}>
-            <canvas ref={waveformRef} width={280} height={60} style={{ width: "100%", background: "#f8fafc", borderRadius: 8 }} />
+            <canvas ref={waveformRef} width={280} height={60} style={{ width: "100%", background: "var(--panel-bg-soft)", borderRadius: 8 }} />
           </div>
           {recordingError && (
             <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 8 }}>
@@ -625,8 +625,8 @@ export default function MeetingCopilot({
         <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16 }}>
         <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)", color: "var(--text-primary)" }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Recordings</div>
-          <input placeholder="Search recordings" value={recordingQuery} onChange={(e) => setRecordingQuery(e.target.value)} style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #d1d5db", marginBottom: 8 }} />
-          <select value={recordingStatusFilter} onChange={(e) => setRecordingStatusFilter(e.target.value)} style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid #d1d5db", marginBottom: 8 }}>
+          <input placeholder="Search recordings" value={recordingQuery} onChange={(e) => setRecordingQuery(e.target.value)} style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", marginBottom: 8 }} />
+          <select value={recordingStatusFilter} onChange={(e) => setRecordingStatusFilter(e.target.value)} style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", marginBottom: 8 }}>
             <option value="">All statuses</option>
             <option value="recording">Recording</option>
             <option value="paused">Paused</option>
@@ -638,7 +638,7 @@ export default function MeetingCopilot({
           {recordingsError && <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 8 }}>{recordingsError}</div>}
           <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
             {recordings.map(rec => (
-              <button key={rec.id} onClick={() => setSelectedId(rec.id)} style={{ textAlign: "left", padding: 8, borderRadius: 10, border: rec.id === selectedId ? "2px solid #2563eb" : "1px solid #e5e7eb" }}>
+              <button key={rec.id} onClick={() => setSelectedId(rec.id)} style={{ textAlign: "left", padding: 8, borderRadius: 10, border: rec.id === selectedId ? "1px solid var(--accent)" : "1px solid var(--panel-border)" }}>
                 <div style={{ fontWeight: 600 }}>{rec.title}</div>
                 <div style={{ fontSize: 11, color: "#6b7280" }}>{new Date(rec.started_at).toLocaleString()}</div>
                 <div style={{ marginTop: 4 }}>{statusChip(rec.status)}</div>
@@ -683,20 +683,20 @@ export default function MeetingCopilot({
                   Download meeting_notes.md
                 </a>
               </div>
-              <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 8 }}>
+              <div style={{ marginTop: 10, border: "1px solid var(--panel-border)", borderRadius: 8, padding: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Email this meeting</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr auto", gap: 8 }}>
                   <input
                     value={emailTo}
                     onChange={(e) => setEmailTo(e.target.value)}
                     placeholder="work@email.com"
-                    style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <input
                     value={emailSubject}
                     onChange={(e) => setEmailSubject(e.target.value)}
                     placeholder={`Meeting Notes: ${selected.title}`}
-                    style={{ padding: 6, borderRadius: 6, border: "1px solid #d1d5db" }}
+                    style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                   />
                   <button
                     onClick={() => emailRecording(selected.id)}
@@ -720,7 +720,7 @@ export default function MeetingCopilot({
               )}
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                 {["summary", "transcript", "tasks", "decisions", "actions", "ask"].map(tab => (
-                  <button key={tab} onClick={() => setDetailTab(tab)} style={{ padding: "6px 10px", borderRadius: 8, border: detailTab === tab ? "2px solid #2563eb" : "1px solid #e5e7eb" }}>
+                  <button key={tab} onClick={() => setDetailTab(tab)} style={{ padding: "6px 10px", borderRadius: 8, border: detailTab === tab ? "1px solid var(--accent)" : "1px solid var(--panel-border)" }}>
                     {tab}
                   </button>
                 ))}
@@ -885,3 +885,6 @@ export default function MeetingCopilot({
     </div>
   );
 }
+
+
+

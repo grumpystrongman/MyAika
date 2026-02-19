@@ -8,6 +8,7 @@ const ACTION_TYPES = [
   "api.external_post",
   "messaging.slackPost",
   "messaging.telegramSend",
+  "messaging.telegramVoiceSend",
   "messaging.discordSend",
   "messaging.whatsapp.send",
   "messaging.sms.send",
@@ -152,9 +153,9 @@ export default function SafetyPanel({ serverUrl }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {policyError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{policyError}</div>}
-      {message && <div style={{ fontSize: 12, color: "#2563eb" }}>{message}</div>}
+      {message && <div style={{ fontSize: 12, color: "var(--accent)" }}>{message}</div>}
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Admin access</div>
         <label style={{ fontSize: 12, display: "block" }}>
           Admin token (local only)
@@ -170,12 +171,12 @@ export default function SafetyPanel({ serverUrl }) {
                 // ignore storage errors
               }
             }}
-            style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+            style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
           />
         </label>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Autonomy</div>
         <div style={{ display: "grid", gap: 8 }}>
           <label style={{ fontSize: 12 }}>Autonomy level</label>
@@ -202,7 +203,7 @@ export default function SafetyPanel({ serverUrl }) {
         </div>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Requires approval</div>
         <div style={{ display: "grid", gap: 6 }}>
           {ACTION_TYPES.map(action => (
@@ -226,20 +227,20 @@ export default function SafetyPanel({ serverUrl }) {
         </div>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Protected paths</div>
         <textarea
           rows={6}
           defaultValue={protectedPathsText}
           onBlur={(e) => setPolicy({ ...policy, protected_paths: e.target.value.split("\n").map(line => line.trim()).filter(Boolean) })}
-          style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db" }}
+          style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
         />
         <button onClick={() => savePolicy(policy)} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
           Save paths
         </button>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Network allowlist</div>
         <textarea
           rows={4}
@@ -251,14 +252,14 @@ export default function SafetyPanel({ serverUrl }) {
               allowlist_domains: e.target.value.split("\n").map(line => line.trim()).filter(Boolean)
             }
           })}
-          style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db" }}
+          style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
         />
         <button onClick={() => savePolicy(policy)} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
           Save network rules
         </button>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Memory tiers</div>
         <div style={{ fontSize: 12, color: "#6b7280" }}>
           Tier4 (PHI) is read-only by default. Enabling writes requires approval.
@@ -282,7 +283,7 @@ export default function SafetyPanel({ serverUrl }) {
         </button>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Kill switch</div>
         <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
           Status: {killSwitch?.enabled ? "ACTIVE" : "inactive"}
@@ -295,13 +296,13 @@ export default function SafetyPanel({ serverUrl }) {
         </button>
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Pending approvals</div>
         {approvals.length === 0 ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>No pending approvals.</div>
         ) : (
           approvals.map(item => (
-            <div key={item.id} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 8, marginBottom: 8 }}>
+            <div key={item.id} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 8, marginBottom: 8 }}>
               <div style={{ fontSize: 12, fontWeight: 600 }}>{item.summary || item.toolName || item.actionType}</div>
               <div style={{ fontSize: 11, color: "#6b7280" }}>Type: {item.actionType || item.toolName}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -317,14 +318,14 @@ export default function SafetyPanel({ serverUrl }) {
         )}
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Audit log</div>
         {auditEvents.length === 0 ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>No audit events yet.</div>
         ) : (
           <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
             {auditEvents.map(event => (
-              <div key={event.id} style={{ borderBottom: "1px solid #f3f4f6", paddingBottom: 6 }}>
+              <div key={event.id} style={{ borderBottom: "1px solid var(--panel-border-subtle)", paddingBottom: 6 }}>
                 <div><strong>{event.action_type}</strong> - {event.decision}</div>
                 <div style={{ color: "#6b7280" }}>{event.ts} - {event.reason}</div>
               </div>
@@ -335,3 +336,5 @@ export default function SafetyPanel({ serverUrl }) {
     </div>
   );
 }
+
+

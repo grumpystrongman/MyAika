@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 
 const DEFAULTS = {
   topK: 8,
@@ -105,22 +105,22 @@ export default function FirefliesRagPage() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f6fb", color: "#111827", padding: "32px 20px" }}>
+    <div style={{ minHeight: "100vh", background: "var(--app-gradient)", color: "var(--text-primary)", padding: "32px 20px" }}>
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         <h1 style={{ fontSize: 28, marginBottom: 6 }}>Fireflies RAG</h1>
-        <p style={{ color: "#6b7280", marginBottom: 24 }}>
+        <p style={{ color: "var(--text-muted)", marginBottom: 24 }}>
           Sync Fireflies transcripts locally, then ask questions with citations.
         </p>
 
         <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-          <div style={{ background: "#ffffff", borderRadius: 16, padding: 20, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 16, padding: 20, border: "1px solid var(--panel-border)" }}>
             <h2 style={{ fontSize: 18, marginBottom: 12 }}>Sync Fireflies</h2>
-            <label style={{ display: "block", fontSize: 13, color: "#6b7280" }}>Limit (0 = all)</label>
+            <label style={{ display: "block", fontSize: 13, color: "var(--text-muted)" }}>Limit (0 = all)</label>
             <input
               type="number"
               value={syncLimit}
               onChange={(e) => setSyncLimit(e.target.value)}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db", marginTop: 6 }}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--panel-border-strong)", marginTop: 6 }}
             />
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 14 }}>
               <input
@@ -138,7 +138,7 @@ export default function FirefliesRagPage() {
                 padding: "10px 14px",
                 borderRadius: 10,
                 border: "none",
-                background: syncing ? "#93c5fd" : "#2563eb",
+                background: syncing ? "var(--chip-bg)" : "var(--accent)",
                 color: "#fff",
                 cursor: syncing ? "not-allowed" : "pointer"
               }}
@@ -146,31 +146,31 @@ export default function FirefliesRagPage() {
               {syncing ? "Syncing..." : "Sync Fireflies"}
             </button>
             {syncStatus && (
-              <div style={{ marginTop: 12, fontSize: 13, color: "#374151" }}>{syncStatus}</div>
+              <div style={{ marginTop: 12, fontSize: 13, color: "var(--text-muted)" }}>{syncStatus}</div>
             )}
             {syncResult && (
-              <pre style={{ marginTop: 12, fontSize: 12, background: "#f9fafb", padding: 12, borderRadius: 10, overflowX: "auto" }}>
+              <pre style={{ marginTop: 12, fontSize: 12, background: "var(--panel-bg-soft)", padding: 12, borderRadius: 10, overflowX: "auto" }}>
                 {JSON.stringify(syncResult, null, 2)}
               </pre>
             )}
           </div>
 
-          <div style={{ background: "#ffffff", borderRadius: 16, padding: 20, border: "1px solid #e5e7eb" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 16, padding: 20, border: "1px solid var(--panel-border)" }}>
             <h2 style={{ fontSize: 18, marginBottom: 12 }}>Ask</h2>
-            <label style={{ display: "block", fontSize: 13, color: "#6b7280" }}>Question</label>
+            <label style={{ display: "block", fontSize: 13, color: "var(--text-muted)" }}>Question</label>
             <textarea
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               rows={4}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #d1d5db", marginTop: 6 }}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--panel-border-strong)", marginTop: 6 }}
               placeholder="What did we decide about ED wait times?"
             />
-            <label style={{ display: "block", fontSize: 13, color: "#6b7280", marginTop: 12 }}>Top K</label>
+            <label style={{ display: "block", fontSize: 13, color: "var(--text-muted)", marginTop: 12 }}>Top K</label>
             <input
               type="number"
               value={topK}
               onChange={(e) => setTopK(e.target.value)}
-              style={{ width: 120, padding: 8, borderRadius: 10, border: "1px solid #d1d5db", marginTop: 6 }}
+              style={{ width: 120, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", marginTop: 6 }}
             />
             <button
               onClick={handleAsk}
@@ -180,7 +180,7 @@ export default function FirefliesRagPage() {
                 padding: "10px 14px",
                 borderRadius: 10,
                 border: "none",
-                background: asking ? "#93c5fd" : "#111827",
+                background: asking ? "var(--chip-bg)" : "var(--accent)",
                 color: "#fff",
                 cursor: asking ? "not-allowed" : "pointer"
               }}
@@ -190,14 +190,14 @@ export default function FirefliesRagPage() {
           </div>
         </div>
 
-        <div style={{ marginTop: 24, background: "#ffffff", borderRadius: 16, padding: 20, border: "1px solid #e5e7eb" }}>
+        <div style={{ marginTop: 24, background: "var(--panel-bg)", borderRadius: 16, padding: 20, border: "1px solid var(--panel-border)" }}>
           <h2 style={{ fontSize: 18, marginBottom: 12 }}>Answer</h2>
           {answer ? (
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, maxHeight: 320, overflowY: "auto", paddingRight: 6 }}>
               {answer}
             </div>
           ) : (
-            <div style={{ color: "#6b7280" }}>No answer yet. Sync transcripts and ask a question.</div>
+            <div style={{ color: "var(--text-muted)" }}>No answer yet. Sync transcripts and ask a question.</div>
           )}
           {answer && (
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -206,8 +206,8 @@ export default function FirefliesRagPage() {
                 style={{
                   padding: "6px 10px",
                   borderRadius: 8,
-                  border: "1px solid #d1d5db",
-                  background: feedbackRating === "up" ? "#dcfce7" : "white",
+                  border: "1px solid var(--panel-border-strong)",
+                  background: feedbackRating === "up" ? "#dcfce7" : "var(--panel-bg)",
                   fontSize: 12
                 }}
               >
@@ -218,20 +218,20 @@ export default function FirefliesRagPage() {
                 style={{
                   padding: "6px 10px",
                   borderRadius: 8,
-                  border: "1px solid #d1d5db",
-                  background: feedbackRating === "down" ? "#fee2e2" : "white",
+                  border: "1px solid var(--panel-border-strong)",
+                  background: feedbackRating === "down" ? "#fee2e2" : "var(--panel-bg)",
                   fontSize: 12
                 }}
               >
                 Thumbs Down
               </button>
               {feedbackStatus && (
-                <div style={{ fontSize: 12, color: "#6b7280" }}>{feedbackStatus}</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{feedbackStatus}</div>
               )}
             </div>
           )}
           {debug && (
-            <pre style={{ marginTop: 12, fontSize: 12, background: "#f9fafb", padding: 12, borderRadius: 10, overflowX: "auto" }}>
+            <pre style={{ marginTop: 12, fontSize: 12, background: "var(--panel-bg-soft)", padding: 12, borderRadius: 10, overflowX: "auto" }}>
               {JSON.stringify(debug, null, 2)}
             </pre>
           )}
@@ -240,15 +240,15 @@ export default function FirefliesRagPage() {
         <div style={{ marginTop: 24 }}>
           <h2 style={{ fontSize: 18, marginBottom: 12 }}>Citations</h2>
           {citations.length === 0 ? (
-            <div style={{ color: "#6b7280" }}>No citations yet.</div>
+            <div style={{ color: "var(--text-muted)" }}>No citations yet.</div>
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
               {citations.map((cite, idx) => (
-                <details key={`${cite.chunk_id}-${idx}`} style={{ background: "#ffffff", borderRadius: 12, border: "1px solid #e5e7eb", padding: 12 }}>
+                <details key={`${cite.chunk_id}-${idx}`} style={{ background: "var(--panel-bg)", borderRadius: 12, border: "1px solid var(--panel-border)", padding: 12 }}>
                   <summary style={{ cursor: "pointer", fontWeight: 600 }}>
                     {cite.meeting_title || "Meeting"} ({cite.occurred_at || "Unknown date"})
                   </summary>
-                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>{cite.chunk_id}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>{cite.chunk_id}</div>
                   <div style={{ marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{cite.snippet}</div>
                 </details>
               ))}
@@ -259,3 +259,6 @@ export default function FirefliesRagPage() {
     </div>
   );
 }
+
+
+

@@ -27,7 +27,7 @@ function extractSnippet(doc) {
 
 function tagBadge(tag, key) {
   return (
-    <span key={key} style={{ padding: "2px 6px", background: "#e2e8f0", borderRadius: 999, fontSize: 11 }}>
+    <span key={key} style={{ padding: "2px 6px", background: "var(--panel-bg-soft)", borderRadius: 999, fontSize: 11, color: "var(--text-muted)" }}>
       {tag}
     </span>
   );
@@ -114,14 +114,14 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
     <div style={{
       minHeight: fullPage ? "100vh" : "auto",
       padding: fullPage ? "32px 24px" : "16px",
-      background: "radial-gradient(circle at top, #f8fafc 0%, #eef2ff 40%, #e0f2fe 100%)",
-      color: "#0f172a"
+      background: "var(--app-gradient)",
+      color: "var(--text-primary)"
     }}>
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 28, fontWeight: 700 }}>Signals Ingestion</div>
-            <div style={{ color: "#475569", marginTop: 6 }}>
+            <div style={{ color: "var(--text-muted)", marginTop: 6 }}>
               Daily macro, energy, weather, and supply chain signals. Informational only — not financial advice.
             </div>
           </div>
@@ -129,13 +129,13 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
             <button
               onClick={() => setRefreshKey(prev => prev + 1)}
               disabled={loading}
-              style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid #cbd5f5", background: "#fff" }}
+              style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg)" }}
             >
               {loading ? "Refreshing..." : "Refresh"}
             </button>
             <button
               onClick={runNow}
-              style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid #0ea5e9", background: "#0ea5e9", color: "#fff", fontWeight: 600 }}
+              style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid var(--accent)", background: "var(--accent)", color: "#0b0f1f", fontWeight: 600 }}
             >
               Run Now
             </button>
@@ -149,25 +149,25 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
         )}
 
         <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", marginTop: 20 }}>
-          <div style={{ background: "#fff", borderRadius: 16, padding: 16, border: "1px solid #e2e8f0" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 16, padding: 16, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Last Run</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Status: {lastRun?.status || "--"}</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Started: {formatTime(lastRun?.started_at)}</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Finished: {formatTime(lastRun?.finished_at)}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Status: {lastRun?.status || "--"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Started: {formatTime(lastRun?.started_at)}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Finished: {formatTime(lastRun?.finished_at)}</div>
           </div>
-          <div style={{ background: "#fff", borderRadius: 16, padding: 16, border: "1px solid #e2e8f0" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 16, padding: 16, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Counts</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Ingested: {lastRun?.ingested_count ?? 0}</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Skipped: {lastRun?.skipped_count ?? 0}</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Expired: {lastRun?.expired_count ?? 0}</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Errors: {lastRun?.error_count ?? 0}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Ingested: {lastRun?.ingested_count ?? 0}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Skipped: {lastRun?.skipped_count ?? 0}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Expired: {lastRun?.expired_count ?? 0}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Errors: {lastRun?.error_count ?? 0}</div>
           </div>
-          <div style={{ background: "#fff", borderRadius: 16, padding: 16, border: "1px solid #e2e8f0" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 16, padding: 16, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Sources Pulled</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Configured: {status?.config?.source_count ?? "--"}</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>Report: {lastRun?.report_path ? lastRun.report_path.split(/[\\/]/).pop() : "--"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Configured: {status?.config?.source_count ?? "--"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Report: {lastRun?.report_path ? lastRun.report_path.split(/[\\/]/).pop() : "--"}</div>
             {lastRun?.sources?.length ? (
-              <div style={{ marginTop: 8, display: "grid", gap: 4, fontSize: 11, color: "#64748b" }}>
+              <div style={{ marginTop: 8, display: "grid", gap: 4, fontSize: 11, color: "var(--text-muted)" }}>
                 {lastRun.sources.slice(0, 6).map(source => (
                   <div key={source.source_id}>
                     {source.source_id}: {source.ingested} ingested / {source.pulled} pulled
@@ -179,23 +179,23 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
         </div>
 
         <div style={{ marginTop: 24, display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-          <div style={{ background: "#fff", borderRadius: 16, padding: 16, border: "1px solid #e2e8f0" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 16, padding: 16, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 10 }}>Top Trends</div>
             {trends.length === 0 ? (
-              <div style={{ fontSize: 12, color: "#94a3b8" }}>No trend clusters yet.</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No trend clusters yet.</div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
                 {trends.map(trend => (
-                  <div key={trend.trend_id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                  <div key={trend.trend_id} style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                     <div style={{ fontWeight: 600 }}>{trend.label || "Trend"}</div>
-                    <div style={{ fontSize: 11, color: "#64748b" }}>Docs: {trend.doc_count}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Docs: {trend.doc_count}</div>
                     {trend.top_entities?.length ? (
-                      <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
                         Entities: {trend.top_entities.join(", ")}
                       </div>
                     ) : null}
                     {trend.note ? (
-                      <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>{trend.note}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>{trend.note}</div>
                     ) : null}
                   </div>
                 ))}
@@ -203,10 +203,10 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
             )}
           </div>
 
-          <div style={{ background: "#fff", borderRadius: 16, padding: 16, border: "1px solid #e2e8f0" }}>
+          <div style={{ background: "var(--panel-bg)", borderRadius: 16, padding: 16, border: "1px solid var(--panel-border)" }}>
             <div style={{ fontWeight: 600, marginBottom: 10 }}>Top Signals</div>
             {topSignals.length === 0 ? (
-              <div style={{ fontSize: 12, color: "#94a3b8" }}>No signal-tagged docs yet.</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No signal-tagged docs yet.</div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
                 {topSignals.map(doc => (
@@ -214,10 +214,10 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
                     key={doc.doc_id}
                     type="button"
                     onClick={() => setSelectedDoc(doc)}
-                    style={{ textAlign: "left", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, cursor: "pointer" }}
+                    style={{ textAlign: "left", background: "var(--panel-bg-soft)", border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10, cursor: "pointer" }}
                   >
                     <div style={{ fontWeight: 600 }}>{doc.title || "Signal"}</div>
-                    <div style={{ fontSize: 11, color: "#64748b" }}>{extractSnippet(doc)}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{extractSnippet(doc)}</div>
                   </button>
                 ))}
               </div>
@@ -225,10 +225,10 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
           </div>
         </div>
 
-        <div style={{ marginTop: 24, background: "#fff", borderRadius: 16, padding: 16, border: "1px solid #e2e8f0" }}>
+        <div style={{ marginTop: 24, background: "var(--panel-bg)", borderRadius: 16, padding: 16, border: "1px solid var(--panel-border)" }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Latest Documents</div>
           {docs.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#94a3b8" }}>No documents ingested yet.</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No documents ingested yet.</div>
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
               {docs.slice(0, 25).map(doc => (
@@ -236,13 +236,13 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
                   key={doc.doc_id}
                   type="button"
                   onClick={() => setSelectedDoc(doc)}
-                  style={{ textAlign: "left", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, cursor: "pointer" }}
+                  style={{ textAlign: "left", background: "var(--panel-bg)", border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, cursor: "pointer" }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ fontWeight: 600 }}>{doc.title || "Document"}</div>
-                    <div style={{ fontSize: 11, color: "#64748b" }}>{formatTime(doc.published_at)}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatTime(doc.published_at)}</div>
                   </div>
-                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{extractSnippet(doc)}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{extractSnippet(doc)}</div>
                   <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                     {(doc.signal_tags || []).slice(0, 4).map(tag => tagBadge(tag, `${doc.doc_id}-${tag}`))}
                   </div>
@@ -255,20 +255,20 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
 
       {selectedDoc && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 80 }}>
-          <div style={{ width: "min(840px, 94vw)", maxHeight: "85vh", overflow: "auto", background: "#fff", borderRadius: 16, padding: 18, border: "1px solid #e2e8f0" }}>
+          <div style={{ width: "min(840px, 94vw)", maxHeight: "85vh", overflow: "auto", background: "var(--panel-bg)", borderRadius: 16, padding: 18, border: "1px solid var(--panel-border)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16 }}>{selectedDoc.title || "Signal Doc"}</div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>{selectedDoc.source_title || selectedDoc.source_id} · {formatTime(selectedDoc.published_at)}</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{selectedDoc.source_title || selectedDoc.source_id} · {formatTime(selectedDoc.published_at)}</div>
               </div>
-              <button onClick={() => setSelectedDoc(null)} style={{ border: "1px solid #e2e8f0", padding: "6px 10px", borderRadius: 8, background: "#fff" }}>
+              <button onClick={() => setSelectedDoc(null)} style={{ border: "1px solid var(--panel-border)", padding: "6px 10px", borderRadius: 8, background: "var(--panel-bg)" }}>
                 Close
               </button>
             </div>
-            <div style={{ fontSize: 12, color: "#475569", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
               Freshness: {formatScore(selectedDoc.freshness_score)} · Reliability: {formatScore(selectedDoc.reliability_score)}
             </div>
-            <div style={{ fontSize: 12, color: "#334155", whiteSpace: "pre-wrap" }}>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
               {selectedDoc.cleaned_text || selectedDoc.summary || selectedDoc.raw_text || "No text available."}
             </div>
             {(selectedDoc.signal_tags || []).length ? (
@@ -282,4 +282,7 @@ export default function SignalsPanel({ serverUrl = "", fullPage = false }) {
     </div>
   );
 }
+
+
+
 

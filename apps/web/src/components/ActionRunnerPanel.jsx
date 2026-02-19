@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const MODE_CONFIG = {
   browser: {
@@ -497,7 +497,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
         borderRadius: 16,
         padding: "14px 16px",
         background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 55%, #2563eb 100%)",
-        color: "white",
+        color: "var(--panel-bg)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -512,7 +512,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
 
       {activeState.error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{activeState.error}</div>}
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           {Object.entries(MODE_CONFIG).map(([key, entry]) => (
             <button
@@ -521,8 +521,8 @@ export default function ActionRunnerPanel({ serverUrl }) {
               style={{
                 padding: "6px 12px",
                 borderRadius: 999,
-                border: mode === key ? "2px solid #2563eb" : "1px solid #e5e7eb",
-                background: mode === key ? "#eff6ff" : "white",
+                border: mode === key ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: mode === key ? "#eff6ff" : "var(--panel-bg)",
                 fontSize: 12,
                 fontWeight: 600
               }}
@@ -536,8 +536,8 @@ export default function ActionRunnerPanel({ serverUrl }) {
               style={{
                 padding: "6px 12px",
                 borderRadius: 999,
-                border: "1px solid #e5e7eb",
-                background: "#f8fafc",
+                border: "1px solid var(--panel-border)",
+                background: "var(--panel-bg-soft)",
                 fontSize: 12,
                 fontWeight: 600
               }}
@@ -554,7 +554,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
             value={activeState.instruction}
             onChange={(e) => updateModeState({ instruction: e.target.value })}
             rows={4}
-            style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+            style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
           />
         </label>
 
@@ -564,7 +564,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
             <input
               value={activeState.startUrl}
               onChange={(e) => updateModeState({ startUrl: e.target.value })}
-              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
             />
           </label>
         )}
@@ -575,7 +575,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
             <select
               value={activeState.approvalMode || "per_run"}
               onChange={(e) => updateModeState({ approvalMode: e.target.value })}
-              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
             >
               <option value="per_run">Per run (one approval for the plan)</option>
               <option value="per_step">Per step (approval at each risky action)</option>
@@ -596,7 +596,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
           <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>{activeState.planExplanation}</div>
         )}
         {activeState.plan && (
-          <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+          <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
 {JSON.stringify(activeState.plan, null, 2)}
           </pre>
         )}
@@ -629,7 +629,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
     </div>
 
       {mode === "desktop" && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>Desktop Macro Recorder</div>
           <div style={{ fontSize: 12, color: "#6b7280" }}>
             Capture live mouse and keyboard input. Press {macroForm.stopKey || "F8"} to stop the recording.
@@ -642,7 +642,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
                 value={macroForm.name}
                 onChange={(e) => updateMacroForm({ name: e.target.value })}
                 placeholder="Daily login flow"
-                style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+                style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
             <label style={{ fontSize: 12 }}>
@@ -651,7 +651,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
                 value={macroForm.stopKey}
                 onChange={(e) => updateMacroForm({ stopKey: e.target.value })}
                 placeholder="F8"
-                style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+                style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
             <label style={{ fontSize: 12 }}>
@@ -660,7 +660,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
                 type="number"
                 value={macroForm.maxSeconds}
                 onChange={(e) => updateMacroForm({ maxSeconds: e.target.value })}
-                style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+                style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
               />
             </label>
           </div>
@@ -671,7 +671,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
               value={macroForm.description}
               onChange={(e) => updateMacroForm({ description: e.target.value })}
               placeholder="Login + open dashboard"
-              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
             />
           </label>
           <label style={{ fontSize: 12, marginTop: 10, display: "block" }}>
@@ -680,7 +680,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
               value={macroForm.tags}
               onChange={(e) => updateMacroForm({ tags: e.target.value })}
               placeholder="daily, admin"
-              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid #d1d5db" }}
+              style={{ width: "100%", padding: 8, marginTop: 4, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
             />
           </label>
           <label style={{ fontSize: 12, marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
@@ -720,7 +720,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
             </div>
           )}
           {recordingState.actions.length > 0 && (
-            <pre style={{ marginTop: 8, background: "#0b1220", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+            <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
 {JSON.stringify(recordingState.actions, null, 2)}
             </pre>
           )}
@@ -728,7 +728,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
       )}
 
       {mode === "desktop" && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>Saved Desktop Macros</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
             Stored locally in data/desktop_macros. Use approvals to run safely.
@@ -741,7 +741,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {desktopMacros.map((macro) => (
-              <div key={macro.id} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10 }}>
+              <div key={macro.id} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                   <div>
                     <div style={{ fontWeight: 600 }}>{macro.name || macro.id}</div>
@@ -771,7 +771,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
       )}
 
       {activeState.runId && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>Run Status</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Run ID: {activeState.runId}</div>
           <div style={{ fontSize: 12, marginBottom: 8 }}>Status: {runData?.status || "running"}</div>
@@ -796,7 +796,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
           <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Timeline</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
             {(runData?.timeline || []).map(step => (
-              <div key={`${step.step}-${step.type}`} style={{ borderBottom: "1px solid #f3f4f6", paddingBottom: 6 }}>
+              <div key={`${step.step}-${step.type}`} style={{ borderBottom: "1px solid var(--panel-border-subtle)", paddingBottom: 6 }}>
                 <div><b>#{step.step}</b> {step.type} - {step.status}</div>
                 {step.error && <div style={{ color: "#b91c1c" }}>{step.error}</div>}
               </div>
@@ -809,7 +809,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
               <div style={{ fontWeight: 600, fontSize: 12, margin: "12px 0 6px" }}>Extracted</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11 }}>
                 {(runData?.extracted || []).map((item, idx) => (
-                  <div key={`${item.step}-${idx}`} style={{ borderBottom: "1px solid #f3f4f6", paddingBottom: 6 }}>
+                  <div key={`${item.step}-${idx}`} style={{ borderBottom: "1px solid var(--panel-border-subtle)", paddingBottom: 6 }}>
                     <div><b>{item.name || item.selector}</b></div>
                     <div>{item.text}</div>
                   </div>
@@ -826,7 +826,7 @@ export default function ActionRunnerPanel({ serverUrl }) {
               return (
                 <div key={`${artifact.file}-${idx}`} style={{ width: 140 }}>
                   {artifact.type === "screenshot" ? (
-                    <img src={url} alt={artifact.file} style={{ width: "100%", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                    <img src={url} alt={artifact.file} style={{ width: "100%", borderRadius: 8, border: "1px solid var(--panel-border)" }} />
                   ) : artifact.type === "ocr" ? (
                     <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>
                       OCR: {artifact.file}
@@ -846,3 +846,6 @@ export default function ActionRunnerPanel({ serverUrl }) {
     </div>
   );
 }
+
+
+

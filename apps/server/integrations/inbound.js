@@ -36,7 +36,7 @@ export async function handleInboundMessage({ channel, senderId, senderName, text
       preview: text.slice(0, 160)
     });
     if (typeof reply === "function") {
-      await reply(`Pairing required. Use code ${pairing.code} in Aika to approve this channel.`);
+      await reply(`Pairing required. Use code ${pairing.code} in Aika to approve this channel.`, { kind: "pairing" });
     }
     return { status: "pairing_required", pairing };
   }
@@ -45,7 +45,7 @@ export async function handleInboundMessage({ channel, senderId, senderName, text
   const commandResult = await tryHandleRemoteCommand({ channel, senderId, senderName, chatId, text });
   if (commandResult?.handled) {
     if (commandResult.response && typeof reply === "function") {
-      await reply(commandResult.response);
+      await reply(commandResult.response, { kind: "command" });
     }
     return { status: "ok", response: commandResult.response || "", command: true };
   }
@@ -65,7 +65,7 @@ export async function handleInboundMessage({ channel, senderId, senderName, text
     senderName
   });
   if (response?.text && typeof reply === "function") {
-    await reply(response.text);
+    await reply(response.text, { kind: "chat" });
   }
   return { status: "ok", response: response?.text || "" };
 }

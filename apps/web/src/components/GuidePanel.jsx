@@ -176,7 +176,7 @@ export default function GuidePanel() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
         Full User Guide
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -188,16 +188,16 @@ export default function GuidePanel() {
         </button>
       </div>
       {status && (
-        <div style={{ fontSize: 12, color: "#6b7280" }}>{status}</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{status}</div>
       )}
       {!status && (
         <div
           className="guide-content"
           style={{
-            border: "1px solid #e5e7eb",
+            border: "1px solid var(--panel-border)",
             borderRadius: 12,
             padding: 16,
-            background: "white",
+            background: "var(--panel-bg)",
             maxHeight: "70vh",
             overflow: "auto"
           }}
@@ -208,7 +208,7 @@ export default function GuidePanel() {
         .guide-content {
           font-size: 13px;
           line-height: 1.6;
-          color: #111827;
+          color: var(--text-primary);
         }
         .guide-content h1 {
           font-size: 20px;
@@ -234,15 +234,15 @@ export default function GuidePanel() {
         }
         .guide-content code {
           font-family: "IBM Plex Mono", monospace;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
+          background: var(--panel-bg-soft);
+          border: 1px solid var(--panel-border);
           border-radius: 6px;
           padding: 1px 4px;
           font-size: 12px;
         }
         .guide-content pre {
-          background: #0b1220;
-          color: #e5e7eb;
+          background: var(--code-bg);
+          color: var(--code-text);
           padding: 10px;
           border-radius: 8px;
           overflow: auto;
@@ -250,13 +250,14 @@ export default function GuidePanel() {
         .guide-content img {
           max-width: 100%;
           border-radius: 10px;
-          border: 1px solid #e5e7eb;
+          border: 1px solid var(--panel-border);
           margin: 8px 0;
         }
         .guide-content a {
-          color: #2563eb;
+          color: var(--accent);
         }
       `}</style>
     </div>
   );
 }
+

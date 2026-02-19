@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function CanvasPanel({ serverUrl }) {
   const [cards, setCards] = useState([]);
@@ -25,7 +25,7 @@ export default function CanvasPanel({ serverUrl }) {
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
       <div style={{ display: "grid", gap: 10 }}>
         {cards.map(card => (
-          <div key={card.cardId} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "white" }}>
+          <div key={card.cardId} style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
             <div style={{ fontWeight: 600 }}>{card.kind || "card"}</div>
             <div style={{ fontSize: 12, color: "#6b7280" }}>Updated: {card.updatedAt || card.createdAt}</div>
             <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", marginTop: 8 }}>{JSON.stringify(card.content, null, 2)}</pre>
@@ -36,3 +36,4 @@ export default function CanvasPanel({ serverUrl }) {
     </div>
   );
 }
+
