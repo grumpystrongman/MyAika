@@ -3,6 +3,7 @@ import { getProvider, setProvider } from "./store.js";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 
 export const GOOGLE_SCOPE_PRESETS = {
   core: [
@@ -631,4 +632,55 @@ export async function sendGmailMessage({ to, subject, text, fromName = "", userI
     throw new Error(detail || "gmail_send_failed");
   }
   return await r.json();
+}
+
+async function modifyGmailLabels(messageId, payload, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.modify"], userId);
+  const r = await fetch(`${GMAIL_API}/users/me/messages/${encodeURIComponent(messageId)}/modify`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload || {})
+  });
+  if (!r.ok) {
+    const detail = await r.text();
+    throw new Error(detail || "gmail_modify_failed");
+  }
+  return await r.json();
+}
+
+export async function archiveGmailMessage(messageId, userId = "") {
+  return await modifyGmailLabels(messageId, { removeLabelIds: ["INBOX"] }, userId);
+}
+
+export async function markGmailSpam(messageId, userId = "") {
+  return await modifyGmailLabels(messageId, { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] }, userId);
+}
+
+export async function trashGmailMessage(messageId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.modify"], userId);
+  const r = await fetch(`${GMAIL_API}/users/me/messages/${encodeURIComponent(messageId)}/trash`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!r.ok) {
+    const detail = await r.text();
+    throw new Error(detail || "gmail_trash_failed");
+  }
+  return await r.json();
+}
+
+export async function deleteGmailMessage(messageId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.modify"], userId);
+  const r = await fetch(`${GMAIL_API}/users/me/messages/${encodeURIComponent(messageId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!r.ok) {
+    const detail = await r.text();
+    throw new Error(detail || "gmail_delete_failed");
+  }
+  return { ok: true, id: messageId };
 }

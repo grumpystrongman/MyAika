@@ -66,6 +66,11 @@ export default function EmailPage() {
   const [followLoading, setFollowLoading] = useState(false);
   const [followResult, setFollowResult] = useState(null);
   const [actionError, setActionError] = useState("");
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageResults, setTriageResults] = useState([]);
+  const [triageSource, setTriageSource] = useState("");
+  const [triageError, setTriageError] = useState("");
+  const [applyLoading, setApplyLoading] = useState(false);
 
   const [tone, setTone] = useState("friendly");
   const [signOffName, setSignOffName] = useState("");
@@ -114,6 +119,9 @@ export default function EmailPage() {
   const loadInbox = async () => {
     setLoading(true);
     setError("");
+    setTriageResults([]);
+    setTriageSource("");
+    setTriageError("");
     try {
       const params = new URLSearchParams({
         provider,
@@ -202,6 +210,95 @@ export default function EmailPage() {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data?.error || "tool_call_failed");
     return data;
+  };
+
+  const runTriage = async () => {
+    if (!emails.length) {
+      setTriageResults([]);
+      setTriageSource("");
+      setTriageError("No emails available to review.");
+      return;
+    }
+    setTriageLoading(true);
+    setTriageError("");
+    try {
+      const resp = await fetchWithCreds(buildUrl(baseUrl, "/api/email/triage"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emails: emails.slice(0, 40) })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "triage_failed");
+      setTriageResults(Array.isArray(data?.results) ? data.results : []);
+      setTriageSource(data?.provider || "");
+    } catch (err) {
+      setTriageResults([]);
+      setTriageSource("");
+      setTriageError(err?.message || "triage_failed");
+    } finally {
+      setTriageLoading(false);
+    }
+  };
+
+  const bulkAction = async (action, messageIds) => {
+    const resp = await fetchWithCreds(buildUrl(baseUrl, "/api/email/gmail/bulk"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, messageIds })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || "bulk_action_failed");
+    return data;
+  };
+
+  const applyTriage = async () => {
+    const trashTargets = triageResults.filter(item => item.action === "trash").map(item => item.id);
+    const spamTargets = triageResults.filter(item => item.action === "spam").map(item => item.id);
+    if (!trashTargets.length && !spamTargets.length) {
+      setNotice("No junk or spam flagged in this review.");
+      return;
+    }
+    const ok = window.confirm("Move flagged junk to Trash and spam to Spam? You can recover from Trash if needed.");
+    if (!ok) return;
+    setApplyLoading(true);
+    try {
+      if (trashTargets.length) await bulkAction("trash", trashTargets);
+      if (spamTargets.length) await bulkAction("spam", spamTargets);
+      setNotice(`Applied cleanup: ${trashTargets.length} trashed, ${spamTargets.length} marked spam.`);
+      await loadInbox();
+    } catch (err) {
+      setActionError(err?.message || "cleanup_failed");
+    } finally {
+      setApplyLoading(false);
+    }
+  };
+
+  const handleMessageAction = async (action) => {
+    if (!selectedEmail?.id) return;
+    const confirmMap = {
+      trash: "Move this email to Trash?",
+      delete: "Delete this email forever? This cannot be undone.",
+      spam: "Mark this email as spam?",
+      archive: "Archive this email (remove from inbox)?"
+    };
+    if (confirmMap[action]) {
+      const ok = window.confirm(confirmMap[action]);
+      if (!ok) return;
+    }
+    setActionError("");
+    try {
+      const resp = await fetchWithCreds(buildUrl(baseUrl, `/api/email/gmail/${action}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: selectedEmail.id })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `${action}_failed`);
+      setNotice(`Email ${action}d.`);
+      await loadInbox();
+    } catch (err) {
+      setActionError(err?.message || `${action}_failed`);
+    }
   };
 
   const draftReply = async () => {
@@ -371,6 +468,37 @@ export default function EmailPage() {
             {syncResult && (
               <pre className="panel-code">{JSON.stringify(syncResult, null, 2)}</pre>
             )}
+            <div className="divider" />
+            <div className="panel-title">Aika Review</div>
+            <div className="muted">Aika flags junk, spam, and solicitations so you can clean fast.</div>
+            <div className="button-row">
+              <button type="button" onClick={runTriage} disabled={triageLoading}>
+                {triageLoading ? "Reviewing..." : "Review Inbox"}
+              </button>
+              <button type="button" onClick={applyTriage} disabled={applyLoading || !triageResults.length}>
+                {applyLoading ? "Applying..." : "Apply Cleanup"}
+              </button>
+            </div>
+            {triageSource && (
+              <div className="muted">Review source: {triageSource}</div>
+            )}
+            {triageError && (
+              <div className="muted error-text">{triageError}</div>
+            )}
+            {triageResults.length > 0 && (
+              <div className="triage-list">
+                {triageResults.map(item => (
+                  <div key={item.id} className="triage-item">
+                    <div>
+                      <div className="triage-subject">{item.subject || "(no subject)"}</div>
+                      <div className="triage-meta">{item.from || "Unknown sender"}</div>
+                      {item.reason && <div className="triage-reason">{item.reason}</div>}
+                    </div>
+                    <div className={`triage-badge ${item.action || "keep"}`}>{item.action || "keep"}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="panel" style={{ animationDelay: "0.12s" }}>
@@ -434,6 +562,20 @@ export default function EmailPage() {
                     )}
                     <button type="button" onClick={loadContext} disabled={contextLoading}>
                       {contextLoading ? "Finding context..." : "Find Context"}
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button type="button" onClick={() => handleMessageAction("archive")}>
+                      Archive
+                    </button>
+                    <button type="button" className="warn" onClick={() => handleMessageAction("trash")}>
+                      Trash
+                    </button>
+                    <button type="button" className="warn" onClick={() => handleMessageAction("spam")}>
+                      Mark Spam
+                    </button>
+                    <button type="button" className="danger" onClick={() => handleMessageAction("delete")}>
+                      Delete Forever
                     </button>
                   </div>
                   {contextAnswer && (
@@ -690,6 +832,16 @@ export default function EmailPage() {
           border: none;
         }
 
+        button.warn {
+          border-color: rgba(245, 158, 11, 0.6);
+          color: #fde68a;
+        }
+
+        button.danger {
+          border-color: rgba(239, 68, 68, 0.7);
+          color: #fecaca;
+        }
+
         select,
         input,
         textarea {
@@ -799,6 +951,73 @@ export default function EmailPage() {
           white-space: pre-wrap;
           max-height: 240px;
           overflow: auto;
+        }
+
+        .triage-list {
+          margin-top: 12px;
+          display: grid;
+          gap: 8px;
+          max-height: 280px;
+          overflow-y: auto;
+          padding-right: 4px;
+        }
+
+        .triage-item {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 10px;
+          border-radius: 12px;
+          border: 1px solid var(--panel-border);
+          background: rgba(15, 23, 42, 0.65);
+        }
+
+        .triage-subject {
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .triage-meta {
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-top: 2px;
+        }
+
+        .triage-reason {
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-top: 6px;
+        }
+
+        .triage-badge {
+          align-self: flex-start;
+          padding: 4px 8px;
+          border-radius: 999px;
+          font-size: 10px;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          background: var(--chip-bg);
+          color: #fde68a;
+        }
+
+        .triage-badge.keep {
+          background: rgba(34, 211, 238, 0.18);
+          color: #a5f3fc;
+        }
+
+        .triage-badge.archive {
+          background: rgba(59, 130, 246, 0.2);
+          color: #bfdbfe;
+        }
+
+        .triage-badge.trash {
+          background: rgba(239, 68, 68, 0.22);
+          color: #fecaca;
+        }
+
+        .triage-badge.spam {
+          background: rgba(244, 63, 94, 0.22);
+          color: #fecdd3;
         }
 
         .email-list {

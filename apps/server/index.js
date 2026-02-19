@@ -34,7 +34,11 @@ import {
   listMeetSpaces,
   createMeetSpace,
   fetchGoogleUserInfo,
-  sendGmailMessage
+  sendGmailMessage,
+  archiveGmailMessage,
+  markGmailSpam,
+  trashGmailMessage,
+  deleteGmailMessage
 } from "./integrations/google.js";
 import {
   connectMicrosoft,
@@ -973,6 +977,117 @@ function extractJsonArray(text) {
   } catch {
     return null;
   }
+}
+
+const TRIAGE_ACTIONS = new Set(["keep", "archive", "trash", "spam"]);
+const TRIAGE_CATEGORIES = new Set([
+  "priority",
+  "reference",
+  "newsletter",
+  "solicitation",
+  "spam",
+  "junk",
+  "other"
+]);
+
+function normalizeEmailPreview(raw = {}) {
+  return {
+    id: String(raw?.id || "").trim(),
+    provider: String(raw?.provider || "gmail").trim().toLowerCase(),
+    subject: String(raw?.subject || "").trim(),
+    from: String(raw?.from || "").trim(),
+    snippet: String(raw?.snippet || "").trim(),
+    receivedAt: String(raw?.receivedAt || "").trim()
+  };
+}
+
+function heuristicEmailTriage(email) {
+  const subject = email.subject || "";
+  const from = email.from || "";
+  const snippet = email.snippet || "";
+  const combined = `${subject} ${from} ${snippet}`.toLowerCase();
+  const solicitationSignals = [
+    "unsubscribe",
+    "newsletter",
+    "marketing",
+    "promo",
+    "promotion",
+    "sale",
+    "offer",
+    "deal",
+    "special",
+    "discount",
+    "advert",
+    "shop",
+    "limited time"
+  ];
+  const spamSignals = [
+    "winner",
+    "lottery",
+    "bitcoin",
+    "crypto",
+    "viagra",
+    "urgent response",
+    "wire transfer",
+    "claim your",
+    "inheritance",
+    "investment opportunity"
+  ];
+  const referenceSignals = [
+    "receipt",
+    "invoice",
+    "statement",
+    "order",
+    "payment",
+    "shipping",
+    "tracking",
+    "reservation",
+    "itinerary"
+  ];
+  const prioritySignals = [
+    "meeting",
+    "agenda",
+    "proposal",
+    "contract",
+    "review",
+    "project",
+    "deadline",
+    "follow up",
+    "action required",
+    "approval",
+    "question",
+    "request"
+  ];
+
+  if (spamSignals.some(signal => combined.includes(signal))) {
+    return { ...email, action: "spam", category: "spam", reason: "Strong spam signal detected.", confidence: 0.72 };
+  }
+  if (referenceSignals.some(signal => combined.includes(signal))) {
+    return { ...email, action: "keep", category: "reference", reason: "Looks like a receipt or reference message.", confidence: 0.55 };
+  }
+  if (prioritySignals.some(signal => combined.includes(signal))) {
+    return { ...email, action: "keep", category: "priority", reason: "Looks like a project or meeting thread.", confidence: 0.55 };
+  }
+  if (solicitationSignals.some(signal => combined.includes(signal)) || from.toLowerCase().includes("noreply") || from.toLowerCase().includes("no-reply")) {
+    return { ...email, action: "trash", category: "solicitation", reason: "Marketing or newsletter pattern.", confidence: 0.48 };
+  }
+  return { ...email, action: "keep", category: "other", reason: "No strong junk signal detected.", confidence: 0.35 };
+}
+
+function normalizeTriageResult(result, email) {
+  const action = TRIAGE_ACTIONS.has(result?.action) ? result.action : "keep";
+  const category = TRIAGE_CATEGORIES.has(result?.category) ? result.category : "other";
+  const parsedConfidence = Number(result?.confidence);
+  const confidence = Number.isFinite(parsedConfidence)
+    ? Math.max(0, Math.min(1, parsedConfidence))
+    : 0.4;
+  return {
+    ...email,
+    action,
+    category,
+    reason: String(result?.reason || ""),
+    confidence
+  };
 }
 
 function buildTradingPreferenceBlock(training) {
@@ -7341,6 +7456,122 @@ app.get("/api/email/inbox", rateLimit, async (req, res) => {
     res.json({ ok: true, items });
   } catch (err) {
     res.status(500).json({ error: err?.message || "email_inbox_failed" });
+  }
+});
+
+app.post("/api/email/triage", rateLimit, async (req, res) => {
+  try {
+    const raw = Array.isArray(req.body?.emails) ? req.body.emails : [];
+    const items = raw.map(normalizeEmailPreview).filter(item => item.id).slice(0, 40);
+    if (!items.length) return res.status(400).json({ error: "emails_required" });
+
+    if (!process.env.OPENAI_API_KEY) {
+      const results = items.map(heuristicEmailTriage);
+      return res.json({ ok: true, provider: "heuristic", results });
+    }
+
+    const systemPrompt = `You are an email triage assistant. Classify each email as one of:
+- category: priority, reference, newsletter, solicitation, spam, junk, other
+- action: keep, archive, trash, spam
+Return ONLY a JSON array of objects with keys: id, category, action, reason, confidence (0-1).
+Rules:
+- Use "spam" only if the message is clearly malicious or scam.
+- Prefer "trash" for solicitations/junk, "archive" for low-importance but non-junk.
+- Keep receipts, orders, meeting, project, or personal messages.`;
+
+    const response = await client.responses.create({
+      model: OPENAI_MODEL,
+      input: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: JSON.stringify(items) }
+      ],
+      max_output_tokens: 420
+    });
+    const text = extractResponseText(response);
+    const parsed = extractJsonArray(text);
+    if (!Array.isArray(parsed)) throw new Error("triage_parse_failed");
+    const map = new Map(parsed.map(entry => [String(entry?.id || "").trim(), entry]));
+    const results = items.map(email => normalizeTriageResult(map.get(email.id), email));
+    res.json({ ok: true, provider: "openai", results });
+  } catch (err) {
+    const raw = Array.isArray(req.body?.emails) ? req.body.emails : [];
+    const items = raw.map(normalizeEmailPreview).filter(item => item.id).slice(0, 40);
+    const results = items.map(heuristicEmailTriage);
+    res.json({ ok: true, provider: "heuristic_fallback", warning: err?.message || "triage_failed", results });
+  }
+});
+
+app.post("/api/email/gmail/archive", rateLimit, async (req, res) => {
+  try {
+    const messageId = String(req.body?.messageId || "").trim();
+    if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const result = await archiveGmailMessage(messageId, getUserId(req));
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_archive_failed" });
+  }
+});
+
+app.post("/api/email/gmail/trash", rateLimit, async (req, res) => {
+  try {
+    const messageId = String(req.body?.messageId || "").trim();
+    if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const result = await trashGmailMessage(messageId, getUserId(req));
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_trash_failed" });
+  }
+});
+
+app.post("/api/email/gmail/spam", rateLimit, async (req, res) => {
+  try {
+    const messageId = String(req.body?.messageId || "").trim();
+    if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const result = await markGmailSpam(messageId, getUserId(req));
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_spam_failed" });
+  }
+});
+
+app.post("/api/email/gmail/delete", rateLimit, async (req, res) => {
+  try {
+    const messageId = String(req.body?.messageId || "").trim();
+    if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const result = await deleteGmailMessage(messageId, getUserId(req));
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_delete_failed" });
+  }
+});
+
+app.post("/api/email/gmail/bulk", rateLimit, async (req, res) => {
+  try {
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    const messageIds = Array.isArray(req.body?.messageIds)
+      ? req.body.messageIds.map(id => String(id || "").trim()).filter(Boolean)
+      : [];
+    if (!messageIds.length) return res.status(400).json({ error: "message_ids_required" });
+    const handlers = {
+      archive: archiveGmailMessage,
+      trash: trashGmailMessage,
+      spam: markGmailSpam,
+      delete: deleteGmailMessage
+    };
+    const handler = handlers[action];
+    if (!handler) return res.status(400).json({ error: "invalid_action" });
+    const results = [];
+    for (const id of messageIds) {
+      try {
+        await handler(id, getUserId(req));
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({ id, ok: false, error: err?.message || "action_failed" });
+      }
+    }
+    res.json({ ok: true, action, results });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_bulk_failed" });
   }
 });
 
