@@ -626,7 +626,7 @@ function buildConnections(userId = "") {
     connectedAt: googleStored?.connectedAt || null,
     configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
     method: "oauth",
-    connectUrl: "/api/integrations/google/connect?preset=gmail_readonly",
+    connectUrl: "/api/integrations/google/connect?preset=gmail_full",
     connectLabel: "Connect Gmail",
     setupHint: "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in apps/server/.env"
   });

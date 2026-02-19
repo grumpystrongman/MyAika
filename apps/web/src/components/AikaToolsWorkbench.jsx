@@ -1503,10 +1503,10 @@ export default function AikaToolsWorkbench({ serverUrl }) {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                 <button
-                  onClick={() => window.open(`${serverUrl}/api/integrations/google/connect?preset=gmail_readonly&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
+                  onClick={() => window.open(`${serverUrl}/api/integrations/google/connect?preset=gmail_full&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
                   style={{ padding: "6px 10px", borderRadius: 8 }}
                 >
-                  Connect Gmail
+                  Connect Gmail (Inbox + Send)
                 </button>
                 <button
                   onClick={() => window.open(`${serverUrl}/api/integrations/microsoft/connect?preset=mail_read&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
@@ -2462,10 +2462,10 @@ export default function AikaToolsWorkbench({ serverUrl }) {
               Connect Google Docs
             </button>
             <button
-              onClick={() => window.open(`${serverUrl}/api/integrations/google/connect?preset=gmail_readonly&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
+              onClick={() => window.open(`${serverUrl}/api/integrations/google/connect?preset=gmail_full&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
               style={{ padding: "6px 10px", borderRadius: 8 }}
             >
-              Connect Gmail (Read)
+              Connect Gmail (Inbox + Send)
             </button>
             <button
               onClick={() => window.open(`${serverUrl}/api/integrations/microsoft/connect?preset=mail_read&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}

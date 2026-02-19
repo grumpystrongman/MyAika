@@ -47,6 +47,7 @@ Use these links as a sidebar jump list inside the guide.
 ### Standalone Pages
 - [Signals Monitor](#signals-monitor)
 - [Fireflies RAG](#fireflies-rag)
+- [Email Workspace](#email-workspace)
 - [Trading Full Screen](#trading-full-screen)
 
 ## Purpose
@@ -756,6 +757,16 @@ How to use
 How to use
 1. Open the URL.
 2. Sync Fireflies and ask questions.
+
+### Email Workspace
+- `http://localhost:3000/email` opens the dedicated Gmail viewer and action studio.
+
+How to use
+1. Click `Connect Gmail (Inbox + Send)` and complete OAuth.
+2. Click `Refresh Inbox` to load recent messages.
+3. Select a message to view details and click `Find Context`.
+4. Use `Sync to Knowledge` to ingest recent threads into RAG.
+5. Create a todo or schedule a follow-up from the Action Studio.
 
 ### Trading Full Screen
 ![Trading full page](user-guide/screenshots/trading_full_page.png)
