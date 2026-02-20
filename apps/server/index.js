@@ -38,6 +38,8 @@ import {
   archiveGmailMessage,
   markGmailSpam,
   trashGmailMessage,
+  untrashGmailMessage,
+  unspamGmailMessage,
   deleteGmailMessage
 } from "./integrations/google.js";
 import {
@@ -1088,6 +1090,22 @@ function normalizeTriageResult(result, email) {
     reason: String(result?.reason || ""),
     confidence
   };
+}
+
+function recordEmailAction({ userId, provider = "gmail", action, messageId, source = "user", meta, ok = true, error } = {}) {
+  if (!messageId || !action) return;
+  writeAudit({
+    type: "email_action",
+    at: new Date().toISOString(),
+    provider,
+    action,
+    messageId,
+    source,
+    ok: Boolean(ok),
+    error: error || undefined,
+    meta: meta && typeof meta === "object" ? meta : undefined,
+    userId
+  });
 }
 
 function buildTradingPreferenceBlock(training) {
@@ -7505,7 +7523,10 @@ app.post("/api/email/gmail/archive", rateLimit, async (req, res) => {
   try {
     const messageId = String(req.body?.messageId || "").trim();
     if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const meta = req.body?.meta && typeof req.body.meta === "object" ? req.body.meta : null;
+    const source = String(req.body?.source || "user").trim() || "user";
     const result = await archiveGmailMessage(messageId, getUserId(req));
+    recordEmailAction({ userId: getUserId(req), action: "archive", messageId, source, meta });
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ error: err?.message || "gmail_archive_failed" });
@@ -7516,7 +7537,10 @@ app.post("/api/email/gmail/trash", rateLimit, async (req, res) => {
   try {
     const messageId = String(req.body?.messageId || "").trim();
     if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const meta = req.body?.meta && typeof req.body.meta === "object" ? req.body.meta : null;
+    const source = String(req.body?.source || "user").trim() || "user";
     const result = await trashGmailMessage(messageId, getUserId(req));
+    recordEmailAction({ userId: getUserId(req), action: "trash", messageId, source, meta });
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ error: err?.message || "gmail_trash_failed" });
@@ -7527,10 +7551,41 @@ app.post("/api/email/gmail/spam", rateLimit, async (req, res) => {
   try {
     const messageId = String(req.body?.messageId || "").trim();
     if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const meta = req.body?.meta && typeof req.body.meta === "object" ? req.body.meta : null;
+    const source = String(req.body?.source || "user").trim() || "user";
     const result = await markGmailSpam(messageId, getUserId(req));
+    recordEmailAction({ userId: getUserId(req), action: "spam", messageId, source, meta });
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ error: err?.message || "gmail_spam_failed" });
+  }
+});
+
+app.post("/api/email/gmail/untrash", rateLimit, async (req, res) => {
+  try {
+    const messageId = String(req.body?.messageId || "").trim();
+    if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const meta = req.body?.meta && typeof req.body.meta === "object" ? req.body.meta : null;
+    const source = String(req.body?.source || "undo").trim() || "undo";
+    const result = await untrashGmailMessage(messageId, getUserId(req));
+    recordEmailAction({ userId: getUserId(req), action: "untrash", messageId, source, meta });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_untrash_failed" });
+  }
+});
+
+app.post("/api/email/gmail/unspam", rateLimit, async (req, res) => {
+  try {
+    const messageId = String(req.body?.messageId || "").trim();
+    if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const meta = req.body?.meta && typeof req.body.meta === "object" ? req.body.meta : null;
+    const source = String(req.body?.source || "undo").trim() || "undo";
+    const result = await unspamGmailMessage(messageId, getUserId(req));
+    recordEmailAction({ userId: getUserId(req), action: "unspam", messageId, source, meta });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "gmail_unspam_failed" });
   }
 });
 
@@ -7538,7 +7593,10 @@ app.post("/api/email/gmail/delete", rateLimit, async (req, res) => {
   try {
     const messageId = String(req.body?.messageId || "").trim();
     if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    const meta = req.body?.meta && typeof req.body.meta === "object" ? req.body.meta : null;
+    const source = String(req.body?.source || "user").trim() || "user";
     const result = await deleteGmailMessage(messageId, getUserId(req));
+    recordEmailAction({ userId: getUserId(req), action: "delete", messageId, source, meta });
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ error: err?.message || "gmail_delete_failed" });
@@ -7552,10 +7610,14 @@ app.post("/api/email/gmail/bulk", rateLimit, async (req, res) => {
       ? req.body.messageIds.map(id => String(id || "").trim()).filter(Boolean)
       : [];
     if (!messageIds.length) return res.status(400).json({ error: "message_ids_required" });
+    const metaById = req.body?.metaById && typeof req.body.metaById === "object" ? req.body.metaById : null;
+    const source = String(req.body?.source || "bulk").trim() || "bulk";
     const handlers = {
       archive: archiveGmailMessage,
       trash: trashGmailMessage,
       spam: markGmailSpam,
+      untrash: untrashGmailMessage,
+      unspam: unspamGmailMessage,
       delete: deleteGmailMessage
     };
     const handler = handlers[action];
@@ -7564,6 +7626,13 @@ app.post("/api/email/gmail/bulk", rateLimit, async (req, res) => {
     for (const id of messageIds) {
       try {
         await handler(id, getUserId(req));
+        recordEmailAction({
+          userId: getUserId(req),
+          action,
+          messageId: id,
+          source,
+          meta: metaById?.[id]
+        });
         results.push({ id, ok: true });
       } catch (err) {
         results.push({ id, ok: false, error: err?.message || "action_failed" });

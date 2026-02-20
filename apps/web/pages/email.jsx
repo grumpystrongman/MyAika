@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function resolveServerUrl() {
   if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
@@ -41,6 +41,17 @@ function toIso(value) {
   return parsed.toISOString();
 }
 
+function buildEmailMeta(email) {
+  if (!email) return null;
+  return {
+    subject: email.subject || "",
+    from: email.from || "",
+    to: email.to || "",
+    snippet: email.snippet || "",
+    receivedAt: email.receivedAt || ""
+  };
+}
+
 export default function EmailPage() {
   const [provider, setProvider] = useState("gmail");
   const [lookbackDays, setLookbackDays] = useState(14);
@@ -71,6 +82,8 @@ export default function EmailPage() {
   const [triageSource, setTriageSource] = useState("");
   const [triageError, setTriageError] = useState("");
   const [applyLoading, setApplyLoading] = useState(false);
+  const [undoToast, setUndoToast] = useState(null);
+  const [undoLoading, setUndoLoading] = useState(false);
 
   const [tone, setTone] = useState("friendly");
   const [signOffName, setSignOffName] = useState("");
@@ -86,6 +99,8 @@ export default function EmailPage() {
 
   const [followUpAt, setFollowUpAt] = useState("");
   const [followReminderAt, setFollowReminderAt] = useState("");
+
+  const undoTimerRef = useRef(null);
 
   const baseUrl = SERVER_URL || "";
   const gmailConnected = Boolean(status?.scopes?.some(scope => String(scope).includes("gmail")));
@@ -240,15 +255,57 @@ export default function EmailPage() {
     }
   };
 
-  const bulkAction = async (action, messageIds) => {
+  const bulkAction = async (action, messageIds, options = {}) => {
     const resp = await fetchWithCreds(buildUrl(baseUrl, "/api/email/gmail/bulk"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, messageIds })
+      body: JSON.stringify({ action, messageIds, ...options })
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data?.error || "bulk_action_failed");
     return data;
+  };
+
+  const clearUndoToast = () => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setUndoToast(null);
+    setUndoLoading(false);
+  };
+
+  const showUndoToast = (toast) => {
+    if (!toast) return;
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    const durationMs = toast.durationMs || 6500;
+    setUndoToast({ ...toast, durationMs });
+    undoTimerRef.current = setTimeout(() => {
+      setUndoToast(null);
+      undoTimerRef.current = null;
+    }, durationMs);
+  };
+
+  const handleUndo = async () => {
+    if (!undoToast?.items?.length) return;
+    setUndoLoading(true);
+    setActionError("");
+    try {
+      for (const item of undoToast.items) {
+        const ids = Array.isArray(item?.messageIds) ? item.messageIds : [];
+        if (!ids.length || !item?.action) continue;
+        await bulkAction(item.action, ids, { source: "undo" });
+      }
+      setNotice("Undo completed. Inbox refreshed.");
+      await loadInbox();
+    } catch (err) {
+      setActionError(err?.message || "undo_failed");
+    } finally {
+      clearUndoToast();
+    }
   };
 
   const applyTriage = async () => {
@@ -258,13 +315,27 @@ export default function EmailPage() {
       setNotice("No junk or spam flagged in this review.");
       return;
     }
-    const ok = window.confirm("Move flagged junk to Trash and spam to Spam? You can recover from Trash if needed.");
-    if (!ok) return;
     setApplyLoading(true);
     try {
-      if (trashTargets.length) await bulkAction("trash", trashTargets);
-      if (spamTargets.length) await bulkAction("spam", spamTargets);
-      setNotice(`Applied cleanup: ${trashTargets.length} trashed, ${spamTargets.length} marked spam.`);
+      if (trashTargets.length) await bulkAction("trash", trashTargets, { source: "triage" });
+      if (spamTargets.length) await bulkAction("spam", spamTargets, { source: "triage" });
+      const summary = `Applied cleanup: ${trashTargets.length} trashed, ${spamTargets.length} marked spam.`;
+      setNotice(summary);
+      const undoItems = [];
+      if (trashTargets.length) {
+        undoItems.push({ action: "untrash", messageIds: trashTargets });
+      }
+      if (spamTargets.length) {
+        undoItems.push({ action: "unspam", messageIds: spamTargets });
+      }
+      if (undoItems.length) {
+        showUndoToast({
+          title: "Cleanup applied",
+          description: summary,
+          items: undoItems,
+          durationMs: 8000
+        });
+      }
       await loadInbox();
     } catch (err) {
       setActionError(err?.message || "cleanup_failed");
@@ -276,10 +347,7 @@ export default function EmailPage() {
   const handleMessageAction = async (action) => {
     if (!selectedEmail?.id) return;
     const confirmMap = {
-      trash: "Move this email to Trash?",
-      delete: "Delete this email forever? This cannot be undone.",
-      spam: "Mark this email as spam?",
-      archive: "Archive this email (remove from inbox)?"
+      delete: "Delete this email forever? This cannot be undone."
     };
     if (confirmMap[action]) {
       const ok = window.confirm(confirmMap[action]);
@@ -287,14 +355,35 @@ export default function EmailPage() {
     }
     setActionError("");
     try {
+      const meta = buildEmailMeta(selectedEmail);
       const resp = await fetchWithCreds(buildUrl(baseUrl, `/api/email/gmail/${action}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messageId: selectedEmail.id })
+        body: JSON.stringify({ messageId: selectedEmail.id, meta, source: "user" })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data?.error || `${action}_failed`);
-      setNotice(`Email ${action}d.`);
+      const actionLabels = {
+        archive: "Archived",
+        trash: "Moved to Trash",
+        spam: "Marked as spam",
+        delete: "Deleted forever"
+      };
+      const label = actionLabels[action] || "Action complete";
+      setNotice(`${label}.`);
+      if (action === "trash" || action === "spam") {
+        showUndoToast({
+          title: label,
+          description: selectedEmail.subject || selectedEmail.from || "Email updated.",
+          items: [
+            {
+              action: action === "trash" ? "untrash" : "unspam",
+              messageIds: [selectedEmail.id]
+            }
+          ],
+          durationMs: 6500
+        });
+      }
       await loadInbox();
     } catch (err) {
       setActionError(err?.message || `${action}_failed`);
@@ -388,6 +477,15 @@ export default function EmailPage() {
       window.history.replaceState({}, "", "/email");
       loadStatus();
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) {
+        clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = null;
+      }
+    };
   }, []);
 
   return (
@@ -690,6 +788,24 @@ export default function EmailPage() {
           </section>
         </div>
       </div>
+
+      {undoToast && (
+        <div className="undo-toast" role="status" aria-live="polite">
+          <div>
+            <div className="undo-title">{undoToast.title}</div>
+            {undoToast.description && <div className="undo-body">{undoToast.description}</div>}
+          </div>
+          <div className="undo-actions">
+            <button type="button" className="primary" onClick={handleUndo} disabled={undoLoading}>
+              {undoLoading ? "Undoing..." : "Undo"}
+            </button>
+            <button type="button" onClick={clearUndoToast}>
+              Dismiss
+            </button>
+          </div>
+          <div className="undo-bar" style={{ "--undo-duration": `${undoToast.durationMs}ms` }} />
+        </div>
+      )}
 
       <style jsx global>{`
         @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700&display=swap");
@@ -1157,6 +1273,60 @@ export default function EmailPage() {
           margin-top: 8px;
         }
 
+        .undo-toast {
+          position: fixed;
+          right: 24px;
+          bottom: 24px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 12px 14px 18px;
+          border-radius: 16px;
+          background: var(--panel-bg);
+          border: 1px solid var(--panel-border-strong);
+          box-shadow: var(--shadow-soft);
+          z-index: 30;
+          max-width: 460px;
+          overflow: hidden;
+        }
+
+        .undo-title {
+          font-size: 13px;
+          font-weight: 600;
+        }
+
+        .undo-body {
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-top: 4px;
+        }
+
+        .undo-actions {
+          display: flex;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+
+        .undo-bar {
+          position: absolute;
+          left: 14px;
+          right: 14px;
+          bottom: 8px;
+          height: 2px;
+          border-radius: 999px;
+          background: rgba(148, 163, 184, 0.2);
+          overflow: hidden;
+        }
+
+        .undo-bar::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, var(--accent), var(--accent-2));
+          transform-origin: left;
+          animation: undoShrink var(--undo-duration, 6500ms) linear forwards;
+        }
+
         @keyframes fadeUp {
           from {
             opacity: 0;
@@ -1178,9 +1348,33 @@ export default function EmailPage() {
           }
         }
 
+        @keyframes undoShrink {
+          from {
+            transform: scaleX(1);
+          }
+          to {
+            transform: scaleX(0);
+          }
+        }
+
         @media (max-width: 1200px) {
           .email-grid {
             grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 720px) {
+          .undo-toast {
+            left: 16px;
+            right: 16px;
+            width: auto;
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .undo-actions {
+            width: 100%;
+            justify-content: flex-start;
           }
         }
       `}</style>

@@ -672,6 +672,23 @@ export async function trashGmailMessage(messageId, userId = "") {
   return await r.json();
 }
 
+export async function untrashGmailMessage(messageId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.modify"], userId);
+  const r = await fetch(`${GMAIL_API}/users/me/messages/${encodeURIComponent(messageId)}/untrash`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!r.ok) {
+    const detail = await r.text();
+    throw new Error(detail || "gmail_untrash_failed");
+  }
+  return await r.json();
+}
+
+export async function unspamGmailMessage(messageId, userId = "") {
+  return await modifyGmailLabels(messageId, { removeLabelIds: ["SPAM"], addLabelIds: ["INBOX"] }, userId);
+}
+
 export async function deleteGmailMessage(messageId, userId = "") {
   const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.modify"], userId);
   const r = await fetch(`${GMAIL_API}/users/me/messages/${encodeURIComponent(messageId)}`, {
