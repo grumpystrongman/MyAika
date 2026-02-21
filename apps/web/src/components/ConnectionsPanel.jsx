@@ -4,6 +4,7 @@ export default function ConnectionsPanel({ serverUrl }) {
   const [connections, setConnections] = useState([]);
   const [panicEnabled, setPanicEnabled] = useState(false);
   const [pairings, setPairings] = useState({ pending: [], allowlist: {} });
+  const [statusInfo, setStatusInfo] = useState(null);
   const [error, setError] = useState("");
 
   async function loadConnections() {
@@ -29,9 +30,21 @@ export default function ConnectionsPanel({ serverUrl }) {
     }
   }
 
+  async function loadStatus() {
+    try {
+      const resp = await fetch(`${serverUrl}/api/status`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "status_failed");
+      setStatusInfo(data || null);
+    } catch {
+      setStatusInfo(null);
+    }
+  }
+
   useEffect(() => {
     loadConnections();
     loadPairings();
+    loadStatus();
   }, []);
 
   async function revokeConnection(id) {
@@ -89,9 +102,40 @@ export default function ConnectionsPanel({ serverUrl }) {
     window.open(url, "_blank", "width=520,height=680");
   }
 
+  const connectedCount = connections.filter(conn => conn.status === "connected").length;
+  const openaiConfigured = Boolean(statusInfo?.openai?.configured);
+  const ttsReady = Boolean(
+    statusInfo?.tts?.engines?.piper?.ready ||
+    statusInfo?.tts?.engines?.gptsovits?.online
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
+
+      <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Setup checklist</div>
+        <div style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+          <div>
+            OpenAI API key:{" "}
+            <span style={{ color: openaiConfigured ? "#059669" : "#b91c1c", fontWeight: 600 }}>
+              {openaiConfigured ? "Configured" : "Missing"}
+            </span>
+          </div>
+          <div>
+            Voice engine:{" "}
+            <span style={{ color: ttsReady ? "#059669" : "#b91c1c", fontWeight: 600 }}>
+              {ttsReady ? "Ready" : "Not ready"}
+            </span>
+          </div>
+          <div>
+            Connections:{" "}
+            <span style={{ color: connectedCount > 0 ? "#059669" : "#b45309", fontWeight: 600 }}>
+              {connectedCount > 0 ? `${connectedCount} connected` : "None yet"}
+            </span>
+          </div>
+        </div>
+      </div>
 
       <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Connections</div>
@@ -162,7 +206,7 @@ export default function ConnectionsPanel({ serverUrl }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {(pairings.pending || []).map(request => (
             <div key={request.id} style={{ border: "1px solid var(--panel-border-subtle)", borderRadius: 10, padding: 10 }}>
-              <div style={{ fontWeight: 600 }}>{request.channel} · {request.senderName || request.senderId}</div>
+              <div style={{ fontWeight: 600 }}>{request.channel}  |  {request.senderName || request.senderId}</div>
               <div style={{ fontSize: 11, color: "#6b7280" }}>Code: {request.code}</div>
               <div style={{ fontSize: 11, color: "#6b7280" }}>{request.preview}</div>
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>

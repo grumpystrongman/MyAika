@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { responsesCreate } from "../llm/openaiClient.js";
 import {
   listRagCollections,
   getRagCollection,
@@ -26,9 +26,7 @@ function buildFallbackSources(topic) {
 }
 
 async function suggestSources(topic, maxSources = 6) {
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  if (!apiKey) return buildFallbackSources(topic).slice(0, maxSources);
-  const client = new OpenAI({ apiKey });
+  if (!process.env.OPENAI_API_KEY) return buildFallbackSources(topic).slice(0, maxSources);
   const system = [
     "You suggest canonical, high-quality sources for a new RAG model.",
     "Return JSON only: {\"sources\":[\"https://...\"]}.",
@@ -36,8 +34,8 @@ async function suggestSources(topic, maxSources = 6) {
   ].join(" ");
   const user = `Topic: ${topic}\nGive ${maxSources} URLs.`;
   try {
-    const response = await client.responses.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    const response = await responsesCreate({
+      model: process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini",
       input: [
         { role: "system", content: [{ type: "input_text", text: system }] },
         { role: "user", content: [{ type: "input_text", text: user }] }

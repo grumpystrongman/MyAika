@@ -4,7 +4,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import OpenAI from "openai";
+import { responsesCreate, chatCompletionsCreate } from "./src/llm/openaiClient.js";
 import { z } from "zod";
 import { initMemory, addMemory, searchMemories } from "./memory.js";
 import { Emotion, makeBehavior } from "@myaika/shared";
@@ -34,7 +34,6 @@ import {
   listMeetSpaces,
   createMeetSpace,
   fetchGoogleUserInfo,
-  sendGmailMessage,
   archiveGmailMessage,
   markGmailSpam,
   trashGmailMessage,
@@ -75,6 +74,8 @@ import { searchAmazonItems } from "./integrations/amazon_paapi.js";
 import { buildMetaAuthUrl, exchangeMetaCode, getMetaToken, storeMetaToken } from "./integrations/meta.js";
 import { buildCoinbaseAuthUrl, exchangeCoinbaseCode, normalizeCoinbaseScopes, revokeCoinbaseToken } from "./integrations/coinbase.js";
 import { registry, executor } from "./mcp/index.js";
+import { handleActionIntent } from "./src/agent/actionPipeline.js";
+import { getActionRun as getAgentActionRun } from "./src/agent/actionRunStore.js";
 import { redactPhi } from "./mcp/policy.js";
 import { listApprovals, denyApproval } from "./mcp/approvals.js";
 import { writeAudit } from "./mcp/audit.js";
@@ -95,7 +96,6 @@ import {
   deleteRecording
 } from "./storage/recordings.js";
 import {
-  addMemoryEntities,
   deleteMemoryEntitiesForRecording,
   searchMemoryEntities
 } from "./storage/memory_entities.js";
@@ -104,21 +104,46 @@ import {
   deleteAgentActionsForRecording,
   listAgentActions
 } from "./storage/agent_actions.js";
-import { writeOutbox } from "./storage/outbox.js";
 import { listPairings, approvePairing, denyPairing } from "./storage/pairings.js";
 import { getThread, listThreadMessages, appendThreadMessage, ensureActiveThread, closeThread } from "./storage/threads.js";
 import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { getAssistantProfile, updateAssistantProfile } from "./storage/assistant_profile.js";
 import { listAssistantTasks, createAssistantTask, updateAssistantTask } from "./storage/assistant_tasks.js";
 import { listAssistantProposals, createAssistantProposal, updateAssistantProposal, getAssistantProposal } from "./storage/assistant_change_proposals.js";
-import { combineChunks, transcribeAudio, summarizeTranscript, extractEntities, splitAudioForTranscription } from "./recordings/processor.js";
-import { redactStructured, redactText } from "./recordings/redaction.js";
+import { combineChunks, transcribeAudio, splitAudioForTranscription } from "./recordings/processor.js";
+import { redactText } from "./recordings/redaction.js";
+import { buildMeetingNotesMarkdown, buildTranscriptText, getRecordingAudioUrl } from "./recordings/meetingUtils.js";
+import {
+  exportRecordingArtifacts,
+  runRecordingAction,
+  sendMeetingEmail,
+  updateProcessingState,
+  summarizeAndPersistRecording,
+  resummarizeRecording
+} from "./recordings/meetingActions.js";
 import { runVoiceFullTest } from "./voice_tests/fulltest_runner.js";
-import { initRagStore, getRagCounts, listMeetings, getVectorStoreStatus, getFirefliesGraph, getFirefliesNodeDetails } from "./src/rag/vectorStore.js";
+import {
+  initRagStore,
+  getRagCounts,
+  listMeetings,
+  getVectorStoreStatus,
+  getFirefliesGraph,
+  getFirefliesNodeDetails,
+  listRagCollections,
+  listTradingSources,
+  listTradingRssSources,
+  listTradingYoutubeSources,
+  upsertRagCollection,
+  upsertTradingSource,
+  upsertTradingRssSource,
+  upsertTradingYoutubeSource
+} from "./src/rag/vectorStore.js";
 import { listRagModels, createRagModel } from "./src/rag/collections.js";
 import { syncFireflies, startFirefliesSyncLoop, getFirefliesSyncStatus, queueFirefliesSync } from "./src/rag/firefliesIngest.js";
-import { answerRagQuestionRouted } from "./src/rag/router.js";
-import { backupRagToDrive } from "./src/rag/backup.js";
+import { answerRagQuestionRouted, detectRagSignals } from "./src/rag/router.js";
+import { formatRagAnswer } from "./src/rag/format.js";
+import { backupRagToDrive, createRagBackupZip } from "./src/rag/backup.js";
+import { exportRagModels, importRagModels } from "./src/rag/modelTransfer.js";
 import { startMetaRagLoop, maybeCreateAutoRagProposal } from "./src/rag/metaRag.js";
 import { recordFeedback } from "./src/feedback/feedback.js";
 import { startDailyPicksLoop, runDailyPicksEmail, generateDailyPicks, rescheduleDailyPicksLoop } from "./src/trading/dailyPicks.js";
@@ -208,13 +233,22 @@ import { searchSymbols } from "./src/trading/symbolSearch.js";
 import { buildRecommendationDetail } from "./src/trading/recommendationDetail.js";
 import { buildLongTermSignal } from "./src/trading/signalEngine.js";
 import { fetchMarketCandles } from "./src/trading/marketData.js";
+import {
+  marketSnapshot as toolMarketSnapshot,
+  strategyEvaluate as toolStrategyEvaluate,
+  riskCheck as toolRiskCheck,
+  placeOrder as toolPlaceOrder,
+  modifyOrder as toolModifyOrder,
+  getPositions as toolGetPositions,
+  getAccountState as toolGetAccountState
+} from "./src/trading/tools/index.js";
 import { getPolicy, savePolicy, reloadPolicy, getPolicyMeta } from "./src/safety/policyLoader.js";
 import { executeAction } from "./src/safety/executeAction.js";
 import { listAuditEvents, verifyAuditChain } from "./src/safety/auditLog.js";
 import { getKillSwitchState, setKillSwitch, isStopPhrase } from "./src/safety/killSwitch.js";
 import { createSafetyApproval, listSafetyApprovals, approveSafetyApproval, rejectSafetyApproval } from "./src/safety/approvals.js";
 import { planAction } from "./src/actionRunner/planner.js";
-import { getActionRun } from "./src/actionRunner/runner.js";
+import { getActionRun as getRunnerActionRun } from "./src/actionRunner/runner.js";
 import { getRunDir, getRunFilePath } from "./src/actionRunner/runStore.js";
 import { planDesktopAction } from "./src/desktopRunner/planner.js";
 import { getDesktopRun, continueDesktopRun, requestDesktopStop } from "./src/desktopRunner/runner.js";
@@ -424,9 +458,17 @@ function withAvatarStatus(models) {
     const thumbPath = thumbUrl
       ? path.join(webPublicDir, thumbUrl.replace(/^\//, ""))
       : "";
+    const fallbackUrl = model.fallbackPng || "";
+    const fallbackPath = fallbackUrl
+      ? path.join(webPublicDir, fallbackUrl.replace(/^\//, ""))
+      : "";
+    const hasLive2D = Boolean(modelUrl) && fs.existsSync(localPath);
+    const hasPng = Boolean(fallbackUrl) && fs.existsSync(fallbackPath);
+    const engine = String(model.engine || "").toLowerCase();
+    const isPngModel = engine === "png" || (!modelUrl && Boolean(fallbackUrl));
     return {
       ...model,
-      available: Boolean(modelUrl) && fs.existsSync(localPath),
+      available: isPngModel ? hasPng : hasLive2D,
       thumbnailAvailable: Boolean(thumbUrl) && fs.existsSync(thumbPath)
     };
   });
@@ -472,11 +514,8 @@ function prepareFemAikaTrim() {
 }
 prepareFemAikaTrim();
 
-// Init memory + OpenAI
+// Init memory
 const db = initMemory();
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
 
 function addMemoryIndexed({ role, content, tags = "", source, occurredAt } = {}) {
   const memoryId = addMemory(db, { role, content, tags });
@@ -928,12 +967,12 @@ function inferBehaviorFromText(text) {
 
 
 
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const OPENAI_MODEL = process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
 const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini";
 
 async function fallbackChatCompletion({ systemPrompt, userText, maxOutputTokens }) {
   try {
-    const r = await client.chat.completions.create({
+    const r = await chatCompletionsCreate({
       model: FALLBACK_MODEL,
       max_tokens: Math.min(600, Math.max(80, Number(maxOutputTokens) || Number(process.env.OPENAI_MAX_OUTPUT_TOKENS) || 220)),
       messages: [
@@ -1217,7 +1256,7 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
 
     try {
       const response = await withTimeout(
-        client.responses.create({
+        responsesCreate({
           model: OPENAI_MODEL,
           max_output_tokens: 700,
           input: [
@@ -1458,7 +1497,7 @@ async function analyzeTradeOutcome(outcome = {}) {
       `PnL%: ${Number.isFinite(pnlPct) ? pnlPct : outcome.pnl_pct || "unknown"}`,
       outcome.notes ? `Notes: ${outcome.notes}` : ""
     ].filter(Boolean).join("\n");
-    const response = await client.responses.create({
+    const response = await responsesCreate({
       model: OPENAI_MODEL,
       input: [
         { role: "system", content: [{ type: "input_text", text: system }] },
@@ -1892,35 +1931,46 @@ async function handleTradingPickRequest({ userText, userId } = {}) {
       const support = formatNumber(scenario.support, 2);
       const resistance = formatNumber(scenario.resistance, 2);
       const rationale = shortenSnippet(cleanSignalText(item.rationale, item.symbol), 160);
+      const header = `${idx + 1}) ${item.symbol} (${item.assetClass})`;
+      lines.push(header);
+      lines.push(`Bias: ${item.bias}`);
+
       if (scenario?.error) {
-        lines.push(`${idx + 1}) ${item.symbol} (${item.assetClass}) | Bias ${item.bias}`);
-        if (rationale) lines.push(`Signal: ${rationale}`);
+        if (rationale) lines.push(rationale.toLowerCase().startsWith("signal:") ? rationale : `Signal: ${rationale}`);
         lines.push(`Data: unavailable (${scenario.error})`);
       } else {
-        lines.push(
-          `${idx + 1}) ${item.symbol} (${item.assetClass}) | Bias ${item.bias} | Trend ${trend} | RSI ${rsi} | ${scenario.windowDays || 120}d ${windowReturn}`
-        );
-        if (rationale) lines.push(`Signal: ${rationale}`);
+        lines.push(`Trend: ${trend}`);
+        lines.push(`RSI(14): ${rsi}`);
+        lines.push(`${scenario.windowDays || 120}d return: ${windowReturn}`);
+        if (rationale) lines.push(rationale.toLowerCase().startsWith("signal:") ? rationale : `Signal: ${rationale}`);
         if (chart) lines.push(`Chart(30d): ${chart}`);
-        lines.push(`Momentum20 ${momentum20} | Vol ${vol} | Support ${support} | Resistance ${resistance}`);
+        lines.push(`Momentum(20d): ${momentum20}`);
+        lines.push(`Volatility (annualized): ${vol}`);
+        lines.push(`Support: ${support}`);
+        lines.push(`Resistance: ${resistance}`);
       }
+
       const ragSnippet = shortenSnippet(item.ragSnippet, 180);
-      lines.push(`RAG: ${ragSnippet || "No relevant knowledge snippet found."}`);
+      lines.push("RAG Insight:");
+      lines.push(`- ${ragSnippet || "No relevant knowledge snippet found."}`);
+      lines.push("");
     });
+
+    if (lines[lines.length - 1] === "") lines.pop();
     return lines;
   };
 
   const stockInsights = insights.filter(item => item.assetClass === "stock");
   const cryptoInsights = insights.filter(item => item.assetClass === "crypto");
   const outputLines = [
-    "Here are signal-based picks from your configured watchlist (educational, not financial advice):",
+    "Signal-based picks (educational, not financial advice)",
     "",
-    ...formatSection("Stocks:", stockInsights),
+    ...formatSection("Stocks", stockInsights),
     "",
-    ...formatSection("Crypto:", cryptoInsights),
+    ...formatSection("Crypto", cryptoInsights),
     "",
     "Data: daily candles via Stooq/Coinbase/Alpaca. RAG snippets come from your trading knowledge store."
-  ].filter(Boolean);
+  ].filter(line => line !== null && line !== undefined);
 
   return {
     text: outputLines.join("\n"),
@@ -1929,10 +1979,12 @@ async function handleTradingPickRequest({ userText, userId } = {}) {
 }
 
 function shouldUseRag(text) {
-  const t = String(text || "").toLowerCase();
-  if (!t) return false;
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  const t = raw.toLowerCase();
   if (t.startsWith("rag:") || t.startsWith("meeting:")) return true;
-  return /\b(fireflies|meeting|meetings|transcript|minutes|action items|decisions|recap|summary|summarize|what did we decide|last week|this week|trading|stock|stocks|crypto|options|portfolio)\b/i.test(t);
+  const signals = detectRagSignals(raw);
+  return Boolean(signals?.any);
 }
 
 function parseRagModelCommand(text) {
@@ -1946,21 +1998,13 @@ function resolveRagSelection(text, requested) {
   const rawText = String(text || "");
   const lower = rawText.toLowerCase();
   const prefixMatch = lower.match(/^rag:\s*([a-z0-9_-]+)/);
-  const hinted = prefixMatch?.[1] || "";
+  const meetingPrefix = lower.startsWith("meeting:") ? "meetings" : "";
+  const hinted = prefixMatch?.[1] || meetingPrefix;
   const selected = cleaned && cleaned !== "auto" ? cleaned : hinted;
   if (selected) {
-    if (selected === "trading") return { id: "trading", forced: true, filters: { meetingIdPrefix: "trading:" } };
-    if (selected === "fireflies") return { id: "fireflies", forced: true, filters: { meetingType: "fireflies" } };
-    if (selected === "all") return { id: "all", forced: true, filters: {} };
-    return { id: selected, forced: true, filters: { meetingIdPrefix: `rag:${selected}:` } };
+    return { id: selected, forced: true, filters: {} };
   }
-  if (/\b(fireflies|meeting|transcript|minutes|action items|decisions|recap)\b/i.test(lower)) {
-    return { id: "fireflies", forced: false, filters: { meetingType: "fireflies" } };
-  }
-  if (/\b(stock|stocks|crypto|trading|options|portfolio|ticker)\b/i.test(lower)) {
-    return { id: "trading", forced: false, filters: { meetingIdPrefix: "trading:" } };
-  }
-  return { id: "all", forced: false, filters: {} };
+  return { id: "auto", forced: false, filters: {} };
 }
 
 function isAdmin(req) {
@@ -2001,28 +2045,24 @@ function canAccessRecording(req, recording) {
   return true;
 }
 
-function updateProcessingState(recordingId, patch) {
-  const existing = getRecording(recordingId);
-  const current = existing?.processing_json || {};
-  const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-  updateRecording(recordingId, { processing_json: JSON.stringify(next) });
-  return next;
-}
-
   async function transcribeRecordingWithFallback(recordingId, audioPath) {
+    const chunks = listRecordingChunks(recordingId);
+    const chunkCount = chunks.length;
+    const recordingMeta = getRecording(recordingId);
+    const durationSec = Number(recordingMeta?.duration || 0);
+    const approxChunkSeconds = Number(process.env.RECORDING_CHUNK_SECONDS || 5);
+    const estimatedDuration = durationSec > 0 ? durationSec : chunkCount * approxChunkSeconds;
+    const segmentSeconds = Number(process.env.STT_SEGMENT_SECONDS || 600);
+    const forceSegment = estimatedDuration >= segmentSeconds;
     let primaryResult = null;
     if (audioPath) {
       try {
         const stat = fs.statSync(audioPath);
         const maxBytes = Number(process.env.STT_MAX_MB || 20) * 1024 * 1024;
-        if (stat.size <= maxBytes) {
-          primaryResult = await transcribeAudio(audioPath);
-          if (!primaryResult?.error && String(primaryResult?.text || "").trim()) {
-            return primaryResult;
-          }
-        } else {
+        const tinyForChunks = chunkCount > 60 && stat.size < 512 * 1024;
+        let segmented = false;
+        if (forceSegment || stat.size > maxBytes) {
           const segmentDir = path.join(recordingsDir, recordingId, "segments");
-          const segmentSeconds = Number(process.env.STT_SEGMENT_SECONDS || 600);
           const segments = splitAudioForTranscription(audioPath, segmentDir, segmentSeconds);
           if (segments.length) {
             const texts = [];
@@ -2061,6 +2101,17 @@ function updateProcessingState(recordingId, patch) {
               };
             }
           }
+          segmented = true;
+        }
+
+        if (!tinyForChunks && stat.size <= maxBytes && (!forceSegment || !segmented)) {
+          primaryResult = await transcribeAudio(audioPath);
+          if (!primaryResult?.error && String(primaryResult?.text || "").trim()) {
+            return primaryResult;
+          }
+        }
+        if (tinyForChunks) {
+          primaryResult = { text: "", language: "en", provider: "local", error: "audio_too_short", segments: [] };
         }
       } catch (err) {
         primaryResult = await transcribeAudio(audioPath);
@@ -2070,7 +2121,6 @@ function updateProcessingState(recordingId, patch) {
       }
     }
 
-  const chunks = listRecordingChunks(recordingId);
   if (!chunks.length) {
     return primaryResult || {
       text: "",
@@ -2164,7 +2214,7 @@ async function processRecordingPipeline(recordingId, opts = {}) {
 
   updateProcessingState(recordingId, { stage: "summarizing" });
   const summary = await summarizeAndPersistRecording({
-    recordingId,
+    recording,
     transcriptText: transcriptResult.text || "",
     title: recording.title,
     redactionEnabled: recording.redaction_enabled
@@ -2221,45 +2271,6 @@ async function processRecordingPipeline(recordingId, opts = {}) {
   updateRecording(recordingId, { status: "ready" });
 }
 
-async function summarizeAndPersistRecording({ recordingId, transcriptText, title, redactionEnabled }) {
-  const summary = await summarizeTranscript(transcriptText || "", title);
-  let summaryPayload = {
-    tldr: summary.tldr,
-    attendees: summary.attendees,
-    overview: summary.overview,
-    decisions: summary.decisions,
-    actionItems: summary.actionItems,
-    risks: summary.risks,
-    nextSteps: summary.nextSteps,
-    discussionPoints: summary.discussionPoints,
-    nextMeeting: summary.nextMeeting,
-    summaryMarkdown: summary.summaryMarkdown,
-    recommendations: summary.recommendations || []
-  };
-  if (redactionEnabled) {
-    summaryPayload = redactStructured(summaryPayload);
-  }
-
-  updateRecording(recordingId, {
-    summary_json: JSON.stringify(summaryPayload),
-    decisions_json: JSON.stringify(summaryPayload.decisions || []),
-    tasks_json: JSON.stringify(summaryPayload.actionItems || []),
-    risks_json: JSON.stringify(summaryPayload.risks || []),
-    next_steps_json: JSON.stringify(summaryPayload.nextSteps || [])
-  });
-
-  updateProcessingState(recordingId, { stage: "extracting" });
-  const entities = extractEntities(summaryPayload);
-  addMemoryEntities(
-    entities.map(entity => ({
-      ...entity,
-      workspaceId: recording.workspace_id || "default",
-      recordingId
-    }))
-  );
-  return summary;
-}
-
 // Health check
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
@@ -2291,12 +2302,14 @@ app.post("/api/auth/logout", (req, res) => {
 // Chat endpoint
 app.post("/chat", async (req, res) => {
   try {
-    const { userText, maxOutputTokens, ragModel, threadId, channel, senderId, senderName } = req.body;
+    const { userText, maxOutputTokens, ragModel, threadId, channel, senderId, senderName, chatId, recordingId } = req.body;
     if (!userText || typeof userText !== "string") {
       return res.status(400).json({ error: "userText required" });
     }
     const lowerText = userText.toLowerCase();
     const requestedRagModel = typeof ragModel === "string" ? ragModel.trim() : "";
+    const profile = getAssistantProfile(getUserId(req));
+    const defaultRagModel = profile?.preferences?.rag?.defaultModel || "auto";
     const threadHistoryLimit = Math.max(1, Number(process.env.THREAD_HISTORY_MAX_MESSAGES || 14) || 14);
     const thread = threadId ? getThread(threadId) : null;
     const threadActive = Boolean(thread && thread.status === "active");
@@ -2306,8 +2319,8 @@ app.post("/chat", async (req, res) => {
           .map(m => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
           .join("\n")
       : "";
-    const effectiveRagModel = requestedRagModel || (threadActive ? thread.rag_model : "");
-    const threadMessageMeta = threadActive ? { channel, senderId, senderName } : null;
+    const effectiveRagModel = requestedRagModel || (threadActive ? thread.rag_model : "") || defaultRagModel;
+    const threadMessageMeta = threadActive ? { channel, senderId, senderName, chatId } : null;
     const recordThreadMessage = (role, content) => {
       if (!threadActive || !content) return;
       try {
@@ -2413,6 +2426,36 @@ app.post("/chat", async (req, res) => {
       );
     }
 
+    const actionOutcome = await handleActionIntent({
+      text: userText,
+      context: {
+        channel,
+        senderId,
+        senderName,
+        chatId,
+        threadId,
+        recordingId,
+        userId: getUserId(req),
+        sessionId: req.aikaSessionId,
+        workspaceId: getWorkspaceId(req),
+        publicBaseUrl: (process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`)
+      },
+      deps: { toolExecutor: executor }
+    });
+    if (actionOutcome?.handled) {
+      const mood = actionOutcome.status === "error" ? Emotion.SAD : Emotion.NEUTRAL;
+      return sendAssistantReply(
+        actionOutcome.reply,
+        makeBehavior({ emotion: mood, intensity: 0.4 }),
+        {
+          action: actionOutcome.action,
+          actionResult: actionOutcome.result,
+          approval: actionOutcome.approval || null,
+          retryable: Boolean(actionOutcome.retryable)
+        }
+      );
+    }
+
     const tradingPickResult = await handleTradingPickRequest({
       userText,
       userId: getUserId(req)
@@ -2467,10 +2510,12 @@ app.post("/chat", async (req, res) => {
                 const chunkId = String(cite?.chunk_id || "");
                 return chunkId.startsWith("memory:") || chunkId.startsWith("feedback:");
               });
+              const responseRagModel = ragSelection?.forced ? ragSelection.id : undefined;
+              const formattedAnswer = formatRagAnswer({ answer: ragAnswer, citations: ragCitations });
               return sendAssistantReply(
-                ragAnswer,
+                formattedAnswer,
                 makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
-                { citations: ragCitations, source: "rag", memoryRecall, ragModel: ragSelection.id }
+                { citations: ragCitations, source: "rag", memoryRecall, ragModel: responseRagModel }
               );
             }
             if (ragResult?.gap && ragUnknown) {
@@ -2496,7 +2541,7 @@ app.post("/chat", async (req, res) => {
                   ragProposal: proposal,
                   ragProposalApprovalId: proposal?.approvalId || null,
                   source: "rag",
-                  ragModel: ragSelection.id
+                  ragModel: ragSelection?.forced ? ragSelection.id : undefined
                 }
               );
             }
@@ -2513,7 +2558,6 @@ app.post("/chat", async (req, res) => {
         const report = await runProductResearch({
           query: productQuery,
           limit: 8,
-          openaiClient: process.env.OPENAI_API_KEY ? client : null,
           model: OPENAI_MODEL
         });
         return sendAssistantReply(
@@ -2719,7 +2763,7 @@ INSTRUCTIONS:
     // ✅ CORRECT Responses API CALL
     let response;
     try {
-      response = await client.responses.create({
+      response = await responsesCreate({
       model: OPENAI_MODEL,
       max_output_tokens: Math.min(600, Math.max(80, Number(maxOutputTokens) || Number(process.env.OPENAI_MAX_OUTPUT_TOKENS) || 220)),
       input: [
@@ -2829,6 +2873,39 @@ User: ${userText}`
     console.error("CHAT ERROR:", err);
     res.status(500).json({ error: "chat_failed" });
   }
+});
+
+app.get("/api/actions/runs/:id", (req, res) => {
+  const run = getAgentActionRun(req.params.id);
+  if (!run) return res.status(404).json({ error: "action_run_not_found" });
+  res.json({ run });
+});
+
+app.get("/api/actions/runs/:id/stream", (req, res) => {
+  const id = req.params.id;
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+  res.write("\n");
+
+  let lastPayload = "";
+  const send = () => {
+    const run = getAgentActionRun(id);
+    const payload = JSON.stringify(run || { status: "not_found" });
+    if (payload !== lastPayload) {
+      res.write(`event: update\ndata: ${payload}\n\n`);
+      lastPayload = payload;
+    }
+    if (!run) {
+      res.end();
+    }
+  };
+
+  send();
+  const interval = setInterval(send, 1000);
+  req.on("close", () => clearInterval(interval));
 });
 
 // Full-duplex call threads (Telegram/Web call bridge)
@@ -3101,6 +3178,21 @@ app.post("/api/aika/avatar/refresh", (_req, res) => {
   try {
     const manifestPath = path.join(live2dDir, "models.json");
     if (!fs.existsSync(live2dDir)) return res.json({ models: [] });
+    let existingModels = [];
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+        existingModels = Array.isArray(existing.models) ? existing.models : [];
+      } catch {
+        existingModels = [];
+      }
+    }
+
+    const preserved = existingModels.filter(model => {
+      const engine = String(model.engine || "").toLowerCase();
+      return engine === "png" || (!model.modelUrl && model.fallbackPng);
+    });
+
     const models = [];
     const ignored = new Set(["runtime", "__macosx"]);
     const dirs = fs
@@ -3125,8 +3217,16 @@ app.post("/api/aika/avatar/refresh", (_req, res) => {
         source: "local_scan"
       });
     }
-    fs.writeFileSync(manifestPath, JSON.stringify({ models }, null, 2));
-    res.json({ models: withAvatarStatus(models) });
+    const merged = new Map();
+    for (const model of preserved) {
+      if (model?.id) merged.set(model.id, model);
+    }
+    for (const model of models) {
+      if (model?.id) merged.set(model.id, model);
+    }
+    const nextModels = Array.from(merged.values());
+    fs.writeFileSync(manifestPath, JSON.stringify({ models: nextModels }, null, 2));
+    res.json({ models: withAvatarStatus(nextModels) });
   } catch (err) {
     res.status(500).json({ error: err.message || "avatar_refresh_failed" });
   }
@@ -3168,7 +3268,7 @@ app.post("/api/meetings/summary", async (req, res) => {
     const meetingId = Date.now().toString(36);
     const safeTitle = typeof title === "string" && title.trim() ? title.trim() : `Meeting ${meetingId}`;
     const prompt = `You are a meeting assistant. Create a polished, shareable meeting summary from the transcript.\n\nTranscript:\n${transcript}\n\nReturn markdown with sections: Summary, Decisions, Action Items (with owners if possible), Key Details, Next Steps. Keep concise.`;
-    const response = await client.responses.create({
+    const response = await responsesCreate({
       model: OPENAI_MODEL,
       max_output_tokens: 500,
       input: [
@@ -3195,132 +3295,6 @@ app.get("/api/meetings/:id", (req, res) => {
 });
 
 // Meeting Copilot recordings
-function getRecordingAudioUrl(recordingId, recording) {
-  if (recording?.storage_url) return recording.storage_url;
-  return `/api/recordings/${recordingId}/audio`;
-}
-
-function formatStamp(seconds) {
-  if (!Number.isFinite(seconds)) return "00:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function buildTranscriptText(recording) {
-  const segments = recording?.transcript_json?.segments;
-  if (Array.isArray(segments) && segments.length) {
-    return segments
-      .map(seg => {
-        const start = formatStamp(seg.start);
-        const end = formatStamp(seg.end);
-        const speaker = seg.speaker || "Speaker";
-        return `[${start}-${end}] ${speaker}: ${seg.text || ""}`.trim();
-      })
-      .join("\n");
-  }
-  return recording?.transcript_text || "";
-}
-
-function buildMeetingNotesMarkdown(recording) {
-  const title = recording?.title || "Meeting";
-  const started = recording?.started_at ? new Date(recording.started_at).toLocaleString() : "Unknown";
-  const meetingDate = recording?.started_at ? new Date(recording.started_at).toLocaleDateString() : "Unknown";
-  const summary = recording?.summary_json || {};
-  const decisions = recording?.decisions_json || summary.decisions || [];
-  const tasks = recording?.tasks_json || summary.actionItems || [];
-  const risks = recording?.risks_json || summary.risks || [];
-  const nextSteps = recording?.next_steps_json || summary.nextSteps || [];
-  const overview = summary.overview || [];
-  const tldr = summary.tldr || "";
-  const attendees = summary.attendees || [];
-  const discussionPoints = summary.discussionPoints || [];
-  const nextMeeting = summary.nextMeeting || {};
-  const transcriptText = buildTranscriptText(recording);
-  return [
-    `# Meeting Notes - ${title}`,
-    "",
-    `Meeting Title & Date: ${title} - ${meetingDate}`,
-    `Attendees: ${attendees.length ? attendees.join(", ") : "Not captured"}`,
-    "TL;DR / Executive Summary:",
-    tldr || (overview.length ? overview.slice(0, 2).join(" ") : "Summary pending."),
-    "",
-    "Key Decisions Made:",
-    decisions.length ? decisions.map(item => `- ${item}`).join("\n") : "- None captured.",
-    "",
-    "Action Items:",
-    tasks.length
-      ? tasks.map(item => {
-          const task = item.task || item.title || item.text || "";
-          const owner = item.owner || "Unassigned";
-          const due = item.due || "Unspecified";
-          return `- ${owner}: ${task} (Due: ${due})`;
-        }).join("\n")
-      : "- None captured.",
-    "",
-    "Key Discussion Points/Insights:",
-    discussionPoints.length
-      ? discussionPoints.map(p => `- ${p.topic || "Discussion"}: ${p.summary || ""}`).join("\n")
-      : "- Not captured.",
-    risks.length ? `\nRisks/Issues:\n${risks.map(item => `- ${item}`).join("\n")}` : "",
-    "",
-    "Next Steps/Follow-up:",
-    nextMeeting?.date || nextMeeting?.goal
-      ? `- ${nextMeeting.date || "TBD"}: ${nextMeeting.goal || "Follow-up meeting"}`
-      : (nextSteps.length ? nextSteps.map(item => `- ${item}`).join("\n") : "- Follow up to confirm next steps."),
-    "",
-    `Meeting metadata: started ${started}, created by ${recording?.created_by || "local"}, workspace ${recording?.workspace_id || "default"}.`,
-    "",
-    "Transcript (Timestamped):",
-    transcriptText || "Transcript not available yet."
-  ].join("\n");
-}
-
-function buildAbsoluteUrl(req, maybeUrl) {
-  if (!maybeUrl) return "";
-  const url = String(maybeUrl);
-  if (/^https?:\/\//i.test(url)) return url;
-  const base = (process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
-  return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
-}
-
-function buildMeetingEmailText({ recording, notesUrl, transcriptUrl, audioUrl, googleDocUrl }) {
-  const summary = recording?.summary_json || {};
-  const tasks = recording?.tasks_json || summary.actionItems || [];
-  const decisions = recording?.decisions_json || summary.decisions || [];
-  const nextSteps = recording?.next_steps_json || summary.nextSteps || [];
-  const lines = [
-    `Meeting: ${recording?.title || "Meeting"}`,
-    `Date: ${recording?.started_at ? new Date(recording.started_at).toLocaleString() : "Unknown"}`,
-    "",
-    "Executive Summary:",
-    String(summary.tldr || (summary.overview || []).slice(0, 2).join(" ") || "Summary pending."),
-    "",
-    "Key Decisions:"
-  ];
-  if (decisions.length) decisions.forEach(d => lines.push(`- ${d}`));
-  else lines.push("- None captured.");
-  lines.push("", "Action Items:");
-  if (tasks.length) {
-    tasks.forEach(task => {
-      const owner = task.owner || "Unassigned";
-      const text = task.task || task.title || task.text || "Task";
-      const due = task.due || "Unspecified";
-      lines.push(`- ${owner}: ${text} (Due: ${due})`);
-    });
-  } else {
-    lines.push("- None captured.");
-  }
-  lines.push("", "Next Steps:");
-  if (nextSteps.length) nextSteps.forEach(s => lines.push(`- ${s}`));
-  else lines.push("- Follow up and confirm owners.");
-  lines.push("", "Links:");
-  if (googleDocUrl) lines.push(`- Google Doc: ${googleDocUrl}`);
-  if (notesUrl) lines.push(`- Meeting Notes (markdown): ${notesUrl}`);
-  if (transcriptUrl) lines.push(`- Transcript (txt): ${transcriptUrl}`);
-  if (audioUrl) lines.push(`- Recording Audio: ${audioUrl}`);
-  return lines.join("\n");
-}
 app.post("/api/recordings/start", (req, res) => {
   try {
     const { title, redactionEnabled, retentionDays } = req.body || {};
@@ -3401,7 +3375,7 @@ app.post("/api/recordings/:id/resume", (req, res) => {
     const recording = getRecording(req.params.id);
     if (!recording) return res.status(404).json({ error: "recording_not_found" });
     if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
-    const { durationSec } = req.body || {};
+    const { durationSec, expectedChunks, chunkMs, failedChunks } = req.body || {};
     const endedAt = new Date().toISOString();
     const updates = {
       ended_at: endedAt,
@@ -3412,7 +3386,11 @@ app.post("/api/recordings/:id/resume", (req, res) => {
       updates.storage_url = `/api/recordings/${recording.id}/audio`;
     }
     updateRecording(recording.id, updates);
-    updateProcessingState(recording.id, { stage: "processing", endedAt });
+    const processingPatch = { stage: "processing", endedAt };
+    if (Number.isFinite(Number(expectedChunks))) processingPatch.expectedChunks = Number(expectedChunks);
+    if (Number.isFinite(Number(chunkMs))) processingPatch.chunkMs = Number(chunkMs);
+    if (Number.isFinite(Number(failedChunks))) processingPatch.failedChunks = Number(failedChunks);
+    updateProcessingState(recording.id, processingPatch);
   setTimeout(() => {
     processRecordingPipeline(recording.id, { createArtifacts: true }).catch(err => {
       console.error("Recording pipeline failed:", err);
@@ -3462,62 +3440,12 @@ app.post("/api/recordings/:id/resummarize", async (req, res) => {
     const recording = getRecording(req.params.id);
     if (!recording) return res.status(404).json({ error: "recording_not_found" });
     if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
-    if (!String(recording.transcript_text || "").trim()) {
-      return res.status(400).json({ error: "transcript_required" });
-    }
-
-    updateRecording(recording.id, { status: "processing" });
-    updateProcessingState(recording.id, { stage: "summarizing" });
-    const summary = await summarizeAndPersistRecording({
-      recordingId: recording.id,
-      transcriptText: recording.transcript_text,
-      title: recording.title,
-      redactionEnabled: recording.redaction_enabled
+    const result = await resummarizeRecording({
+      recording,
+      userId: getUserId(req),
+      sessionId: req.aikaSessionId
     });
-
-    try {
-      await indexRecordingToRag({
-        recording: {
-          ...recording,
-          storage_url: recording.storage_url || (recording.storage_path ? `/api/recordings/${recording.id}/audio` : "")
-        },
-        transcriptText: recording.transcript_text || "",
-        segments: recording.diarization_json || [],
-        summary,
-        force: true
-      });
-    } catch (err) {
-      console.warn("Recording RAG reindex failed:", err?.message || err);
-    }
-
-    try {
-      const notifyChannels = parseNotifyChannels(process.env.RECORDING_NOTIFY_CHANNELS || "");
-      if (notifyChannels.length) {
-        await sendMeetingNotifications({
-          meetingId: `recording:${recording.id}`,
-          title: recording.title || "Aika Recording",
-          occurredAt: recording.started_at || recording.created_at || new Date().toISOString(),
-          summary,
-          sourceUrl: recording.storage_url || (recording.storage_path ? `/api/recordings/${recording.id}/audio` : ""),
-          channels: notifyChannels,
-          force: true
-        });
-      }
-    } catch (err) {
-      console.warn("Recording notification failed:", err?.message || err);
-    }
-
-    if (summary?.summaryMarkdown) {
-      const filePath = writeArtifact(recording.id, "summary.md", summary.summaryMarkdown);
-      const prev = Array.isArray(recording.artifacts_json) ? recording.artifacts_json : [];
-      const kept = prev.filter(a => !(a?.type === "local" && a?.name === "summary.md"));
-      kept.push({ type: "local", name: "summary.md", path: filePath });
-      updateRecording(recording.id, { artifacts_json: JSON.stringify(kept) });
-    }
-
-    updateRecording(recording.id, { status: "ready" });
-    updateProcessingState(recording.id, { stage: "ready", doneAt: new Date().toISOString() });
-    res.json({ ok: true, recording: getRecording(recording.id) });
+    res.json(result);
   } catch (err) {
     console.error("Recording resummarize failed:", err);
     updateRecording(req.params.id, { status: "failed" });
@@ -3615,17 +3543,14 @@ app.get("/api/recordings/:id/export", (req, res) => {
   const recording = getRecording(req.params.id);
   if (!recording) return res.status(404).json({ error: "recording_not_found" });
   if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
-  const notes = buildMeetingNotesMarkdown(recording);
-  const transcriptText = buildTranscriptText(recording);
-  const notesPath = writeArtifact(recording.id, "meeting_notes.md", notes);
-  const transcriptPath = writeArtifact(recording.id, "transcript.txt", transcriptText || "");
+  const result = exportRecordingArtifacts({ recording });
   res.json({
     ok: true,
     notesUrl: `/api/recordings/${recording.id}/notes`,
     transcriptUrl: `/api/recordings/${recording.id}/transcript`,
     audioUrl: getRecordingAudioUrl(recording.id, recording),
-    notesPath,
-    transcriptPath
+    notesPath: result.notesPath,
+    transcriptPath: result.transcriptPath
   });
 });
 
@@ -3634,95 +3559,27 @@ app.post("/api/recordings/:id/email", async (req, res) => {
     const recording = getRecording(req.params.id);
     if (!recording) return res.status(404).json({ error: "recording_not_found" });
     if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
-    const toRaw = String(req.body?.to || "").trim();
-    if (!toRaw) return res.status(400).json({ error: "email_to_required" });
-    const recipients = toRaw.split(/[;,]/).map(v => v.trim()).filter(Boolean);
-    if (!recipients.length) return res.status(400).json({ error: "email_to_required" });
-    const bad = recipients.find(v => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v));
-    if (bad) return res.status(400).json({ error: "email_to_invalid", detail: bad });
-
-    const notes = buildMeetingNotesMarkdown(recording);
-    const notesUrl = buildAbsoluteUrl(req, `/api/recordings/${recording.id}/notes`);
-    const transcriptUrl = buildAbsoluteUrl(req, `/api/recordings/${recording.id}/transcript`);
-    const audioUrl = recording.storage_path ? buildAbsoluteUrl(req, getRecordingAudioUrl(recording.id, recording)) : "";
-    let googleDocUrl = "";
-    const artifacts = Array.isArray(recording.artifacts_json) ? recording.artifacts_json : [];
-    const docArtifact = artifacts.find(a => a?.type === "google_doc" && a?.url);
-    if (docArtifact?.url) googleDocUrl = String(docArtifact.url);
-      if (!googleDocUrl) {
-        try {
-          const doc = await createGoogleDoc(`${recording.title || "Meeting"} Notes`, notes, recording.created_by || "local");
-          if (doc?.documentId) googleDocUrl = `https://docs.google.com/document/d/${doc.documentId}/edit`;
-        } catch {
-          // ignore; email can still include local links
-        }
-      }
-
-    const subject = String(req.body?.subject || `Meeting Notes: ${recording.title || "Meeting"}`);
-    const text = buildMeetingEmailText({ recording, notesUrl, transcriptUrl, audioUrl, googleDocUrl });
-    const fromName = String(process.env.EMAIL_FROM_NAME || "Aika Meeting Copilot");
-    const allowOutboxFallback = String(process.env.EMAIL_OUTBOX_FALLBACK || "0").toLowerCase() === "1";
-    const googleStatus = getGoogleStatus(recording.created_by || getUserId(req));
-    const scopes = new Set(Array.isArray(googleStatus.scopes) ? googleStatus.scopes : []);
-    const hasGmailSendScope = scopes.has("https://www.googleapis.com/auth/gmail.send");
-    if (!googleStatus.connected || !hasGmailSendScope) {
-      return res.status(409).json({
-        error: "gmail_send_scope_missing",
-        detail: "Google needs reconnect with gmail.send scope to send email.",
-        reconnectUrl: "/api/integrations/google/connect?preset=core"
-      });
-    }
-    const result = await executeAction({
-      actionType: "email.send",
-      params: { to: recipients, subject },
-      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
-      summary: `Send meeting notes email for ${recording.id}`,
-      handler: async () => {
-        try {
-          const sent = await sendGmailMessage({
-            to: recipients,
-            subject,
-            text,
-            fromName,
-            userId: recording.created_by || getUserId(req)
-          });
-          return {
-            ok: true,
-            transport: "gmail",
-            to: recipients,
-            messageId: sent?.id || null,
-            links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
-          };
-        } catch (err) {
-          if (!allowOutboxFallback) {
-            throw err;
-          }
-          const outbox = writeOutbox({
-            type: "meeting_email",
-            to: recipients,
-            subject,
-            text,
-            recordingId: recording.id,
-            reason: String(err?.message || "gmail_not_configured")
-          });
-          return {
-            ok: true,
-            transport: "stub",
-            to: recipients,
-            outboxId: outbox.id,
-            warning: "gmail_send_unavailable_saved_to_outbox",
-            links: { notesUrl, transcriptUrl, audioUrl, googleDocUrl }
-          };
-        }
-      }
+    const baseUrl = process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+    const result = await sendMeetingEmail({
+      recording,
+      to: req.body?.to,
+      subject: req.body?.subject,
+      userId: getUserId(req),
+      sessionId: req.aikaSessionId,
+      baseUrl
     });
-    if (result.status === "approval_required") {
+    if (result?.status === "approval_required") {
       return res.status(403).json(result);
     }
-    return res.json(result.data);
+    return res.json(result);
   } catch (err) {
     const status = err.status || 500;
-    res.status(status).json({ error: err?.message || "recording_email_failed", reason: err.reason });
+    res.status(status).json({
+      error: err?.message || "recording_email_failed",
+      detail: err.detail,
+      reconnectUrl: err.reconnectUrl,
+      reason: err.reason
+    });
   }
 });
 
@@ -3767,7 +3624,7 @@ app.post("/api/recordings/:id/ask", async (req, res) => {
   }
   try {
     const prompt = `Answer the question using only this meeting transcript and summary.\n\nTranscript:\n${recording.transcript_text || ""}\n\nSummary:\n${JSON.stringify(recording.summary_json || {}, null, 2)}\n\nQuestion: ${question}`;
-    const response = await client.responses.create({
+    const response = await responsesCreate({
       model: OPENAI_MODEL,
       input: prompt,
       max_output_tokens: 500
@@ -3789,7 +3646,7 @@ app.post("/api/memory/ask", async (req, res) => {
   }
   try {
     const prompt = `Answer the question using only the structured memory entities below.\n\nEntities:\n${JSON.stringify(entities, null, 2)}\n\nQuestion: ${question}`;
-    const response = await client.responses.create({
+    const response = await responsesCreate({
       model: OPENAI_MODEL,
       input: prompt,
       max_output_tokens: 400
@@ -3807,73 +3664,46 @@ app.post("/api/recordings/:id/actions", async (req, res) => {
   if (!canAccessRecording(req, recording)) return res.status(403).json({ error: "forbidden" });
   const { actionType, input } = req.body || {};
   if (!actionType) return res.status(400).json({ error: "action_type_required" });
-  let output = {};
-  let status = "draft";
   try {
-    if (actionType === "schedule_followup") {
-      const fallback = {
-        summary: input?.summary || `Follow-up for ${recording.title}`,
-        startISO: input?.startISO,
-        endISO: input?.endISO,
-        description: input?.description || "Follow-up meeting generated by Aika."
-      };
-      try {
-          const event = await createCalendarEvent(fallback, recording.created_by || getUserId(req));
-        output = { event, provider: "google" };
-        status = "completed";
-      } catch {
-        output = { draft: fallback, provider: "draft" };
-      }
-    } else if (actionType === "draft_email") {
-      const body = [
-        `Subject: Recap - ${recording.title}`,
-        "",
-        "Summary:",
-        ...(recording.summary_json?.overview || []),
-        "",
-        "Decisions:",
-        ...(recording.summary_json?.decisions || []),
-        "",
-        "Action Items:",
-        ...(recording.summary_json?.actionItems || []).map(a => `- ${a.task} (${a.owner || "Unassigned"})`)
-      ].join("\n");
-      output = { draft: body };
-      status = "completed";
-    } else if (actionType === "create_doc") {
-      const markdown = (recording.summary_json && JSON.stringify(recording.summary_json, null, 2)) || "";
-        try {
-          const doc = await createGoogleDoc(`${recording.title} Recap`, markdown, recording.created_by || "local");
-          const url = doc?.documentId ? `https://docs.google.com/document/d/${doc.documentId}/edit` : null;
-          output = { docId: doc.documentId, url };
-          status = "completed";
-      } catch {
-        const filePath = writeArtifact(recording.id, "recap.md", markdown);
-        output = { localPath: filePath };
-      }
-    } else if (actionType === "create_task") {
-      output = { task: input || { title: "Follow up", owner: "Unassigned" }, provider: "draft" };
-      status = "completed";
-    } else if (actionType === "create_ticket") {
-      output = { ticket: input || { title: "Follow up ticket" }, provider: "draft" };
-      status = "completed";
-    } else {
-      output = { note: "Action type not implemented yet." };
-    }
+    const mappedAction = actionType === "schedule_followup"
+      ? "meeting.schedule_followup"
+      : actionType === "draft_email"
+        ? "meeting.draft_email"
+        : actionType === "create_doc"
+          ? "meeting.recap_doc"
+          : actionType === "create_task"
+            ? "meeting.create_task"
+            : actionType === "create_ticket"
+              ? "meeting.create_ticket"
+              : actionType;
+    const result = await runRecordingAction({
+      recording,
+      actionType: mappedAction,
+      input,
+      userId: getUserId(req)
+    });
+    const action = createAgentAction({
+      workspaceId: recording.workspace_id || "default",
+      recordingId: recording.id,
+      requestedBy: getUserId(req),
+      actionType,
+      input,
+      output: result.output,
+      status: result.status
+    });
+    return res.json({ action });
   } catch (err) {
-    output = { error: err?.message || "action_failed" };
-    status = "failed";
+    const action = createAgentAction({
+      workspaceId: recording.workspace_id || "default",
+      recordingId: recording.id,
+      requestedBy: getUserId(req),
+      actionType,
+      input,
+      output: { error: err?.message || "action_failed" },
+      status: "failed"
+    });
+    return res.json({ action });
   }
-
-  const action = createAgentAction({
-    workspaceId: recording.workspace_id || "default",
-    recordingId: recording.id,
-    requestedBy: getUserId(req),
-    actionType,
-    input,
-    output,
-    status
-  });
-  res.json({ action });
 });
 
 app.get("/api/aika/config", (_req, res) => {
@@ -3965,6 +3795,55 @@ const ragModelCreateSchema = z.object({
   autoDiscover: z.boolean().optional()
 }).refine(data => data.topic || data.name, { message: "topic_required" });
 
+const ragModelImportSchema = z.object({
+  version: z.number().optional(),
+  models: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    kind: z.string().optional()
+  })).optional(),
+  collections: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    kind: z.string().optional()
+  })).optional(),
+  sources: z.object({
+    trading: z.array(z.object({
+      collectionId: z.string().optional(),
+      collection_id: z.string().optional(),
+      url: z.string(),
+      tags: z.array(z.string()).optional(),
+      enabled: z.boolean().optional()
+    })).optional(),
+    rss: z.array(z.object({
+      collectionId: z.string().optional(),
+      collection_id: z.string().optional(),
+      url: z.string(),
+      title: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      enabled: z.boolean().optional(),
+      includeForeign: z.boolean().optional(),
+      include_foreign: z.boolean().optional()
+    })).optional(),
+    youtube: z.array(z.object({
+      collectionId: z.string().optional(),
+      collection_id: z.string().optional(),
+      channelId: z.string().optional(),
+      channel_id: z.string().optional(),
+      handle: z.string().optional(),
+      url: z.string().optional(),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      enabled: z.boolean().optional(),
+      maxVideos: z.number().optional(),
+      max_videos: z.number().optional()
+    })).optional()
+  }).optional()
+});
+
 const feedbackSchema = z.object({
   source: z.string().optional(),
   rating: z.enum(["up", "down"]),
@@ -3999,6 +3878,10 @@ const tradingSettingsSchema = z.object({
       question: z.string().min(1),
       answer: z.string().optional()
     })).optional()
+  }).optional(),
+  engine: z.object({
+    tradeApiUrl: z.string().optional(),
+    alpacaFeed: z.string().optional()
   }).optional()
 });
 
@@ -4151,6 +4034,68 @@ const tradingManualTradeSchema = z.object({
 });
 
 const tradingManualTradeUpdateSchema = tradingManualTradeSchema.partial();
+
+const tradingToolMarketSnapshotSchema = z.object({
+  symbols: z.array(z.union([
+    z.string(),
+    z.object({
+      symbol: z.string().min(1),
+      assetClass: z.string().optional(),
+      asset_class: z.string().optional()
+    })
+  ])).min(1),
+  timeframe: z.string().optional(),
+  assetClass: z.string().optional(),
+  limit: z.number().int().min(10).max(1000).optional(),
+  feed: z.string().optional()
+});
+
+const tradingToolStrategySchema = z.object({
+  snapshot: z.any(),
+  horizonDays: z.number().int().min(30).max(365).optional()
+});
+
+const tradingToolRiskCheckSchema = z.object({
+  proposedTrade: z.object({
+    symbol: z.string().min(1),
+    side: z.string().optional(),
+    quantity: z.union([z.number(), z.string()]),
+    entryPrice: z.union([z.number(), z.string()]).optional(),
+    price: z.union([z.number(), z.string()]).optional(),
+    stopLoss: z.union([z.number(), z.string()]),
+    leverage: z.union([z.number(), z.string()]).optional(),
+    assetClass: z.string().optional()
+  }),
+  mode: z.string().optional()
+});
+
+const tradingToolPlaceOrderSchema = z.object({
+  trade: z.object({
+    symbol: z.string().min(1),
+    side: z.string().optional(),
+    quantity: z.union([z.number(), z.string()]),
+    price: z.union([z.number(), z.string()]).optional(),
+    entryPrice: z.union([z.number(), z.string()]).optional(),
+    stopLoss: z.union([z.number(), z.string()]).optional(),
+    takeProfit: z.union([z.number(), z.string()]).optional(),
+    leverage: z.union([z.number(), z.string()]).optional(),
+    assetClass: z.string().optional()
+  }),
+  mode: z.string().optional(),
+  riskCheckId: z.string().min(1),
+  liveConfirmationToken: z.string().optional()
+});
+
+const tradingToolModifyOrderSchema = z.object({
+  orderId: z.string().min(1),
+  updates: z.object({
+    stopLoss: z.union([z.number(), z.string()]).optional(),
+    takeProfit: z.union([z.number(), z.string()]).optional(),
+    cancel: z.boolean().optional()
+  }).optional(),
+  mode: z.string().optional(),
+  liveConfirmationToken: z.string().optional()
+});
 
 const actionPlanSchema = z.object({
   instruction: z.string().min(3),
@@ -4310,7 +4255,11 @@ app.post("/api/rag/ask", async (req, res) => {
       filters: parsed.filters || {},
       ragModel: parsed.ragModel || "auto"
     });
-    res.json(result);
+    const formattedAnswer = formatRagAnswer({
+      answer: result?.answer || "",
+      citations: result?.citations || []
+    });
+    res.json({ ...result, answer: formattedAnswer });
   } catch (err) {
     if (err?.issues) {
       return res.status(400).json({ error: "invalid_request", detail: err.issues });
@@ -4355,12 +4304,43 @@ app.post("/api/rag/backup", async (req, res) => {
   }
 });
 
+app.get("/api/rag/backup/download", (req, res) => {
+  try {
+    const rawIncludeWal = req.query.includeWal ?? req.query.include_wal;
+    const rawIncludeHnsw = req.query.includeHnsw ?? req.query.include_hnsw;
+    const parseToggle = (value) => {
+      if (value === undefined || value === null || value === "") return undefined;
+      return !["0", "false", "no", "off"].includes(String(value).toLowerCase());
+    };
+    const backup = createRagBackupZip({
+      includeWal: parseToggle(rawIncludeWal),
+      includeHnsw: parseToggle(rawIncludeHnsw)
+    });
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${backup.fileName}"`);
+    res.sendFile(backup.filePath);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "rag_backup_download_failed" });
+  }
+});
+
 app.get("/api/rag/models", (_req, res) => {
   try {
     const models = listRagModels();
     res.json({ models });
   } catch (err) {
     res.status(500).json({ error: err?.message || "rag_models_failed" });
+  }
+});
+
+app.get("/api/rag/models/export", (_req, res) => {
+  try {
+    const payload = exportRagModels();
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", "attachment; filename=\"rag-models.json\"");
+    res.send(JSON.stringify(payload, null, 2));
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "rag_models_export_failed" });
   }
 });
 
@@ -4381,6 +4361,19 @@ app.post("/api/rag/models", rateLimit, async (req, res) => {
     }
     const message = err?.message || "rag_model_create_failed";
     res.status(500).json({ error: message });
+  }
+});
+
+app.post("/api/rag/models/import", rateLimit, (req, res) => {
+  try {
+    const parsed = ragModelImportSchema.parse(req.body || {});
+    const imported = importRagModels(parsed);
+    res.json({ ok: true, imported });
+  } catch (err) {
+    if (err?.issues) {
+      return res.status(400).json({ error: "invalid_request", detail: err.issues });
+    }
+    res.status(500).json({ error: err?.message || "rag_models_import_failed" });
   }
 });
 
@@ -4806,7 +4799,7 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
         try {
           const system = "Summarize the trading knowledge node in 2-3 sentences using only the provided context.";
           const user = `Context:\n${contextParts.join("\n")}`;
-          const response = await client.responses.create({
+          const response = await responsesCreate({
             model: OPENAI_MODEL,
             input: [
               { role: "system", content: [{ type: "input_text", text: system }] },
@@ -5133,7 +5126,7 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
       if (base.context && process.env.OPENAI_API_KEY) {
         const system = "Answer using ONLY the provided trading knowledge context. If unsure, say you don't know.";
         const user = `Question: ${parsed.question}\n\nContext:\n${base.context}`;
-        const response = await client.responses.create({
+        const response = await responsesCreate({
           model: OPENAI_MODEL,
           input: [
             { role: "system", content: [{ type: "input_text", text: system }] },
@@ -5145,7 +5138,8 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
       } else if (base.context) {
         answer = base.context;
       }
-      res.json({ answer, citations: base.citations || [], debug: base.debug || {} });
+      const formattedAnswer = formatRagAnswer({ answer, citations: base.citations || [] });
+      res.json({ answer: formattedAnswer, citations: base.citations || [], debug: base.debug || {} });
     } catch (err) {
       if (err?.issues) {
         return res.status(400).json({ error: "invalid_request", detail: err.issues });
@@ -5169,7 +5163,7 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
       if (process.env.OPENAI_API_KEY && allowFallback) {
         const system = "You are a trading education assistant. Use the provided context first. If the context is insufficient, you may answer from general knowledge, but explicitly note when you are doing so.";
         const user = `Question: ${parsed.question}\n\nContext:\n${base.context || "(none)"}`;
-        const response = await client.responses.create({
+        const response = await responsesCreate({
           model: OPENAI_MODEL,
           input: [
             { role: "system", content: [{ type: "input_text", text: system }] },
@@ -5187,7 +5181,8 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
         source = "rag";
       }
 
-      res.json({ answer, citations: base.citations || [], debug: base.debug || {}, source });
+      const formattedAnswer = formatRagAnswer({ answer, citations: base.citations || [] });
+      res.json({ answer: formattedAnswer, citations: base.citations || [], debug: base.debug || {}, source });
     } catch (err) {
       if (err?.issues) {
         return res.status(400).json({ error: "invalid_request", detail: err.issues });
@@ -5238,6 +5233,116 @@ app.post("/api/trading/knowledge/ingest-url", rateLimit, async (req, res) => {
       res.json({ ok: result.deleted });
     } catch (err) {
       res.status(500).json({ error: err?.message || "manual_trade_delete_failed" });
+    }
+  });
+
+  app.post("/api/trading/tools/market-snapshot", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingToolMarketSnapshotSchema.parse(req.body || {});
+      const snapshot = await toolMarketSnapshot({
+        symbols: parsed.symbols,
+        timeframe: parsed.timeframe,
+        assetClass: parsed.assetClass,
+        limit: parsed.limit,
+        feed: parsed.feed
+      });
+      res.json(snapshot);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "market_snapshot_failed" });
+    }
+  });
+
+  app.post("/api/trading/tools/strategy-evaluate", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingToolStrategySchema.parse(req.body || {});
+      const result = await toolStrategyEvaluate({
+        snapshot: parsed.snapshot,
+        horizonDays: parsed.horizonDays
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "strategy_evaluate_failed" });
+    }
+  });
+
+  app.post("/api/trading/tools/risk-check", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingToolRiskCheckSchema.parse(req.body || {});
+      const result = toolRiskCheck({
+        proposedTrade: parsed.proposedTrade,
+        mode: parsed.mode,
+        userId: getUserId(req)
+      });
+      res.json(result);
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "risk_check_failed" });
+    }
+  });
+
+  app.post("/api/trading/tools/place-order", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingToolPlaceOrderSchema.parse(req.body || {});
+      const result = await toolPlaceOrder({
+        trade: parsed.trade,
+        mode: parsed.mode,
+        riskCheckId: parsed.riskCheckId,
+        liveConfirmationToken: parsed.liveConfirmationToken,
+        userId: getUserId(req)
+      });
+      res.json({ ok: true, result });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "place_order_failed" });
+    }
+  });
+
+  app.post("/api/trading/tools/modify-order", rateLimit, async (req, res) => {
+    try {
+      const parsed = tradingToolModifyOrderSchema.parse(req.body || {});
+      const result = await toolModifyOrder({
+        orderId: parsed.orderId,
+        updates: parsed.updates || {},
+        mode: parsed.mode,
+        liveConfirmationToken: parsed.liveConfirmationToken,
+        userId: getUserId(req)
+      });
+      res.json({ ok: true, result });
+    } catch (err) {
+      if (err?.issues) {
+        return res.status(400).json({ error: "invalid_request", detail: err.issues });
+      }
+      res.status(500).json({ error: err?.message || "modify_order_failed" });
+    }
+  });
+
+  app.get("/api/trading/tools/positions", rateLimit, async (req, res) => {
+    try {
+      const mode = String(req.query.mode || "paper");
+      const positions = await toolGetPositions({ mode, userId: getUserId(req) });
+      res.json({ positions });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "positions_failed" });
+    }
+  });
+
+  app.get("/api/trading/tools/account-state", rateLimit, async (req, res) => {
+    try {
+      const mode = String(req.query.mode || "paper");
+      const state = await toolGetAccountState({ mode, userId: getUserId(req) });
+      res.json({ state });
+    } catch (err) {
+      res.status(500).json({ error: err?.message || "account_state_failed" });
     }
   });
 
@@ -5447,7 +5552,7 @@ app.get("/api/fireflies/node", async (req, res) => {
       try {
         const system = "Summarize the node in 2-3 sentences using only the provided context.";
         const user = `Context:\n${contextParts.join("\n")}`;
-        const response = await client.responses.create({
+        const response = await responsesCreate({
           model: OPENAI_MODEL,
           input: [
             { role: "system", content: [{ type: "input_text", text: system }] },
@@ -5542,7 +5647,7 @@ app.post("/api/action/run", rateLimit, async (req, res) => {
 });
 
 app.get("/api/action/runs/:id", rateLimit, (req, res) => {
-  const run = getActionRun(req.params.id);
+  const run = getRunnerActionRun(req.params.id);
   if (!run) return res.status(404).json({ error: "run_not_found" });
   res.json(run);
 });
@@ -6345,7 +6450,8 @@ app.get("/api/status", async (_req, res) => {
       lastEvent: getSkillEvents()[0] || null
     },
     openai: {
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      configured: Boolean(process.env.OPENAI_API_KEY),
+      model: process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini",
       maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 220)
     },
     memory: {
@@ -6989,7 +7095,6 @@ app.post("/api/integrations/amazon/research", async (req, res) => {
       query,
       budget,
       limit,
-      openaiClient: process.env.OPENAI_API_KEY ? client : null,
       model: OPENAI_MODEL
     });
     res.json({ ok: true, report });
@@ -7497,7 +7602,7 @@ Rules:
 - Prefer "trash" for solicitations/junk, "archive" for low-importance but non-junk.
 - Keep receipts, orders, meeting, project, or personal messages.`;
 
-    const response = await client.responses.create({
+    const response = await responsesCreate({
       model: OPENAI_MODEL,
       input: [
         { role: "system", content: systemPrompt },
@@ -7955,6 +8060,18 @@ app.post("/api/aika/voice/preference", (req, res) => {
     content: pref,
     tags: "voice_preference"
   });
+  updateAssistantProfile(getUserId(req), {
+    preferences: {
+      voice: {
+        settings: {
+          voice: {
+            ...(name ? { name } : {}),
+            ...(reference_wav_path ? { reference_wav_path } : {})
+          }
+        }
+      }
+    }
+  });
   res.json({ ok: true });
 });
 
@@ -7967,6 +8084,16 @@ app.post("/api/aika/voice/prompt", (req, res) => {
     role: "assistant",
     content: `Aika voice prompt: ${prompt_text}`,
     tags: "voice_prompt"
+  });
+  updateAssistantProfile(getUserId(req), {
+    preferences: {
+      voice: {
+        promptText: prompt_text,
+        settings: {
+          voice: { prompt_text }
+        }
+      }
+    }
   });
   res.json({ ok: true });
 });

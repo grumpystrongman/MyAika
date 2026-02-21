@@ -28,15 +28,15 @@ function KnowledgeGraph({ graph, width = 520, height = 320, selectedId = "", onS
     if (!raw) return { display: "", full: "", type: "topic" };
     if (raw.startsWith("#")) {
       const label = raw.slice(1);
-      const short = label.length > 18 ? `${label.slice(0, 18)}…` : label;
+      const short = label.length > 18 ? `${label.slice(0, 18)}...` : label;
       return { display: `#${short}`, full: `#${label}`, type: "topic" };
     }
     if (raw.includes("@")) {
       const name = raw.split("@")[0];
-      const short = name.length > 18 ? `${name.slice(0, 18)}…` : name;
+      const short = name.length > 18 ? `${name.slice(0, 18)}...` : name;
       return { display: short, full: raw, type: "participant" };
     }
-    const short = raw.length > 18 ? `${raw.slice(0, 18)}…` : raw;
+    const short = raw.length > 18 ? `${raw.slice(0, 18)}...` : raw;
     return { display: short, full: raw, type: "participant" };
   };
 
@@ -536,17 +536,17 @@ export default function FirefliesPanel({ serverUrl }) {
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Status</div>
         {status ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>
-            Meetings: {status.firefliesMeetings} · Recordings: {status.recordingMeetings || 0} · Memory: {status.memoryMeetings} · Feedback: {status.feedbackMeetings} · Chunks: {status.totalChunks}
-            {status.vectorStore?.vecEnabled === false ? " · sqlite-vec: fallback" : " · sqlite-vec: on"}
-            {status.vectorStore?.ftsEnabled ? " · fts: on" : " · fts: off"}
-            {syncInfo?.running ? ` · Sync: running${syncInfo.startedAt ? ` (since ${syncInfo.startedAt})` : ""}` : ""}
+            Meetings: {status.firefliesMeetings} | Recordings: {status.recordingMeetings || 0} | Memory: {status.memoryMeetings} | Feedback: {status.feedbackMeetings} | Chunks: {status.totalChunks}
+            {status.vectorStore?.vecEnabled === false ? " | sqlite-vec: fallback" : " | sqlite-vec: on"}
+            {status.vectorStore?.ftsEnabled ? " | fts: on" : " | fts: off"}
+            {syncInfo?.running ? ` | Sync: running${syncInfo.startedAt ? ` (since ${syncInfo.startedAt})` : ""}` : ""}
           </div>
         ) : (
           <div style={{ fontSize: 12, color: "#6b7280" }}>{loading ? "Loading..." : "No status yet."}</div>
         )}
         {syncInfo?.lastResult && !syncInfo?.running && (
           <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
-            Last sync: {syncInfo.lastResult.finishedAt || "unknown"} · Synced {syncInfo.lastResult.syncedMeetings || 0} · Skipped {syncInfo.lastResult.skippedMeetings || 0}
+            Last sync: {syncInfo.lastResult.finishedAt || "unknown"} | Synced {syncInfo.lastResult.syncedMeetings || 0} | Skipped {syncInfo.lastResult.skippedMeetings || 0}
           </div>
         )}
       </div>
@@ -697,7 +697,7 @@ export default function FirefliesPanel({ serverUrl }) {
                   {nodeDetails.snippets.map(snippet => (
                     <div key={snippet.chunk_id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>
-                        {snippet.meeting_title || "Meeting"} · {snippet.occurred_at || ""}
+                        {snippet.meeting_title || "Meeting"} | {snippet.occurred_at || ""}
                       </div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{snippet.chunk_id}</div>
                       <div style={{ marginTop: 6, fontSize: 12 }}>{snippet.text}</div>
@@ -793,7 +793,7 @@ export default function FirefliesPanel({ serverUrl }) {
         </div>
 
         <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Thumbs‑up feedback indexed</div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Thumbs-up feedback indexed</div>
           {feedbackEntries.length === 0 ? (
             <div style={{ fontSize: 12, color: "#6b7280" }}>No feedback entries yet.</div>
           ) : (

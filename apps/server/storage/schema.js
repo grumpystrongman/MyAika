@@ -441,6 +441,188 @@ const migrations = [
     CREATE INDEX IF NOT EXISTS idx_todos_reminder
       ON todos(reminder_at, reminder_sent_at);
     `
+  },
+  {
+    id: 13,
+    sql: `
+    ALTER TABLE trading_settings ADD COLUMN engine_json TEXT;
+    `
+  },
+  {
+    id: 14,
+    sql: `
+    CREATE TABLE IF NOT EXISTS restaurants (
+      restaurant_id TEXT PRIMARY KEY,
+      osm_type TEXT,
+      osm_id TEXT,
+      name TEXT,
+      address TEXT,
+      address_json TEXT,
+      lat REAL,
+      lon REAL,
+      phone TEXT,
+      website TEXT,
+      cuisine_tags_json TEXT,
+      hours_json TEXT,
+      price_hint TEXT,
+      source_refs_json TEXT,
+      menu_hash TEXT,
+      hours_hash TEXT,
+      menu_updated_at TEXT,
+      hours_updated_at TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS restaurant_menus (
+      restaurant_id TEXT PRIMARY KEY,
+      menu_json TEXT,
+      last_seen_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS restaurant_media (
+      id TEXT PRIMARY KEY,
+      restaurant_id TEXT,
+      image_url TEXT,
+      caption TEXT,
+      source_url TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS restaurant_pages (
+      id TEXT PRIMARY KEY,
+      restaurant_id TEXT,
+      url TEXT,
+      doc_type TEXT,
+      title TEXT,
+      status TEXT,
+      etag TEXT,
+      last_modified TEXT,
+      content_hash TEXT,
+      http_status INTEGER,
+      error TEXT,
+      last_crawled_at TEXT,
+      last_changed_at TEXT,
+      crawl_run_id TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS restaurant_document_chunks (
+      chunk_id TEXT PRIMARY KEY,
+      restaurant_id TEXT,
+      source_url TEXT,
+      doc_type TEXT,
+      text TEXT,
+      created_at TEXT,
+      content_hash TEXT,
+      crawl_run_id TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS restaurant_crawl_runs (
+      id TEXT PRIMARY KEY,
+      started_at TEXT,
+      finished_at TEXT,
+      status TEXT,
+      restaurants_total INTEGER,
+      restaurants_new INTEGER,
+      restaurants_updated INTEGER,
+      pages_fetched INTEGER,
+      pages_skipped INTEGER,
+      chunks_upserted INTEGER,
+      errors_json TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_restaurants_name ON restaurants(name);
+    CREATE INDEX IF NOT EXISTS idx_restaurant_pages_url ON restaurant_pages(url);
+    CREATE INDEX IF NOT EXISTS idx_restaurant_chunks_restaurant ON restaurant_document_chunks(restaurant_id);
+    `
+  },
+  {
+    id: 15,
+    sql: `
+    CREATE TABLE IF NOT EXISTS trading_accounts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      mode TEXT,
+      equity REAL,
+      cash REAL,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS trading_positions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      symbol TEXT,
+      asset_class TEXT,
+      side TEXT,
+      quantity REAL,
+      entry_price REAL,
+      leverage REAL,
+      stop_loss REAL,
+      take_profit REAL,
+      opened_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_trading_positions_account
+      ON trading_positions (account_id, symbol);
+
+    CREATE TABLE IF NOT EXISTS trading_orders (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      symbol TEXT,
+      asset_class TEXT,
+      side TEXT,
+      quantity REAL,
+      type TEXT,
+      price REAL,
+      status TEXT,
+      fill_price REAL,
+      filled_at TEXT,
+      leverage REAL,
+      stop_loss REAL,
+      take_profit REAL,
+      risk_check_id TEXT,
+      mode TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_trading_orders_account
+      ON trading_orders (account_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS trading_daily_pnl (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      day TEXT,
+      realized_pnl REAL,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_trading_daily_pnl
+      ON trading_daily_pnl (account_id, day);
+
+    CREATE TABLE IF NOT EXISTS trading_risk_checks (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      mode TEXT,
+      trade_json TEXT,
+      decision TEXT,
+      reasons_json TEXT,
+      created_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_trading_risk_checks
+      ON trading_risk_checks (account_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS openai_usage (
+      id TEXT PRIMARY KEY,
+      ts TEXT,
+      model TEXT,
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      total_tokens INTEGER,
+      cost_usd REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_openai_usage_ts
+      ON openai_usage (ts);
+    `
   }
 ];
 

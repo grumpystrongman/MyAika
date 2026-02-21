@@ -21,27 +21,29 @@ function withEnv(vars, fn) {
   }
 }
 
-test("model router prefers local when configured", () => {
+test("model router uses OpenAI only when API key configured", () => {
   withEnv({
     MODEL_ROUTER_MODE: "local",
     LOCAL_LLM_BASE_URL: "http://localhost:1234",
     LOCAL_LLM_MODEL: "local-model",
-    OPENAI_API_KEY: ""
+    OPENAI_PRIMARY_MODEL: "gpt-4o-mini",
+    OPENAI_API_KEY: "test-key"
   }, () => {
     const route = routeModel({ purpose: "planner" });
-    assert.equal(route.provider, "local");
-    assert.equal(route.model, "local-model");
+    assert.equal(route.provider, "cloud");
+    assert.equal(route.model, "gpt-4o-mini");
   });
 });
 
-test("model router auto prefers local when requested", () => {
+test("model router reports missing OpenAI when not configured", () => {
   withEnv({
     MODEL_ROUTER_MODE: "auto",
     LOCAL_LLM_BASE_URL: "http://localhost:1234",
     LOCAL_LLM_MODEL: "local-model",
-    OPENAI_API_KEY: "test-key"
+    OPENAI_API_KEY: ""
   }, () => {
     const route = routeModel({ purpose: "planner", preferLocal: true });
-    assert.equal(route.provider, "local");
+    assert.equal(route.provider, "cloud");
+    assert.equal(route.reason, "openai_missing");
   });
 });

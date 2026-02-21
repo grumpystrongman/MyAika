@@ -15,18 +15,69 @@ function defaultPreferences() {
   return {
     notifications: {
       taskChannels: ["in_app", "email", "telegram"]
+    },
+    identity: {
+      workEmail: "",
+      personalEmail: ""
+    },
+    appearance: {
+      theme: "aurora",
+      appBackground: "",
+      avatarBackground: "none",
+      avatarModelId: "miku"
+    },
+    audio: {
+      sttSilenceMs: 1400,
+      meetingCommandListening: false
+    },
+    voice: {
+      promptText: "",
+      settings: {
+        style: "brat_baddy",
+        format: "wav",
+        rate: 1.05,
+        pitch: 0,
+        energy: 1.0,
+        pause: 1.1,
+        engine: "piper",
+        voice: {
+          reference_wav_path: "riko_sample.wav",
+          name: "en_GB-semaine-medium",
+          prompt_text: ""
+        }
+      }
+    },
+    rag: {
+      defaultModel: "auto",
+      tradingModel: "trading"
     }
   };
 }
 
-function normalizePreferences(input, fallback) {
-  if (!input || typeof input !== "object") return fallback;
-  const output = { ...fallback };
-  for (const [key, value] of Object.entries(input)) {
+function mergePreferences(base, patch) {
+  if (!patch || typeof patch !== "object") return base;
+  const output = Array.isArray(base) ? [...base] : { ...base };
+  for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    output[key] = value;
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      base &&
+      typeof base[key] === "object" &&
+      !Array.isArray(base[key])
+    ) {
+      output[key] = mergePreferences(base[key], value);
+    } else {
+      output[key] = value;
+    }
   }
   return output;
+}
+
+function normalizePreferences(input, fallback) {
+  if (!input || typeof input !== "object") return fallback;
+  return mergePreferences(fallback, input);
 }
 
 function normalizeMemoryMode(value, fallback) {

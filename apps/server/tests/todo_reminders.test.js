@@ -10,11 +10,12 @@ initDb();
 runMigrations();
 
 test("todo reminders mark sent in-app", async () => {
+  const userId = `todo-reminder-${Date.now()}`;
   const todo = createTodoRecord({
     title: "Reminder demo",
     details: "Check the inbox",
     reminderAt: new Date(Date.now() - 1000).toISOString(),
-    userId: "local"
+    userId
   });
   const config = {
     enabled: true,
@@ -24,18 +25,19 @@ test("todo reminders mark sent in-app", async () => {
     emailTo: [],
     maxPerRun: 10
   };
-  const result = await runTodoReminders({ userId: "local", config });
+  const result = await runTodoReminders({ userId, config });
   assert.equal(result.processed, 1);
-  const updated = getTodoRecord({ id: todo.id, userId: "local" });
+  const updated = getTodoRecord({ id: todo.id, userId });
   assert.equal(updated.reminderStatus, "sent");
   assert.ok(updated.reminderSentAt);
 });
 
 test("todo reminders send slack via executor", async () => {
+  const userId = `todo-reminder-${Date.now()}-slack`;
   const todo = createTodoRecord({
     title: "Slack reminder",
     reminderAt: new Date(Date.now() - 2000).toISOString(),
-    userId: "local"
+    userId
   });
   const config = {
     enabled: true,
@@ -55,9 +57,9 @@ test("todo reminders send slack via executor", async () => {
     return { ok: true };
   };
 
-  await runTodoReminders({ userId: "local", config, deps: { executeAction, sendSlackMessage } });
+  await runTodoReminders({ userId, config, deps: { executeAction, sendSlackMessage } });
   assert.equal(sent, true);
-  const updated = getTodoRecord({ id: todo.id, userId: "local" });
+  const updated = getTodoRecord({ id: todo.id, userId });
   assert.equal(updated.reminderStatus, "sent");
 });
 

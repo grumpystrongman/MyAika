@@ -15,11 +15,12 @@ function resolveRepoRoot() {
 
 function resolveDbPath() {
   const override = process.env.AIKA_DB_PATH || "";
-  if (override) {
+  const isTestEnv = process.env.NODE_ENV === "test" || process.argv.includes("--test") || process.env.AIKA_TEST_MODE === "1";
+  if (override && !isTestEnv) {
     if (override === ":memory:") return override;
     return path.isAbsolute(override) ? override : path.join(resolveRepoRoot(), override);
   }
-  if (process.env.NODE_ENV === "test") {
+  if (isTestEnv) {
     const suffix = `${process.pid}-${threadId || 0}`;
     return path.join(os.tmpdir(), `aika_test_${suffix}.sqlite`);
   }

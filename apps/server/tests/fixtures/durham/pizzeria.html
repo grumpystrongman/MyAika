@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Toro Pizzeria | Durham</title>
+  </head>
+  <body>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Restaurant",
+        "name": "Toro Pizzeria",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "123 Main St",
+          "addressLocality": "Durham",
+          "addressRegion": "NC",
+          "postalCode": "27701"
+        },
+        "telephone": "(919) 555-0101",
+        "openingHoursSpecification": [
+          { "dayOfWeek": "Monday", "opens": "11:00", "closes": "22:00" },
+          { "dayOfWeek": "Tuesday", "opens": "11:00", "closes": "22:00" }
+        ],
+        "servesCuisine": ["Italian", "Pizza"],
+        "priceRange": "$$",
+        "hasMenu": {
+          "@type": "Menu",
+          "hasMenuSection": [
+            {
+              "name": "Pizzas",
+              "hasMenuItem": [
+                { "name": "Margherita", "description": "Tomato, basil", "offers": { "price": "14" } },
+                { "name": "Pepperoni", "description": "Spicy", "offers": { "price": "16" } }
+              ]
+            }
+          ]
+        },
+        "image": [
+          { "url": "https://toro.example/images/margherita.jpg", "caption": "Margherita pizza" }
+        ]
+      }
+    </script>
+    <nav>
+      <a href="/menu">Menu</a>
+      <a href="/hours">Hours</a>
+    </nav>
+    <main>
+      <h1>Toro Pizzeria</h1>
+      <p>Wood-fired pizza in downtown Durham.</p>
+      <img src="https://toro.example/images/pizza.jpg" alt="Wood-fired pizza" />
+    </main>
+  </body>
+</html>

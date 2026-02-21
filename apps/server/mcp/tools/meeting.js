@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { responsesCreate } from "../../src/llm/openaiClient.js";
 import { createMeetingRecord } from "../../storage/meetings.js";
 import { createGoogleDocInFolder, ensureDriveFolderPath } from "../../integrations/google.js";
 
@@ -28,10 +28,9 @@ function summarizeDeterministic({ transcript, title, date, attendees = [] }) {
 }
 
 async function summarizeWithOpenAI({ transcript, title, date, attendees = [] }) {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   const prompt = `Create a polished meeting summary in markdown with sections: Summary, Key Decisions, Action Items (with owners if possible), Risks/Issues, Notable Quotes.\n\nTitle: ${title}\nDate: ${date || ""}\nAttendees: ${attendees.join(", ")}\n\nTranscript:\n${transcript}`;
-  const resp = await client.responses.create({
+  const resp = await responsesCreate({
     model,
     input: prompt,
     max_output_tokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 260)

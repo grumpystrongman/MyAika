@@ -25,9 +25,10 @@ const repoRoot = resolveRepoRoot();
 const defaultDbPath = path.join(repoRoot, "apps", "server", "data", "aika_rag.sqlite");
 const envPath = process.env.RAG_SQLITE_PATH || "";
 const testPath = path.join(os.tmpdir(), `aika_rag_test_${process.pid}-${threadId || 0}.sqlite`);
-const dbPath = envPath
+const isTestEnv = process.env.NODE_ENV === "test" || process.argv.includes("--test") || process.env.AIKA_TEST_MODE === "1";
+const dbPath = (!isTestEnv && envPath)
   ? (path.isAbsolute(envPath) ? envPath : path.join(repoRoot, envPath))
-  : (process.env.NODE_ENV === "test" ? testPath : defaultDbPath);
+  : (isTestEnv ? testPath : defaultDbPath);
 const dataDir = path.dirname(dbPath);
 const hnswDir = path.join(dataDir, "rag_hnsw");
 const hnswIndexPath = path.join(hnswDir, "index.bin");
@@ -547,6 +548,7 @@ function ensureMigrations() {
   ensureIndex("knowledge_documents", "reviewed_at", "idx_knowledge_docs_reviewed");
   migrateTradingSourcesSchema();
   migrateTradingRssSourcesSchema();
+  migrateTradingRssItemsSchema();
 }
 
 function hasUniqueIndex(table, columns = []) {
@@ -636,6 +638,48 @@ function migrateTradingRssSourcesSchema() {
     `);
     db.exec("DROP TABLE trading_rss_sources_old");
     db.exec("CREATE INDEX IF NOT EXISTS idx_trading_rss_sources_enabled ON trading_rss_sources(enabled)");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
+    throw err;
+  }
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
+function migrateTradingRssItemsSchema() {
+  const cols = db.prepare("PRAGMA table_info(trading_rss_items)").all();
+  if (!cols.length) return;
+  const foreign = db.prepare("PRAGMA foreign_key_list(trading_rss_items)").all();
+  const sourceKey = foreign.find(row => row.from === "source_id");
+  if (sourceKey?.table === "trading_rss_sources") return;
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec("ALTER TABLE trading_rss_items RENAME TO trading_rss_items_old");
+    db.exec(`
+      CREATE TABLE trading_rss_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_id INTEGER,
+        guid TEXT,
+        url TEXT,
+        title TEXT,
+        published_at TEXT,
+        seen_at TEXT,
+        decision TEXT,
+        reason TEXT,
+        content_hash TEXT,
+        UNIQUE(source_id, guid),
+        FOREIGN KEY(source_id) REFERENCES trading_rss_sources(id)
+      );
+    `);
+    const allowed = ["id", "source_id", "guid", "url", "title", "published_at", "seen_at", "decision", "reason", "content_hash"];
+    const existing = cols.map(col => col.name).filter(name => allowed.includes(name));
+    if (existing.length) {
+      const columns = existing.join(", ");
+      db.exec(`INSERT INTO trading_rss_items (${columns}) SELECT ${columns} FROM trading_rss_items_old;`);
+    }
+    db.exec("DROP TABLE trading_rss_items_old");
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -896,7 +940,8 @@ export function initRagStore() {
   if (db) return { db, vecEnabled };
   ensureDir(dataDir);
   db = new Database(dbPath);
-  db.pragma("busy_timeout = 8000");
+  const busyTimeoutMs = Number(process.env.RAG_BUSY_TIMEOUT_MS || 20000);
+  db.pragma(`busy_timeout = ${Number.isFinite(busyTimeoutMs) ? busyTimeoutMs : 20000}`);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   ensureSchema();

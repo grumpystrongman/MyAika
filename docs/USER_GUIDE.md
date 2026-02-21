@@ -1,6 +1,6 @@
 # MyAika User Guide (Training Manual)
 
-Last updated: February 19, 2026
+Last updated: February 21, 2026
 
 ## Sidebar Navigation (Quick Links)
 Use these links as a sidebar jump list inside the guide.
@@ -12,7 +12,7 @@ Use these links as a sidebar jump list inside the guide.
 - [Global Concepts](#global-concepts)
 - [Chat Tab](#chat-tab)
 - [Recordings Tab (Meeting Copilot)](#recordings-tab-meeting-copilot)
-- [Aika Tools Tab (Aika Tools Workbench)](#aika-tools-tab-aika-tools-workbench)
+- [Legacy Tools (Settings -> Legacy)](#legacy-tools-settings--legacy)
 - [Tools Tab (MCP-lite Tools)](#tools-tab-mcp-lite-tools)
 - [Action Runner Tab](#action-runner-tab)
 - [Teach Mode Tab](#teach-mode-tab)
@@ -66,7 +66,6 @@ If you are on iPad/Safari, microphone access requires HTTPS. Use `npm run dev:ip
 ## Navigation Map (Top Tabs)
 - `Chat`: Conversational UI, voice control, and general assistant use.
 - `Recordings`: Meeting Copilot for recording, transcription, and meeting notes.
-- `Aika Tools`: Structured tools for notes, todos, calendar, email, memory, and messaging.
 - `Tools`: MCP-lite tool browser, direct tool execution, approvals, and history.
 - `Action Runner`: Browser automation plus Desktop mode (local control) with approvals and artifacts.
 - `Teach Mode`: Record and run reusable browser macros.
@@ -75,7 +74,7 @@ If you are on iPad/Safari, microphone access requires HTTPS. Use `npm run dev:ip
 - `Safety`: Autonomy controls, approval rules, kill switch, and audit log.
 - `Canvas`: Live cards that Aika updates from server events.
 - `Features`: MCP discovery and Connections portal.
-- `Settings`: Integrations, Skills, Trading preferences, Appearance, and Voice controls.
+- `Settings`: Integrations, Skills, Trading preferences, Appearance, Voice controls, plus `Legacy` (Aika Tools workbench).
 - `Debug`: System health, voice pipeline checks, and logs.
 - `Guide`: This user guide in-app.
 
@@ -144,11 +143,11 @@ Local meeting recording, transcription, and structured meeting notes with action
 5. Review `Summary`, `Tasks`, and `Decisions`.
 6. Use `Actions` to create follow-ups.
 
-## Aika Tools Tab (Aika Tools Workbench)
+## Legacy Tools (Settings -> Legacy)
 ![Aika Tools tab](user-guide/screenshots/tools_workbench.png)
 
 ### What it is
-A structured set of tools for daily operations and personal productivity.
+The legacy Aika Tools workbench, now located under `Settings -> Legacy`. It is kept for reference and likely unused in the beta release.
 
 ### Tool groups and when to use them
 - `Meeting Summaries`: Turn raw transcripts into structured summaries and store them.
@@ -162,10 +161,11 @@ A structured set of tools for daily operations and personal productivity.
 - `Messaging`: Send notifications to Slack/Discord/Telegram.
 
 ### How to use
-1. Choose a tool tab (for example `Notes`).
-2. Fill in the form fields.
-3. Click the action button (for example `Create Note`).
-4. Review the response for success or errors.
+1. Open `Settings -> Legacy`.
+2. Choose a tool tab (for example `Notes`).
+3. Fill in the form fields.
+4. Click the action button (for example `Create Note`).
+5. Review the response for success or errors.
 
 ### Email Workflows (Inbox + Context)
 ![Email workflows](user-guide/screenshots/tools_email_workflows.png)
@@ -186,6 +186,9 @@ How to use
 2. Set provider + lookback days, then click `Refresh Inbox`.
 3. Select a message to view details and click `Find Context`.
 4. Click `Use in Draft` to seed the reply composer.
+
+Voice command setup
+- Set your work email in `Settings -> Connections -> Email identity` to enable commands like “email my work address…”.
 
 ### Email Action Layer (Todos + Follow-ups)
 ![Email action layer](user-guide/screenshots/tools_email_workflows.png)
@@ -680,6 +683,20 @@ How to use
 2. Use the export buttons to generate outputs.
 3. Configure webhooks or scenes if needed.
 
+### Knowledge
+
+Key functions
+- Set the default RAG model for chat + Telegram.
+- Refresh the available models list.
+- Export model metadata (JSON).
+- Download a full RAG backup (SQLite + HNSW).
+- Import model definitions + knowledge sources.
+
+How to use
+1. Pick the default RAG model.
+2. Use `Download RAG Backup` for a full restore snapshot.
+3. Use `Export/Import RAG Models` to move model definitions and sources between instances.
+
 ### Trading
 ![Settings trading](user-guide/screenshots/settings_trading.png)
 
@@ -714,6 +731,9 @@ Key functions
 How to use
 1. Toggle voice controls on.
 2. Adjust thresholds and test the mic.
+
+### Legacy
+The legacy Aika Tools workbench now lives under `Settings -> Legacy`. It is kept for reference and likely unused in the beta release. See [Legacy Tools](#legacy-tools-settings--legacy) for details.
 
 ## Debug Tab
 ![Debug tab](user-guide/screenshots/debug.png)

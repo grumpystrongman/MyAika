@@ -145,7 +145,11 @@ function markdownToHtml(markdown) {
   return htmlParts.join("\n");
 }
 
-export default function GuidePanel() {
+export default function GuidePanel({
+  docPath = "/docs/USER_GUIDE.md",
+  title = "Full User Guide",
+  openLabel = "Open Markdown"
+}) {
   const [content, setContent] = useState("");
   const [status, setStatus] = useState("Loading guide...");
 
@@ -153,7 +157,7 @@ export default function GuidePanel() {
     let active = true;
     async function loadGuide() {
       try {
-        const resp = await fetch("/docs/USER_GUIDE.md");
+        const resp = await fetch(docPath);
         if (!resp.ok) throw new Error("guide_load_failed");
         const text = await resp.text();
         if (active) {
@@ -162,7 +166,7 @@ export default function GuidePanel() {
         }
       } catch (err) {
         if (active) {
-          setStatus("Guide not available. Check /docs/USER_GUIDE.md");
+          setStatus(`Document not available. Check ${docPath}`);
         }
       }
     }
@@ -170,21 +174,21 @@ export default function GuidePanel() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [docPath]);
 
   const html = useMemo(() => markdownToHtml(content), [content]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-        Full User Guide
+        {title}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button
-          onClick={() => window.open("/docs/USER_GUIDE.md", "_blank")}
+          onClick={() => window.open(docPath, "_blank")}
           style={{ padding: "6px 10px", borderRadius: 8 }}
         >
-          Open Markdown
+          {openLabel}
         </button>
       </div>
       {status && (

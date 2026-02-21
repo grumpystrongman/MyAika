@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import OpenAI from "openai";
+import { responsesCreate } from "../llm/openaiClient.js";
 import Parser from "rss-parser";
 import {
   listTradingRssSources,
@@ -50,7 +50,7 @@ const GENERAL_MARKET_KEYWORDS = [
 ];
 
 const parser = new Parser();
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const openaiEnabled = Boolean(process.env.OPENAI_API_KEY);
 
 function nowIso() {
   return new Date().toISOString();
@@ -140,7 +140,7 @@ function extractJsonObject(text = "") {
 }
 
 async function aiReviewItem({ title, content }) {
-  if (!openai) {
+  if (!openaiEnabled) {
     if (RSS_REQUIRE_AI) {
       return { decision: "skip", reason: "ai_required_no_key", tags: [] };
     }
@@ -164,8 +164,8 @@ async function aiReviewItem({ title, content }) {
   const user = `Title: ${title}\n\nContent:\n${content.slice(0, 4000)}`;
 
   try {
-    const response = await openai.responses.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    const response = await responsesCreate({
+      model: process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini",
       input: [
         { role: "system", content: [{ type: "input_text", text: system }] },
         { role: "user", content: [{ type: "input_text", text: user }] }
@@ -387,3 +387,4 @@ export function startTradingRssLoop() {
 export function listTradingRssItemsUi({ sourceId, limit = 50 } = {}) {
   return listTradingRssItems({ sourceId, limit });
 }
+

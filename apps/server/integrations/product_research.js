@@ -1,5 +1,6 @@
 import { searchAmazonItems } from "./amazon_paapi.js";
 import { searchWeb } from "./web_search.js";
+import { responsesCreate } from "../src/llm/openaiClient.js";
 
 function toNumber(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -63,8 +64,9 @@ export function buildAmazonAddToCartUrl({ asin, quantity = 1 }) {
   return url.toString();
 }
 
-async function generateLlmAnalysis({ query, candidates, webResults, openaiClient, model }) {
-  if (!openaiClient || !model || !candidates.length) return null;
+async function generateLlmAnalysis({ query, candidates, webResults, model }) {
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey || !model || !candidates.length) return null;
   try {
     const prompt = [
       "You are a strict product analyst. Compare options and recommend one best value item.",
@@ -73,7 +75,7 @@ async function generateLlmAnalysis({ query, candidates, webResults, openaiClient
       `Candidates: ${JSON.stringify(candidates.slice(0, 6), null, 2)}`,
       `Web signals: ${JSON.stringify(webResults?.results || [], null, 2)}`
     ].join("\n\n");
-    const response = await openaiClient.responses.create({
+    const response = await responsesCreate({
       model,
       input: prompt,
       max_output_tokens: 450
@@ -99,11 +101,16 @@ export async function runProductResearch({
   query,
   budget = null,
   limit = 8,
-  openaiClient = null,
   model = ""
 }) {
   const normalizedQuery = cleanText(query, 180);
   if (!normalizedQuery) throw new Error("query_required");
+  const modelName = String(
+    model ||
+    process.env.OPENAI_PRIMARY_MODEL ||
+    process.env.OPENAI_MODEL ||
+    "gpt-4o-mini"
+  ).trim();
 
   const resultLimit = clampInt(limit, 3, 12, 8);
   let amazonItems = [];
@@ -139,8 +146,7 @@ export async function runProductResearch({
     query: normalizedQuery,
     candidates: amazonItems,
     webResults,
-    openaiClient,
-    model
+    model: modelName
   });
 
   const deterministicSummary = bestItem

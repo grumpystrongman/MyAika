@@ -1,6 +1,6 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
-import OpenAI from "openai";
+import { responsesCreate } from "../llm/openaiClient.js";
 import { getPolicyConfig } from "../../mcp/policy.js";
 
 const repoRoot = path.resolve(process.cwd(), "..", "..");
@@ -68,12 +68,6 @@ function evaluateSkillPermissions(manifest) {
   return { blockedTools: blocked };
 }
 
-function getOpenAi() {
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  if (!apiKey) return null;
-  return new OpenAI({ apiKey });
-}
-
 export async function runPromptSkill({ id, input, skipPolicyCheck = false }) {
   const entry = getSkillVaultEntry(id);
   if (!entry) throw new Error("skill_not_found");
@@ -96,11 +90,10 @@ export async function runPromptSkill({ id, input, skipPolicyCheck = false }) {
 
   const promptPath = path.join(vaultDir, id, manifest.prompt || "prompt.md");
   const prompt = fs.existsSync(promptPath) ? fs.readFileSync(promptPath, "utf8") : "";
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const client = getOpenAi();
-  if (!client) throw new Error("missing_openai_api_key");
+  const model = process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  if (!process.env.OPENAI_API_KEY) throw new Error("missing_openai_api_key");
 
-  const response = await client.responses.create({
+  const response = await responsesCreate({
     model,
     input: [
       { role: "system", content: [{ type: "input_text", text: prompt || "You are a helpful assistant." }] },
@@ -127,3 +120,4 @@ export function assessSkillPermissions(id) {
   if (!entry) return { blockedTools: ["skill_not_found"] };
   return evaluateSkillPermissions(entry.manifest || {});
 }
+

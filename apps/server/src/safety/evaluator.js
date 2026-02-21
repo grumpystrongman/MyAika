@@ -3,6 +3,7 @@ import { classifyAction } from "./classifier.js";
 import { scoreRisk } from "./risk.js";
 import { detectSecrets } from "./redact.js";
 import { getKillSwitchState, isAllowedWhenKillSwitchActive } from "./killSwitch.js";
+import { evaluateAutonomy } from "./autonomy.js";
 
 function normalizePath(value) {
   return String(value || "").replace(/\\/g, "/");
@@ -67,7 +68,7 @@ function domainUnknown(domains, policy) {
   return domains.some(domain => !allowlist.includes(String(domain || "").toLowerCase()));
 }
 
-export function evaluateAction({ actionType, params = {}, outboundTargets = [], resourceRefs = [] } = {}) {
+export function evaluateAction({ actionType, params = {}, outboundTargets = [], resourceRefs = [], context = {} } = {}) {
   const policy = getPolicy();
   const killState = getKillSwitchState();
   const classification = classifyAction({ actionType, params, outboundTargets });
@@ -159,6 +160,17 @@ export function evaluateAction({ actionType, params = {}, outboundTargets = [], 
     };
   }
 
+  const autonomy = evaluateAutonomy({ actionType, params, context, policy, classification, riskScore });
+  if (autonomy?.allow) {
+    return {
+      decision: "allow",
+      reason: autonomy.reason || "autonomy_allow",
+      riskScore,
+      classification,
+      autonomy
+    };
+  }
+
   const requiresApproval =
     actionInList(actionType, policy.requires_approval || []) ||
     protectedHit ||
@@ -171,7 +183,8 @@ export function evaluateAction({ actionType, params = {}, outboundTargets = [], 
       decision: "require_approval",
       reason: "policy_requires_approval",
       riskScore,
-      classification
+      classification,
+      autonomy
     };
   }
 
@@ -179,6 +192,7 @@ export function evaluateAction({ actionType, params = {}, outboundTargets = [], 
     decision: "allow",
     reason: "policy_allow",
     riskScore,
-    classification
+    classification,
+    autonomy
   };
 }

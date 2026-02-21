@@ -17,7 +17,8 @@ export async function executeAction({
     actionType,
     params,
     outboundTargets,
-    resourceRefs
+    resourceRefs,
+    context
   });
   const redactedPayload = redactPayload(params);
   const auditBase = {

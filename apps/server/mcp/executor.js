@@ -19,7 +19,8 @@ export class ToolExecutor {
     const safetyDecision = evaluateAction({
       actionType: def.name,
       params,
-      outboundTargets
+      outboundTargets,
+      context
     });
     const redactedPayload = redactPayload(params);
     const policy = evaluatePolicy({ tool: def, params, context, outboundTargets });
@@ -79,10 +80,11 @@ export class ToolExecutor {
       throw err;
     }
 
+    const autonomyAllowed = Boolean(safetyDecision?.autonomy?.allow);
     const toolRequiresApproval = typeof def.requiresApproval === "function"
       ? def.requiresApproval(params, context)
       : def.requiresApproval;
-    if (policy.requiresApproval || toolRequiresApproval || safetyDecision.decision === "require_approval") {
+    if (!autonomyAllowed && (policy.requiresApproval || toolRequiresApproval || safetyDecision.decision === "require_approval")) {
       const approval = createApproval({
         toolName: def.name,
         params: policy.redactedParams,
@@ -220,7 +222,8 @@ export class ToolExecutor {
     const safetyDecision = evaluateAction({
       actionType: def.name,
       params: approval.params || {},
-      outboundTargets: def.outboundTargets?.(approval.params, execContext) || []
+      outboundTargets: def.outboundTargets?.(approval.params, execContext) || [],
+      context: execContext
     });
     const redactedPayload = redactPayload(approval.params || {});
     if (safetyDecision.decision === "deny") {

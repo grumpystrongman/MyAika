@@ -9,8 +9,10 @@ import {
   appendArtifact,
   setRunStatus,
   getRunRecord,
-  getRunDir
+  getRunDir,
+  updateRunRecord
 } from "./runStore.js";
+import { ingestActionRunToRag } from "../rag/scrapeIngest.js";
 
 const DEFAULT_REQUIRE_APPROVAL = ["purchase", "send", "delete", "auth", "download", "upload", "new_domain"];
 const DEFAULT_MAX_ACTIONS = 60;
@@ -48,6 +50,38 @@ function enforceRateLimit(workspaceId) {
     throw err;
   }
   lastRunByWorkspace.set(workspaceId, now);
+}
+
+async function indexRunExtracted(runId) {
+  const run = getRunRecord(runId);
+  if (!run) return null;
+  if (!Array.isArray(run.extracted) || run.extracted.length === 0) {
+    updateRunRecord(runId, record => ({
+      ...record,
+      rag: { status: "skipped", reason: "no_extracted", updatedAt: nowIso() }
+    }));
+    return getRunRecord(runId);
+  }
+  try {
+    const result = await ingestActionRunToRag(run);
+    const status = result?.ok ? "indexed" : (result?.skipped ? "skipped" : "error");
+    updateRunRecord(runId, record => ({
+      ...record,
+      rag: {
+        status,
+        reason: result?.reason || "",
+        meetingId: result?.meetingId || "",
+        collectionId: result?.collectionId || "",
+        updatedAt: nowIso()
+      }
+    }));
+  } catch (err) {
+    updateRunRecord(runId, record => ({
+      ...record,
+      rag: { status: "error", reason: err?.message || "rag_index_failed", updatedAt: nowIso() }
+    }));
+  }
+  return getRunRecord(runId);
 }
 
 export function extractDomainsFromPlan({ startUrl, actions } = {}) {
@@ -226,6 +260,7 @@ async function runSteps(runId, plan, context = {}) {
     }
 
     setRunStatus(runId, "completed", { finishedAt: nowIso() });
+    await indexRunExtracted(runId);
     await browser.close();
     return getRunRecord(runId);
   } catch (err) {

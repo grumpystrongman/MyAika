@@ -8,6 +8,12 @@ const STATUS_COLORS = {
   failed: "#b91c1c"
 };
 
+const RECORDING_CHUNK_MS = 5000;
+const UPLOAD_RETRY_ATTEMPTS = 3;
+const UPLOAD_RETRY_BASE_MS = 600;
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 function formatDuration(seconds) {
   if (!Number.isFinite(seconds)) return "--:--";
   const m = Math.floor(seconds / 60);
@@ -47,6 +53,7 @@ export default function MeetingCopilot({
   registerControls,
   onActivateTab,
   onRecordingStateChange,
+  onSelectedRecordingChange,
   visible = true,
   commandListening,
   onCommandListeningChange
@@ -102,6 +109,8 @@ export default function MeetingCopilot({
   const pendingUploadsRef = useRef([]);
   const totalBytesRef = useRef(0);
   const commandRecRef = useRef(null);
+  const uploadWarningRef = useRef(false);
+  const failedChunkCountRef = useRef(0);
 
   async function refreshRecordings() {
     try {
@@ -165,10 +174,18 @@ export default function MeetingCopilot({
   useEffect(() => {
     if (!registerControls) return;
     registerControls({
-      start: startRecording,
-      stop: stopRecording
+      start: (options) => startRecording(options),
+      stop: () => stopRecording(),
+      pause: () => pauseRecording(),
+      resume: () => resumeRecording()
     });
   }, [registerControls, recordingTitle, redactionEnabled]);
+
+  useEffect(() => {
+    if (!onSelectedRecordingChange) return;
+    const id = recordingId || selectedId || "";
+    onSelectedRecordingChange(id);
+  }, [onSelectedRecordingChange, recordingId, selectedId]);
 
   function cleanupAudio() {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
@@ -215,9 +232,37 @@ export default function MeetingCopilot({
     render();
   }
 
-  async function startRecording() {
+  async function uploadChunkWithRetry({ recordingId, seq, blob, ext }) {
+    const url = `${serverUrl}/api/recordings/${recordingId}/chunk?seq=${seq}`;
+    for (let attempt = 0; attempt < UPLOAD_RETRY_ATTEMPTS; attempt += 1) {
+      const form = new FormData();
+      form.append("chunk", blob, `chunk-${seq}.${ext}`);
+      try {
+        const resp = await fetch(url, { method: "POST", body: form });
+        if (resp.ok) return true;
+      } catch {
+        // swallow and retry
+      }
+      await sleep(UPLOAD_RETRY_BASE_MS * (attempt + 1));
+    }
+    failedChunkCountRef.current += 1;
+    if (!uploadWarningRef.current) {
+      uploadWarningRef.current = true;
+      setRecordingNotice("Recording... (network issues detected, retrying uploads)");
+    }
+    return false;
+  }
+
+  async function startRecording(options = {}) {
     try {
       if (recordingActive || recordingStarting) return;
+      const incomingTitle = typeof options.title === "string" ? options.title.trim() : "";
+      const effectiveTitle = incomingTitle || recordingTitle;
+      const effectiveRedaction = typeof options.redactionEnabled === "boolean" ? options.redactionEnabled : redactionEnabled;
+      if (incomingTitle && incomingTitle !== recordingTitle) setRecordingTitle(incomingTitle);
+      if (typeof options.redactionEnabled === "boolean" && options.redactionEnabled !== redactionEnabled) {
+        setRedactionEnabled(options.redactionEnabled);
+      }
       setRecordingStarting(true);
       setRecordingError("");
       setRecordingStopping(false);
@@ -226,16 +271,19 @@ export default function MeetingCopilot({
       const resp = await fetch(`${serverUrl}/api/recordings/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: recordingTitle, redactionEnabled })
+        body: JSON.stringify({ title: effectiveTitle, redactionEnabled: effectiveRedaction })
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "recording_start_failed");
       const id = data.recording.id;
       setRecordingId(id);
+      setSelectedId(id);
       chunkSeqRef.current = 0;
       finalChunksRef.current = [];
       totalBytesRef.current = 0;
       pendingUploadsRef.current = [];
+      uploadWarningRef.current = false;
+      failedChunkCountRef.current = 0;
       const unavailableReason = getRecorderUnavailableReason();
       if (unavailableReason) throw new Error(unavailableReason);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -257,6 +305,17 @@ export default function MeetingCopilot({
       finalMimeTypeRef.current = mimeType || "audio/webm";
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
+      recorder.onerror = () => {
+        setRecordingError("Recorder error.");
+        setRecordingNotice("Recorder error.");
+        cleanupAudio();
+        stopStream();
+        setRecordingActive(false);
+        setRecordingStarting(false);
+        setRecordingStopping(false);
+        setRecordingPaused(false);
+        if (onRecordingStateChange) onRecordingStateChange(false);
+      };
       recorder.ondataavailable = async (evt) => {
         if (!evt.data || evt.data.size === 0) return;
         totalBytesRef.current += evt.data.size;
@@ -267,13 +326,8 @@ export default function MeetingCopilot({
           finalChunksRef.current = [];
         }
         const seq = chunkSeqRef.current++;
-        const form = new FormData();
         const ext = finalMimeTypeRef.current.includes("ogg") ? "ogg" : "webm";
-        form.append("chunk", evt.data, `chunk-${seq}.${ext}`);
-        const upload = fetch(`${serverUrl}/api/recordings/${id}/chunk?seq=${seq}`, {
-          method: "POST",
-          body: form
-        }).catch(() => {});
+        const upload = uploadChunkWithRetry({ recordingId: id, seq, blob: evt.data, ext });
         pendingUploadsRef.current.push(upload);
         upload.finally(() => {
           pendingUploadsRef.current = pendingUploadsRef.current.filter(p => p !== upload);
@@ -299,7 +353,12 @@ export default function MeetingCopilot({
           await fetch(`${serverUrl}/api/recordings/${id}/stop`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ durationSec: elapsed })
+            body: JSON.stringify({
+              durationSec: elapsed,
+              expectedChunks: chunkSeqRef.current,
+              chunkMs: RECORDING_CHUNK_MS,
+              failedChunks: failedChunkCountRef.current
+            })
           }).catch(() => {});
         }
         cleanupAudio();
@@ -314,7 +373,7 @@ export default function MeetingCopilot({
         finalChunksRef.current = [];
         refreshRecordings();
       };
-      recorder.start(1000);
+      recorder.start(RECORDING_CHUNK_MS);
       setRecordingActive(true);
       setRecordingStarting(false);
       setRecordingStopping(false);
@@ -563,7 +622,7 @@ export default function MeetingCopilot({
                 else setCommandListeningInternal(v);
               }}
             />
-            Listening for voice commands (say “hey Aika, start recording”)
+            Listening for voice commands (say "hey Aika, start recording")
           </label>
           <div style={{ fontSize: 12, color: "#6b7280" }}>{commandStatus}</div>
         </div>
@@ -738,7 +797,7 @@ export default function MeetingCopilot({
                     Started: {selected.started_at ? new Date(selected.started_at).toLocaleString() : "unknown"}{" "}
                     | Ended: {selected.ended_at ? new Date(selected.ended_at).toLocaleString() : "unknown"}
                   </div>
-                  <div style={{ fontWeight: 600, marginTop: 10 }}>⚡ TL;DR / Executive Summary</div>
+                  <div style={{ fontWeight: 600, marginTop: 10 }}>TL;DR / Executive Summary</div>
                   <div style={{ fontSize: 13 }}>
                     {selected.summary_json?.tldr
                       || (selected.summary_json?.overview || []).slice(0, 2).join(" ")
@@ -756,7 +815,7 @@ export default function MeetingCopilot({
                   <ul>{(selected.summary_json?.overview || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
                   <div style={{ fontWeight: 600 }}>Risks</div>
                   <ul>{(selected.summary_json?.risks || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
-                  <div style={{ fontWeight: 600 }}>💡 Key Discussion Points/Insights</div>
+                  <div style={{ fontWeight: 600 }}>Key Discussion Points/Insights</div>
                   <ul>
                     {(selected.summary_json?.discussionPoints || []).map((item, i) => (
                       <li key={i}><b>{item.topic || "Discussion"}:</b> {item.summary}</li>
@@ -766,7 +825,7 @@ export default function MeetingCopilot({
                   <ul>{(selected.summary_json?.nextSteps || []).map((item, i) => <li key={i}>{item}</li>)}</ul>
                   {(selected.summary_json?.nextMeeting?.date || selected.summary_json?.nextMeeting?.goal) && (
                     <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-                      Next meeting: {selected.summary_json?.nextMeeting?.date || "TBD"} — {selected.summary_json?.nextMeeting?.goal || "TBD"}
+                      Next meeting: {selected.summary_json?.nextMeeting?.date || "TBD"} - {selected.summary_json?.nextMeeting?.goal || "TBD"}
                     </div>
                   )}
                   {selected.summary_json?.recommendations?.length > 0 && (
@@ -790,7 +849,7 @@ export default function MeetingCopilot({
                       {selected.transcript_json.segments.map((seg, idx) => (
                         <div key={idx} style={{ display: "grid", gridTemplateColumns: "70px 1fr", gap: 8 }}>
                           <div style={{ fontSize: 12, color: "#6b7280" }}>
-                            {formatStamp(seg.start)}–{formatStamp(seg.end)}
+                            {formatStamp(seg.start)}-{formatStamp(seg.end)}
                             <div style={{ fontWeight: 600 }}>{seg.speaker}</div>
                           </div>
                           <div>{seg.text}</div>

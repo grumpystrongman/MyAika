@@ -1,5 +1,6 @@
 import { executor, registry } from "../mcp/index.js";
 import { listApprovals, getApproval } from "../mcp/approvals.js";
+import { getActionRun } from "../src/agent/actionRunStore.js";
 import {
   crawlTradingRssSources,
   listTradingRssSourcesUi,
@@ -358,6 +359,17 @@ async function handleApprovals() {
   return `Pending approvals (${approvals.length}):\n${formatted}`;
 }
 
+function handleActionStatus(args) {
+  const id = args[0] || "";
+  if (!id) return "Usage: /action <id>";
+  const run = getActionRun(id);
+  if (!run) return "Action not found.";
+  const status = run.status || "unknown";
+  const attempts = run.attempts || 0;
+  const updated = run.updatedAt || "unknown";
+  return `Action ${id}: ${status}\nAttempts: ${attempts}\nUpdated: ${updated}`;
+}
+
 function handleResources() {
   const tools = registry.list().slice().sort((a, b) => a.name.localeCompare(b.name));
   const skills = getSkillsState();
@@ -426,7 +438,8 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
           "/knowledge list | /knowledge crawl [--force] | /knowledge add <url> | /knowledge remove <id>",
           "/macro list | /macro run <id>",
           "/approvals",
-          "/approve <approvalId> [token]"
+          "/approve <approvalId> [token]",
+          "/action <id>"
         ].join("\n")
       };
     }
@@ -478,6 +491,10 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
 
     if (["approvals"].includes(cmd)) {
       return { handled: true, response: await handleApprovals() };
+    }
+
+    if (["action", "run"].includes(cmd)) {
+      return { handled: true, response: handleActionStatus(args) };
     }
 
     if (["approve"].includes(cmd)) {

@@ -84,3 +84,26 @@ def lessons_query(payload: dict):
     limit = int(payload.get("limit") or 5)
     lessons = query_loss_lessons(question, limit=limit)
     return {"lessons": lessons}
+
+
+@router.post("/positions")
+def positions(payload: dict, db: Session = Depends(get_db)):
+    connector = _connector_from_payload(db, payload)
+    return {"positions": connector.get_positions()}
+
+
+@router.post("/account")
+def account(payload: dict, db: Session = Depends(get_db)):
+    connector = _connector_from_payload(db, payload)
+    return connector.get_account()
+
+
+@router.post("/cancel")
+def cancel(payload: dict, db: Session = Depends(get_db)):
+    order_id = payload.get("order_id")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id_required")
+    connector = _connector_from_payload(db, payload)
+    result = connector.cancel_order(order_id)
+    append_audit_event(db, "trade.cancel", "allow", {"order_id": order_id})
+    return result

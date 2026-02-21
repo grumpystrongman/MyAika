@@ -1,7 +1,7 @@
  "use client";
 import { useEffect, useRef, useState } from "react";
 import type { AvatarEngine, Mood } from "../avatar/AvatarEngine";
-import { PngAvatarEngine } from "../avatar/PngAvatarEngine";
+import { PngAvatarEngine, type PngAvatarSet } from "../avatar/PngAvatarEngine";
 
 type Props = {
   mood: Mood;
@@ -11,10 +11,35 @@ type Props = {
   className?: string;
   modelUrl?: string;
   fallbackPng?: string;
+  pngSet?: PngAvatarSet;
   backgroundSrc?: string;
 };
 
 const FALLBACK_PNG = "/assets/aika/live2d/placeholder.svg";
+
+function normalizeMood(value: Mood | string): Mood {
+  const key = String(value || "").toLowerCase();
+  switch (key) {
+    case "happy":
+      return "happy";
+    case "shy":
+      return "happy";
+    case "sad":
+      return "thinking";
+    case "sleepy":
+      return "thinking";
+    case "angry":
+      return "concerned";
+    case "concerned":
+      return "concerned";
+    case "surprised":
+      return "surprised";
+    case "thinking":
+      return "thinking";
+    default:
+      return "neutral";
+  }
+}
 
 export default function AikaAvatar({
   mood,
@@ -24,6 +49,7 @@ export default function AikaAvatar({
   className,
   modelUrl,
   fallbackPng,
+  pngSet,
   backgroundSrc
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -63,7 +89,7 @@ export default function AikaAvatar({
       }
 
       if (!pngRef.current) return;
-      const png = new PngAvatarEngine(pngRef.current, targetPng);
+      const png = new PngAvatarEngine(pngRef.current, targetPng, pngSet);
       await png.load(targetModel);
       engineRef.current = png;
       setEngineType("png");
@@ -75,12 +101,13 @@ export default function AikaAvatar({
       engineRef.current?.destroy();
       engineRef.current = null;
     };
-  }, [modelUrl, fallbackPng]);
+  }, [modelUrl, fallbackPng, pngSet]);
 
   useEffect(() => {
     const engine = engineRef.current;
+    const resolvedMood = normalizeMood(mood);
     if (engine) {
-      engine.setMood(mood);
+      engine.setMood(resolvedMood);
       engine.setTalking(isTalking, talkIntensity);
       engine.setListening(isListening);
       engine.setIdle(true);
@@ -89,7 +116,7 @@ export default function AikaAvatar({
     if (engineType === "live2d" && iframeRef.current?.contentWindow) {
       iframeRef.current.contentWindow.postMessage({
         type: "state",
-        mood,
+        mood: resolvedMood,
         isTalking,
         talkIntensity,
         isListening

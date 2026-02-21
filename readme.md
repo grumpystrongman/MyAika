@@ -596,4 +596,74 @@ Environment variables:
 - `SIGNALS_DEDUP_LOOKBACK_HOURS` (default 96)
 - `SIGNALS_MAX_RECENT_DEDUP` (default 1500)
 
+## Restaurant RAG Pipeline (Location-aware)
+Discovers restaurants via OpenStreetMap (Overpass), enriches from each official website, and ingests structured content into RAG.
+
+How to run locally:
+1) Ensure server deps are installed: `npm install`
+2) Run the pipeline: `npm run durham:sync`
+
+Optional CLI args:
+- `--limit 50` (cap restaurant count)
+- `--max-pages 12` (cap pages per restaurant)
+- `--collection durham-restaurants` (override RAG collection id)
+- `--overpass https://overpass-api.de/api/interpreter`
+- `--amenity restaurant` (repeat to add amenities: `cafe`, `fast_food`, `pub`)
+- `--location "Austin, TX"` (auto-geocode)
+- `--zip 27701` (auto-geocode by postal code)
+- `--city Durham --state NC`
+- `--lat 35.99 --lon -78.90 --radius-km 15` (use a radius-based bbox)
+- `--bbox 35.9,-79.1,36.1,-78.7` (explicit bbox: south,west,north,east)
+
+Environment variables:
+- `RESTAURANT_RAG_COLLECTION_ID` (optional override)
+- `RESTAURANT_DEFAULT_LOCATION` (fallback if no location args provided; otherwise uses stored “my city is …” memory or `DEFAULT_WEATHER_LOCATION`)
+- `RESTAURANT_RADIUS_KM` (default 15)
+- `RESTAURANT_MAX_RESTAURANTS` (default 120)
+- `RESTAURANT_MAX_PAGES` (default 20)
+- `RESTAURANT_CRAWL_CONCURRENCY` (default 6)
+- `RESTAURANT_CRAWL_PER_DOMAIN` (default 2)
+- `RESTAURANT_CRAWL_DELAY_MS` (default 800)
+- `RESTAURANT_USER_AGENT` (default `AikaDurham/1.0`)
+
+Scheduling:
+- Windows Task Scheduler: create a daily task that runs `npm run durham:sync` from the repo root.
+- macOS/Linux cron: add `npm run durham:sync` on your preferred interval.
+
+Example restaurant record:
+```json
+{
+  "restaurant_id": "durham_3a1f9c2d1e12a9b8",
+  "name": "Toro Pizzeria",
+  "address": "123 Main St, Durham, NC 27701",
+  "lat": 35.999,
+  "lon": -78.901,
+  "phone": "+19195550101",
+  "website": "https://toropizzeria.example/",
+  "cuisine_tags": ["Italian", "Pizza"],
+  "hours": ["Monday 11:00-22:00", "Tuesday 11:00-22:00"],
+  "price_hint": "$$",
+  "source_refs": [
+    "https://www.openstreetmap.org/node/123",
+    "https://toropizzeria.example/"
+  ]
+}
+```
+
+Example RAG chunk metadata:
+```json
+{
+  "restaurant_id": "durham_3a1f9c2d1e12a9b8",
+  "restaurant_name": "Toro Pizzeria",
+  "source_url": "https://toropizzeria.example/menu",
+  "doc_type": "menu",
+  "last_updated": "2026-02-21T18:12:10.000Z",
+  "city": "Durham",
+  "state": "NC",
+  "postal_code": "27701",
+  "location_label": "Durham, North Carolina, United States",
+  "crawl_run_id": "a2c6cfea-acde-4cd3-8f3c-2f1b1b9c5e9a"
+}
+```
+
 See `docs/QA_CHECKLIST.md` for validation steps.

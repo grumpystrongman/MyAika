@@ -1,11 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import OpenAI from "openai";
+import { responsesCreate, transcriptionsCreate } from "../src/llm/openaiClient.js";
 import { listRecordingChunks } from "../storage/recordings.js";
 import ffmpegPath from "ffmpeg-static";
 
-const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1";
 const SUMMARY_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const WORDS_PER_SECOND = Number(process.env.TRANSCRIPT_WPS || 2.5);
@@ -28,6 +27,31 @@ function runFfmpeg(args) {
   if (!exe) return false;
   const result = spawnSync(exe, args, { stdio: "ignore" });
   return result.status === 0;
+}
+
+function normalizeFfmpegPath(filePath, { asFileUrl = false } = {}) {
+  let normalized = String(filePath || "").replace(/\\/g, "/");
+  if (asFileUrl && /^[A-Za-z]:\//.test(normalized)) {
+    normalized = `file:${normalized}`;
+  }
+  return normalized;
+}
+
+function buildConcatList(entries, { useFileUrl = false } = {}) {
+  return entries
+    .map(chunk => {
+      const normalized = normalizeFfmpegPath(chunk.storagePath, { asFileUrl: useFileUrl });
+      return `file '${normalized.replace(/'/g, "'\\''")}'`;
+    })
+    .join("\n");
+}
+
+function isSuspiciousConcatOutput(sizeBytes, chunkCount) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return true;
+  if (chunkCount <= 3) return false;
+  if (sizeBytes < 64 * 1024) return true;
+  if (chunkCount > 60 && sizeBytes < 512 * 1024) return true;
+  return false;
 }
 
 function isSilentWav(audioPath) {
@@ -79,18 +103,18 @@ export function combineChunks(recordingId, recordingsDir) {
   if (!available.length) return null;
   const outputWav = path.join(recordingsDir, recordingId, "recording.wav");
   const listPath = path.join(recordingsDir, recordingId, "chunks.txt");
-  const listContent = available
-    .map(chunk => `file '${chunk.storagePath.replace(/'/g, "'\\''")}'`)
-    .join("\n");
-  fs.writeFileSync(listPath, listContent);
-  const ffmpegOk = runFfmpeg([
+  const plainListPath = path.join(recordingsDir, recordingId, "chunks_plain.txt");
+  fs.writeFileSync(listPath, buildConcatList(available, { useFileUrl: true }));
+  fs.writeFileSync(plainListPath, buildConcatList(available, { useFileUrl: false }));
+
+  const concatToWav = (listFilePath) => runFfmpeg([
     "-y",
     "-f",
     "concat",
     "-safe",
     "0",
     "-i",
-    listPath,
+    normalizeFfmpegPath(listFilePath),
     "-ac",
     "1",
     "-ar",
@@ -99,18 +123,55 @@ export function combineChunks(recordingId, recordingsDir) {
     "pcm_s16le",
     outputWav
   ]);
+
+  let ffmpegOk = concatToWav(listPath);
+  if ((!ffmpegOk || !fs.existsSync(outputWav)) && fs.existsSync(plainListPath)) {
+    ffmpegOk = concatToWav(plainListPath);
+  }
   if (ffmpegOk && fs.existsSync(outputWav)) {
-    return outputWav;
+    const outSize = fs.statSync(outputWav).size;
+    if (!isSuspiciousConcatOutput(outSize, available.length)) {
+      return outputWav;
+    }
   }
 
-  const buffers = [];
-  for (const chunk of available) {
-    buffers.push(fs.readFileSync(chunk.storagePath));
+  const outputWebm = path.join(recordingsDir, recordingId, "recording.webm");
+  const concatToWebm = (listFilePath) => runFfmpeg([
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    normalizeFfmpegPath(listFilePath),
+    "-c",
+    "copy",
+    "-fflags",
+    "+genpts",
+    outputWebm
+  ]);
+  let webmOk = concatToWebm(listPath);
+  if ((!webmOk || !fs.existsSync(outputWebm)) && fs.existsSync(plainListPath)) {
+    webmOk = concatToWebm(plainListPath);
   }
-  if (!buffers.length) return null;
+  if (webmOk && fs.existsSync(outputWebm)) {
+    const outSize = fs.statSync(outputWebm).size;
+    if (!isSuspiciousConcatOutput(outSize, available.length)) {
+      return outputWebm;
+    }
+  }
+
   const outputPath = path.join(recordingsDir, recordingId, "recording.webm");
-  fs.writeFileSync(outputPath, Buffer.concat(buffers));
-  return outputPath;
+  try {
+    fs.writeFileSync(outputPath, "");
+    for (const chunk of available) {
+      const data = fs.readFileSync(chunk.storagePath);
+      if (data?.length) fs.appendFileSync(outputPath, data);
+    }
+    return outputPath;
+  } catch {
+    return null;
+  }
 }
 
 export function splitAudioForTranscription(audioPath, segmentDir, segmentSeconds) {
@@ -170,7 +231,7 @@ function buildSegmentsFromText(text) {
 }
 
 async function labelSpeakersWithLLM(text) {
-  if (!client) return null;
+  if (!process.env.OPENAI_API_KEY) return null;
   const prompt = `You are a transcription assistant. Split the transcript into an array of JSON objects with keys:
 speaker (string, e.g. "Speaker 1" or inferred name if obvious),
 text (string).
@@ -179,7 +240,7 @@ Return ONLY valid JSON array, no code fences.
 Transcript:
 ${text}`;
   try {
-    const response = await client.responses.create({
+    const response = await responsesCreate({
       model: SUMMARY_MODEL,
       input: prompt,
       max_output_tokens: 600
@@ -239,7 +300,7 @@ export async function transcribeAudio(audioPath) {
       segments: []
     };
   }
-  if (!client) {
+  if (!process.env.OPENAI_API_KEY) {
     return {
       text: "",
       language: "en",
@@ -252,7 +313,7 @@ export async function transcribeAudio(audioPath) {
     const file = fs.createReadStream(audioPath);
     let result;
     try {
-      result = await client.audio.transcriptions.create({
+      result = await transcriptionsCreate({
         file,
         model: TRANSCRIBE_MODEL,
         language: STT_FORCE_LANGUAGE,
@@ -266,7 +327,7 @@ export async function transcribeAudio(audioPath) {
       const msg = String(primaryErr?.message || "").toLowerCase();
       if (!msg.includes("timestamp") && !msg.includes("response_format")) throw primaryErr;
       const fallbackFile = fs.createReadStream(audioPath);
-      result = await client.audio.transcriptions.create({
+      result = await transcriptionsCreate({
         file: fallbackFile,
         model: TRANSCRIBE_MODEL,
         language: STT_FORCE_LANGUAGE,
@@ -356,7 +417,7 @@ function heuristicSummary(transcript) {
 }
 
 export async function summarizeTranscript(transcript, title) {
-  if (!client) {
+  if (!process.env.OPENAI_API_KEY) {
     const data = heuristicSummary(transcript);
     return toSummaryPayload(data, title);
   }
@@ -372,10 +433,10 @@ Keep outputs concise and grounded in the transcript. Use empty strings when unkn
 Return ONLY valid JSON. Do not include code fences.
 
 Title: ${title}
-Transcript:
+  Transcript:
 ${transcript}`;
   try {
-    const response = await client.responses.create({
+    const response = await responsesCreate({
       model: SUMMARY_MODEL,
       input: prompt,
       max_output_tokens: 800

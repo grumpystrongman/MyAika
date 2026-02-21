@@ -1,6 +1,6 @@
 # MyAika User Guide
 
-Last updated: February 17, 2026
+Last updated: February 21, 2026
 
 ## Purpose
 This guide is a complete, tab-by-tab walkthrough of MyAika. It explains what each feature does, why you would use it, and how to use it safely and effectively. It also includes step-by-step scenarios for the trading stack.
@@ -18,7 +18,6 @@ If you are on iPad/Safari, microphone access requires HTTPS. Use `npm run dev:ip
 ## Navigation Map (Top Tabs)
 - `Chat`: Conversational UI, voice control, and general assistant use.
 - `Recordings`: Meeting Copilot for recording, transcription, and meeting notes.
-- `Aika Tools`: Structured tools for notes, todos, calendar, email, memory, and messaging.
 - `Tools`: MCP-lite tool browser, direct tool execution, approvals, and history.
 - `Action Runner`: Headless browser automation with approval gates and artifacts.
 - `Teach Mode`: Record and run reusable browser macros.
@@ -27,7 +26,7 @@ If you are on iPad/Safari, microphone access requires HTTPS. Use `npm run dev:ip
 - `Safety`: Autonomy controls, approval rules, kill switch, and audit log.
 - `Canvas`: Live cards that Aika updates from server events.
 - `Features`: MCP discovery and Connections portal.
-- `Settings`: Integrations, Skills, Trading preferences, Appearance, and Voice controls.
+- `Settings`: Integrations, Skills, Trading preferences, Appearance, Voice controls, plus `Legacy` (Aika Tools workbench).
 - `Debug`: System health, voice pipeline checks, and logs.
 - `Guide`: This user guide in-app.
 
@@ -95,11 +94,11 @@ Local meeting recording, transcription, and structured meeting notes with action
 5. Review `Summary`, `Tasks`, and `Decisions`.
 6. Use `Actions` to create follow-ups.
 
-## Aika Tools Tab (Aika Tools Workbench)
+## Legacy Tools (Settings -> Legacy)
 ![Aika Tools tab](user-guide/screenshots/tools_workbench.png)
 
 ### What it is
-A structured set of tools for daily operations and personal productivity.
+The legacy Aika Tools workbench, now located under `Settings -> Legacy`. It is kept for reference and likely unused in the beta release.
 
 ### Tool groups and when to use them
 - `Meeting Summaries`: Turn raw transcripts into structured summaries and store them.
@@ -113,10 +112,11 @@ A structured set of tools for daily operations and personal productivity.
 - `Messaging`: Send notifications to Slack/Discord/Telegram.
 
 ### How to use
-1. Choose a tool tab (for example `Notes`).
-2. Fill in the form fields.
-3. Click the action button (for example `Create Note`).
-4. Review the response for success or errors.
+1. Open `Settings -> Legacy`.
+2. Choose a tool tab (for example `Notes`).
+3. Fill in the form fields.
+4. Click the action button (for example `Create Note`).
+5. Review the response for success or errors.
 
 ## Tools Tab (MCP-lite Tools)
 ![Tools tab](user-guide/screenshots/tools_mcp.png)
@@ -374,6 +374,15 @@ Key functions
 - Webhooks and scenes for automation.
 - Meeting recorder tools.
 
+### Knowledge
+
+Key functions
+- Set the default RAG model for chat + Telegram.
+- Refresh the available models list.
+- Export model metadata (JSON).
+- Download a full RAG backup (SQLite + HNSW).
+- Import model definitions + knowledge sources.
+
 ### Trading
 ![Settings trading](user-guide/screenshots/settings_trading.png)
 
@@ -396,6 +405,9 @@ Key functions
 Key functions
 - Open the voice settings panel.
 - Adjust `Send after silence` threshold.
+
+### Legacy
+The legacy Aika Tools workbench now lives under `Settings -> Legacy`. It is kept for reference and likely unused in the beta release.
 
 ## Debug Tab
 ![Debug tab](user-guide/screenshots/debug.png)

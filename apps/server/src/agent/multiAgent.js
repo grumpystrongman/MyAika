@@ -1,4 +1,5 @@
 import { routeModel } from "./modelRouter.js";
+import { responsesCreate } from "../llm/openaiClient.js";
 
 function extractJson(text) {
   if (!text) return null;
@@ -130,10 +131,7 @@ function criticSystemFor(mode) {
 async function callModel({ purpose, preferLocal, requireCloud, input }) {
   const route = routeModel({ purpose, preferLocal, requireCloud });
   if (!route.client) return { error: "model_unavailable", route };
-  const response = await route.client.responses.create({
-    model: route.model,
-    input
-  });
+  const response = await responsesCreate({ model: route.model, input });
   return { text: response?.output_text || "", route };
 }
 

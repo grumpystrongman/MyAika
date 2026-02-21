@@ -1,8 +1,9 @@
 ﻿import { createPairingRequest, isSenderAllowed, recordPairingUse } from "../storage/pairings.js";
 import { tryHandleRemoteCommand } from "./remoteCommands.js";
 import { ensureActiveThread } from "../storage/threads.js";
+import { getAssistantProfile } from "../storage/assistant_profile.js";
 
-async function callLocalChat({ userText, threadId, ragModel, channel, senderId, senderName } = {}) {
+async function callLocalChat({ userText, threadId, ragModel, channel, senderId, senderName, chatId } = {}) {
   const port = process.env.PORT || 8790;
   const base = `http://127.0.0.1:${port}`;
   const resp = await fetch(`${base}/chat`, {
@@ -14,7 +15,8 @@ async function callLocalChat({ userText, threadId, ragModel, channel, senderId, 
       ragModel,
       channel,
       senderId,
-      senderName
+      senderName,
+      chatId
     })
   });
   if (!resp.ok) {
@@ -49,20 +51,24 @@ export async function handleInboundMessage({ channel, senderId, senderName, text
     }
     return { status: "ok", response: commandResult.response || "", command: true };
   }
+  const profile = getAssistantProfile("local");
+  const defaultRag = profile?.preferences?.rag?.defaultModel || "auto";
   const thread = ensureActiveThread({
     channel,
     senderId,
     chatId,
     senderName,
-    workspaceId
+    workspaceId,
+    ragModel: defaultRag
   });
   const response = await callLocalChat({
     userText: text,
     threadId: thread?.id || null,
-    ragModel: thread?.rag_model || "auto",
+    ragModel: thread?.rag_model || defaultRag,
     channel,
     senderId,
-    senderName
+    senderName,
+    chatId
   });
   if (response?.text && typeof reply === "function") {
     await reply(response.text, { kind: "chat" });

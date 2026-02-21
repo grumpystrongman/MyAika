@@ -1,4 +1,4 @@
-import { getEmailDraft, updateEmailDraftStatus } from "../../storage/email.js";
+import { createEmailDraft, getEmailDraft, updateEmailDraftStatus } from "../../storage/email.js";
 import { writeOutbox } from "../../storage/outbox.js";
 import {
   buildDraftReply,
@@ -18,26 +18,80 @@ export function draftReply({ originalEmail, tone = "friendly", context = "", sig
   });
 }
 
-export function sendEmail({ draftId, sendTo = null, cc = [], bcc = [] }, contextData = {}) {
-  const draft = getEmailDraft(draftId, contextData.userId || "local");
-  if (!draft) {
-    const err = new Error("draft_not_found");
-    err.status = 404;
-    throw err;
+export function sendEmail({ draftId, sendTo = null, to = null, subject = "", body = "", cc = [], bcc = [] }, contextData = {}) {
+  const userId = contextData.userId || "local";
+  const resolvedTo = sendTo || to || [];
+  const normalizedTo = normalizeRecipients(resolvedTo);
+  const normalizedCc = normalizeRecipients(cc);
+  const normalizedBcc = normalizeRecipients(bcc);
+  let draft = null;
+  let resolvedDraftId = draftId;
+  let draftSubject = "";
+  let draftBody = "";
+  let draftRecipients = [];
+
+  if (resolvedDraftId) {
+    draft = getEmailDraft(resolvedDraftId, userId);
+    if (!draft) {
+      const err = new Error("draft_not_found");
+      err.status = 404;
+      throw err;
+    }
+    draftSubject = String(draft.draft_subject || "");
+    draftBody = String(draft.draft_body || "");
+    try {
+      draftRecipients = JSON.parse(draft.to_json || "[]");
+    } catch {
+      draftRecipients = [];
+    }
+  } else {
+    const subjectLine = String(subject || "Aika message").trim() || "Aika message";
+    const bodyText = String(body || "").trim();
+    if (!bodyText) {
+      const err = new Error("email_body_required");
+      err.status = 400;
+      throw err;
+    }
+    if (!normalizedTo.length) {
+      const err = new Error("email_to_required");
+      err.status = 400;
+      throw err;
+    }
+    const created = createEmailDraft({
+      originalFrom: "",
+      originalSubject: "",
+      draftSubject: subjectLine,
+      draftBody: bodyText,
+      to: normalizedTo,
+      cc: normalizedCc,
+      bcc: normalizedBcc,
+      userId
+    });
+    resolvedDraftId = created.id;
+    draftSubject = subjectLine;
+    draftBody = bodyText;
+    draftRecipients = normalizedTo;
   }
-  updateEmailDraftStatus(draftId, "sent");
+
+  updateEmailDraftStatus(resolvedDraftId, "sent");
   const payload = {
     type: "email",
-    draftId,
-    to: sendTo || JSON.parse(draft.to_json || "[]"),
-    cc,
-    bcc,
-    subject: draft.draft_subject,
-    body: draft.draft_body,
+    draftId: resolvedDraftId,
+    to: normalizedTo.length ? normalizedTo : draftRecipients,
+    cc: normalizedCc,
+    bcc: normalizedBcc,
+    subject: draftSubject,
+    body: draftBody,
     transport: "stub"
   };
   const outbox = writeOutbox(payload);
-  return { status: "sent", transport: "stub", outboxId: outbox.id };
+  return {
+    status: "sent",
+    transport: "stub",
+    outboxId: outbox.id,
+    to: payload.to,
+    subject: payload.subject
+  };
 }
 
 export async function convertEmailToTodo(params = {}, contextData = {}) {

@@ -1,15 +1,7 @@
-﻿import OpenAI from "openai";
 import { planWithAgents } from "../agent/multiAgent.js";
+import { responsesCreate } from "../llm/openaiClient.js";
 
-let openaiClient = null;
-
-function getClient() {
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  if (!apiKey) return null;
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
-
+// OpenAI client handled by shared wrapper.
 function extractJson(text) {
   if (!text) return null;
   const first = text.indexOf("{");
@@ -37,8 +29,7 @@ export async function planAction({ instruction, startUrl } = {}) {
     }
   }
 
-  const client = getClient();
-  if (!client) {
+  if (!process.env.OPENAI_API_KEY) {
     return {
       plan: {
         taskName: cleanInstruction.slice(0, 80) || "Action Plan",
@@ -54,8 +45,8 @@ export async function planAction({ instruction, startUrl } = {}) {
 
   const user = `Instruction: ${cleanInstruction}\nStart URL (if any): ${startUrl || ""}`;
 
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const response = await client.responses.create({
+  const model = process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const response = await responsesCreate({
     model,
     input: [
       { role: "system", content: [{ type: "input_text", text: system }] },
@@ -88,3 +79,5 @@ export async function planAction({ instruction, startUrl } = {}) {
     explanation: "Plan generated from instruction."
   };
 }
+
+

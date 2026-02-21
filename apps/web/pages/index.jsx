@@ -216,7 +216,6 @@ const AVATAR_BACKGROUNDS = [
 const VALID_TABS = new Set([
   "chat",
   "recordings",
-  "workbench",
   "tools",
   "actionRunner",
   "teachMode",
@@ -227,11 +226,12 @@ const VALID_TABS = new Set([
   "features",
   "settings",
   "debug",
-  "guide"
+  "guide",
+  "capabilities"
 ]);
 
-const VALID_SETTINGS_TABS = new Set(["integrations", "skills", "trading", "appearance", "voice"]);
-const VALID_FEATURES_VIEWS = new Set(["mcp", "connections"]);
+const VALID_SETTINGS_TABS = new Set(["connections", "knowledge", "skills", "trading", "appearance", "voice", "legacy"]);
+const VALID_FEATURES_VIEWS = new Set(["mcp"]);
 
 function pickThinkingCue() {
   return THINKING_CUES[Math.floor(Math.random() * THINKING_CUES.length)];
@@ -341,6 +341,20 @@ function stripEmotionTags(text) {
   return cleaned.replace(/\s+/g, " ").trim();
 }
 
+function formatActionLabel(actionType = "") {
+  return String(actionType || "").replace(/[._]/g, " ").trim() || "action";
+}
+
+function formatActionStatus(status = "") {
+  const value = String(status || "").toLowerCase();
+  if (!value) return "pending";
+  if (value === "ok") return "done";
+  if (value === "error") return "failed";
+  if (value === "client_required") return "waiting on device";
+  if (value === "approval_required") return "needs approval";
+  return value.replace(/_/g, " ");
+}
+
 async function unlockAudio() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx) return false;
@@ -396,6 +410,23 @@ function buildGreeting(user) {
   return `Hello ${name}, Aika is here to serve. How may I assist you today?`;
 }
 
+function readLegacyPreferences() {
+  if (typeof window === "undefined") return {};
+  try {
+    return {
+      theme: window.localStorage.getItem("aika_theme") || "",
+      appBackground: window.localStorage.getItem("aika_app_bg") || "",
+      avatarBackground: window.localStorage.getItem("aika_avatar_bg") || "",
+      avatarModelId: window.localStorage.getItem("aika_avatar_model") || "",
+      meetingCommands: window.localStorage.getItem("aika_meeting_commands") || "",
+      sttSilenceMs: Number(window.localStorage.getItem("aika_stt_silence_ms") || "1400"),
+      ragModel: window.localStorage.getItem("aika_default_rag_model") || window.localStorage.getItem("aika_active_rag_model") || ""
+    };
+  } catch {
+    return {};
+  }
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState("chat");
   const [killSwitchActive, setKillSwitchActive] = useState(false);
@@ -446,8 +477,8 @@ export default function Home() {
   const [toolCallName, setToolCallName] = useState("");
   const [toolCallParams, setToolCallParams] = useState("{}");
   const [toolCallResult, setToolCallResult] = useState("");
-  const [approvals, setApprovals] = useState([]);
-  const [approvalsError, setApprovalsError] = useState("");
+  const [toolApproval, setToolApproval] = useState(null);
+  const [toolApprovalStatus, setToolApprovalStatus] = useState("");
   const [toolHistory, setToolHistory] = useState([]);
   const [toolHistoryError, setToolHistoryError] = useState("");
   const [featuresServices, setFeaturesServices] = useState([]);
@@ -474,7 +505,32 @@ export default function Home() {
   const [productResearchNotice, setProductResearchNotice] = useState("");
   const [cartBusyAsin, setCartBusyAsin] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
+  const [workEmail, setWorkEmail] = useState("");
+  const [personalEmail, setPersonalEmail] = useState("");
   const [authChecked, setAuthChecked] = useState(false);
+  const [assistantProfile, setAssistantProfile] = useState(null);
+  const [assistantProfileError, setAssistantProfileError] = useState("");
+  const [assistantProfileLoaded, setAssistantProfileLoaded] = useState(false);
+  const [defaultRagModel, setDefaultRagModel] = useState("auto");
+  const [ragModels, setRagModels] = useState([]);
+  const [ragModelsError, setRagModelsError] = useState("");
+  const [ragModelsLoading, setRagModelsLoading] = useState(false);
+  const [ragExportStatus, setRagExportStatus] = useState("");
+  const [ragExportError, setRagExportError] = useState("");
+  const [ragExportBusy, setRagExportBusy] = useState(false);
+  const [ragBackupStatus, setRagBackupStatus] = useState("");
+  const [ragBackupError, setRagBackupError] = useState("");
+  const [ragBackupBusy, setRagBackupBusy] = useState(false);
+  const [ragImportStatus, setRagImportStatus] = useState("");
+  const [ragImportError, setRagImportError] = useState("");
+  const [ragImportBusy, setRagImportBusy] = useState(false);
+  const [tradingEngineSettings, setTradingEngineSettings] = useState({
+    tradeApiUrl: "http://localhost:8088",
+    alpacaFeed: "iex"
+  });
+  const profileSaveTimerRef = useRef(null);
+  const ragImportInputRef = useRef(null);
+  const lastSavedPrefsRef = useRef("");
   const meetingCopilotRef = useRef({ start: null, stop: null });
   const meetingRecRef = useRef(null);
   const [meetingRecording, setMeetingRecording] = useState(false);
@@ -504,12 +560,17 @@ export default function Home() {
   const [fastReplies, setFastReplies] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState("integrations");
+  const [settingsTab, setSettingsTab] = useState("connections");
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
-    if (tab && VALID_TABS.has(tab)) setActiveTab(tab);
+    if (tab === "workbench") {
+      setActiveTab("settings");
+      setSettingsTab("legacy");
+    } else if (tab && VALID_TABS.has(tab)) {
+      setActiveTab(tab);
+    }
     const settings = params.get("settingsTab");
     if (settings && VALID_SETTINGS_TABS.has(settings)) setSettingsTab(settings);
     const features = params.get("featuresView");
@@ -519,6 +580,7 @@ export default function Home() {
   const [appBackground, setAppBackground] = useState("");
   const [avatarBackground, setAvatarBackground] = useState("none");
   const [meetingCommandListening, setMeetingCommandListening] = useState(false);
+  const [activeRecordingId, setActiveRecordingId] = useState("");
   const [sttSilenceMs, setSttSilenceMs] = useState(1400);
   const [ttsEngineOnline, setTtsEngineOnline] = useState(null);
   const [voicePromptText, setVoicePromptText] = useState("");
@@ -541,6 +603,7 @@ export default function Home() {
   });
   const [meetingLock, setMeetingLock] = useState(false);
   const previousChatState = useRef(null);
+  const logRef = useRef(log);
 
   function registerMeetingCopilotControls(controls) {
     meetingCopilotRef.current = controls || {};
@@ -551,19 +614,216 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const savedTheme = window.localStorage.getItem("aika_theme");
-    const savedBg = window.localStorage.getItem("aika_app_bg") || "";
-    const savedAvatarBg = window.localStorage.getItem("aika_avatar_bg") || "none";
-    const savedMeetingCommands = window.localStorage.getItem("aika_meeting_commands") || "";
-    const savedSilenceMs = Number(window.localStorage.getItem("aika_stt_silence_ms") || "1400");
-    if (savedTheme) setThemeId(savedTheme);
-    if (savedBg) setAppBackground(savedBg);
-    if (savedAvatarBg) setAvatarBackground(savedAvatarBg);
-    if (savedMeetingCommands) setMeetingCommandListening(savedMeetingCommands === "true");
-    if (Number.isFinite(savedSilenceMs)) {
-      setSttSilenceMs(Math.max(800, Math.min(3000, savedSilenceMs)));
+    logRef.current = log;
+  }, [log]);
+
+  function buildPreferencePayload(overrides = {}) {
+    const base = assistantProfile?.preferences || {};
+    const voiceSettings = {
+      ...ttsSettings,
+      voice: {
+        ...(ttsSettings.voice || {}),
+        prompt_text: voicePromptText || ttsSettings.voice?.prompt_text || ""
+      }
+    };
+    return {
+      ...base,
+      ...overrides,
+      appearance: {
+        ...(base.appearance || {}),
+        theme: themeId,
+        appBackground,
+        avatarBackground,
+        avatarModelId
+      },
+      audio: {
+        ...(base.audio || {}),
+        sttSilenceMs,
+        meetingCommandListening
+      },
+      voice: {
+        ...(base.voice || {}),
+        promptText: voicePromptText || "",
+        settings: voiceSettings
+      },
+      identity: {
+        ...(base.identity || {}),
+        workEmail,
+        personalEmail
+      },
+      rag: {
+        ...(base.rag || {}),
+        defaultModel: defaultRagModel || "auto"
+      }
+    };
+  }
+
+  async function persistPreferences(nextPrefs) {
+    if (!SERVER_URL) return;
+    try {
+      const resp = await fetch(`${SERVER_URL}/api/assistant/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ preferences: nextPrefs })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "profile_update_failed");
+      if (data?.profile) {
+        setAssistantProfile(data.profile);
+        lastSavedPrefsRef.current = JSON.stringify(data.profile.preferences || {});
+      }
+      setAssistantProfileError("");
+    } catch (err) {
+      setAssistantProfileError(err?.message || "profile_update_failed");
     }
+  }
+
+  function schedulePreferenceSave(nextPrefs) {
+    if (!assistantProfileLoaded) return;
+    const payload = JSON.stringify(nextPrefs || {});
+    if (payload === lastSavedPrefsRef.current) return;
+    if (profileSaveTimerRef.current) clearTimeout(profileSaveTimerRef.current);
+    profileSaveTimerRef.current = setTimeout(() => {
+      persistPreferences(nextPrefs);
+    }, 500);
+  }
+
+  useEffect(() => {
+    if (!authChecked) return;
+    let mounted = true;
+    async function loadProfile() {
+      try {
+        const resp = await fetch(`${SERVER_URL}/api/assistant/profile`, { credentials: "include" });
+        const data = await resp.json();
+        if (!mounted) return;
+        const profile = data?.profile || null;
+        if (!profile) {
+          setAssistantProfileLoaded(true);
+          return;
+        }
+        let prefs = profile.preferences || {};
+        const shouldMigrate = !profile.createdAt;
+        if (shouldMigrate) {
+          const legacy = readLegacyPreferences();
+          const nextAppearance = {
+            ...(prefs.appearance || {}),
+            ...(legacy.theme ? { theme: legacy.theme } : {}),
+            ...(legacy.appBackground ? { appBackground: legacy.appBackground } : {}),
+            ...(legacy.avatarBackground ? { avatarBackground: legacy.avatarBackground } : {}),
+            ...(legacy.avatarModelId ? { avatarModelId: legacy.avatarModelId } : {})
+          };
+          const nextAudio = {
+            ...(prefs.audio || {}),
+            ...(legacy.meetingCommands ? { meetingCommandListening: legacy.meetingCommands === "true" } : {}),
+            ...(Number.isFinite(legacy.sttSilenceMs) ? { sttSilenceMs: legacy.sttSilenceMs } : {})
+          };
+          const nextRag = {
+            ...(prefs.rag || {}),
+            ...(legacy.ragModel ? { defaultModel: legacy.ragModel, tradingModel: legacy.ragModel } : {})
+          };
+          prefs = {
+            ...prefs,
+            appearance: nextAppearance,
+            audio: nextAudio,
+            rag: nextRag
+          };
+        }
+
+        setAssistantProfile({ ...profile, preferences: prefs });
+        setAssistantProfileError("");
+        setThemeId(prefs.appearance?.theme || "aurora");
+        setAppBackground(prefs.appearance?.appBackground || "");
+        setAvatarBackground(prefs.appearance?.avatarBackground || "none");
+        if (prefs.appearance?.avatarModelId) {
+          setAvatarModelId(prefs.appearance.avatarModelId);
+        }
+        setMeetingCommandListening(Boolean(prefs.audio?.meetingCommandListening));
+        const silenceMs = Number(prefs.audio?.sttSilenceMs || 1400);
+        if (Number.isFinite(silenceMs)) {
+          setSttSilenceMs(Math.max(800, Math.min(3000, silenceMs)));
+        }
+        if (prefs.voice?.settings) {
+          setTtsSettings(prev => ({
+            ...prev,
+            ...prefs.voice.settings,
+            voice: { ...prev.voice, ...(prefs.voice.settings.voice || {}) }
+          }));
+        }
+        const prompt = prefs.voice?.promptText || prefs.voice?.settings?.voice?.prompt_text || "";
+        if (prompt) {
+          setVoicePromptText(prompt);
+          setTtsSettings(prev => ({
+            ...prev,
+            voice: { ...prev.voice, prompt_text: prompt }
+          }));
+        }
+        setDefaultRagModel(prefs.rag?.defaultModel || "auto");
+        setWorkEmail(prefs.identity?.workEmail || "");
+        setPersonalEmail(prefs.identity?.personalEmail || "");
+        lastSavedPrefsRef.current = JSON.stringify(prefs || {});
+        setAssistantProfileLoaded(true);
+        if (shouldMigrate) {
+          persistPreferences(prefs);
+        }
+      } catch (err) {
+        if (!mounted) return;
+        setAssistantProfileError(err?.message || "profile_load_failed");
+        setAssistantProfileLoaded(true);
+      }
+    }
+    loadProfile();
+    return () => {
+      mounted = false;
+    };
+  }, [authChecked]);
+
+  useEffect(() => {
+    if (!assistantProfileLoaded) return;
+    const prefs = buildPreferencePayload();
+    schedulePreferenceSave(prefs);
+  }, [
+    assistantProfileLoaded,
+    themeId,
+    appBackground,
+    avatarBackground,
+    avatarModelId,
+    meetingCommandListening,
+    sttSilenceMs,
+    ttsSettings,
+    voicePromptText,
+    defaultRagModel,
+    workEmail,
+    personalEmail
+  ]);
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const current = logRef.current || [];
+      const pending = current.filter(item => item.actionMeta?.idempotencyKey && ["running", "client_required", "approval_required"].includes(item.actionMeta.status));
+      if (!pending.length) return;
+      const ids = [...new Set(pending.map(item => item.actionMeta.idempotencyKey))];
+      const updates = await Promise.all(ids.map(async (id) => {
+        try {
+          const resp = await fetch(`${SERVER_URL}/api/actions/runs/${id}`);
+          if (!resp.ok) return { id, run: null };
+          const data = await resp.json();
+          return { id, run: data.run || null };
+        } catch {
+          return { id, run: null };
+        }
+      }));
+      const statusMap = new Map(updates.filter(item => item.run).map(item => [item.id, item.run]));
+      if (!statusMap.size) return;
+      setLog(prev => prev.map(item => {
+        const id = item.actionMeta?.idempotencyKey;
+        if (!id || !statusMap.has(id)) return item;
+        const run = statusMap.get(id);
+        const nextStatus = run?.status || item.actionMeta.status;
+        return { ...item, actionMeta: { ...item.actionMeta, status: nextStatus } };
+      }));
+    }, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -589,7 +849,11 @@ export default function Home() {
       window.localStorage.removeItem("aika_app_bg");
     }
     window.localStorage.setItem("aika_avatar_bg", avatarBackground);
-  }, [themeId, appBackground, avatarBackground]);
+    if (avatarModelId) window.localStorage.setItem("aika_avatar_model", avatarModelId);
+    if (defaultRagModel) {
+      window.localStorage.setItem("aika_default_rag_model", defaultRagModel);
+    }
+  }, [themeId, appBackground, avatarBackground, avatarModelId, defaultRagModel]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -600,12 +864,6 @@ export default function Home() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("aika_stt_silence_ms", String(sttSilenceMs));
   }, [sttSilenceMs]);
-
-  useEffect(() => {
-    if (activeTab === "settings" && settingsTab === "voice") {
-      setShowSettings(true);
-    }
-  }, [activeTab, settingsTab]);
 
   useEffect(() => {
     const shouldMute = activeTab === "recordings" || meetingLock;
@@ -688,17 +946,22 @@ export default function Home() {
 
     setChatError("");
     let r;
-    let ragModel = "";
+    const ragModel = defaultRagModel || "auto";
     try {
-      ragModel = localStorage.getItem("aika_active_rag_model") || "";
-    } catch {
-      ragModel = "";
-    }
-    try {
+      const senderId = currentUser?.email || "local";
+      const senderName = currentUser?.name || currentUser?.email || "local";
       r = await fetch(`${SERVER_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userText: text, maxOutputTokens: fastReplies ? 200 : 320, ragModel })
+        body: JSON.stringify({
+          userText: text,
+          maxOutputTokens: fastReplies ? 200 : 320,
+          ragModel,
+          channel: "web",
+          senderId,
+          senderName,
+          recordingId: activeRecordingId || undefined
+        })
       });
     } catch (err) {
       setChatError("chat_unreachable");
@@ -722,10 +985,23 @@ export default function Home() {
       setProductResearchNotice("");
     }
     if (data?.ragModel) {
+      setDefaultRagModel(data.ragModel);
+    }
+    const action = data?.action;
+    if (action?.type?.startsWith("record_meeting") && action?.status === "client_required") {
+      const controls = meetingCopilotRef.current || {};
       try {
-        localStorage.setItem("aika_active_rag_model", data.ragModel);
-      } catch {
-        // ignore
+        if (action.type === "record_meeting.start") {
+          await controls.start?.(action.params || {});
+        } else if (action.type === "record_meeting.stop") {
+          await controls.stop?.();
+        } else if (action.type === "record_meeting.pause") {
+          await controls.pause?.();
+        } else if (action.type === "record_meeting.resume") {
+          await controls.resume?.();
+        }
+      } catch (err) {
+        setChatError(err?.message || "recording_action_failed");
       }
     }
     const reply = data.text || "";
@@ -738,10 +1014,11 @@ export default function Home() {
       const displayReply = stripEmotionTags(reply);
       const replyMessageId = makeMessageId();
       const replyCitations = Array.isArray(data.citations) ? data.citations : [];
+      const actionMeta = data?.action ? { ...data.action } : null;
       const memoryNote = data?.memoryAdded
-        ? "⭐ Added to memory"
+        ? "Added to memory"
         : data?.memoryRecall
-          ? "⭐ Memory recall"
+          ? "Memory recall"
           : "";
       setLog(l => [
         ...l,
@@ -752,7 +1029,8 @@ export default function Home() {
           prompt: text,
           source: data?.source || "chat",
           citations: replyCitations,
-          memoryNote
+          memoryNote,
+          actionMeta
         }
       ]);
       setLastAssistantText(displayReply);
@@ -1652,10 +1930,15 @@ export default function Home() {
       };
     }, [activeTab, settingsTab]);
 
-    useEffect(() => {
-      if (activeTab !== "settings" || settingsTab !== "trading") return;
-      loadTradingSettings();
-    }, [activeTab, settingsTab]);
+  useEffect(() => {
+    if (activeTab !== "settings" || settingsTab !== "trading") return;
+    loadTradingSettings();
+  }, [activeTab, settingsTab]);
+
+  useEffect(() => {
+    if (activeTab !== "settings" || settingsTab !== "knowledge") return;
+    loadRagModels();
+  }, [activeTab, settingsTab]);
 
     useEffect(() => {
       let cancelled = false;
@@ -1810,15 +2093,6 @@ export default function Home() {
         if (!cancelled) setToolsError(err?.message || "tools_load_failed");
       }
     }
-    async function loadApprovals() {
-      try {
-        const r = await fetch(`${SERVER_URL}/api/approvals`);
-        const data = await r.json();
-        if (!cancelled) setApprovals(Array.isArray(data.approvals) ? data.approvals : []);
-      } catch (err) {
-        if (!cancelled) setApprovalsError(err?.message || "approvals_load_failed");
-      }
-    }
     async function loadHistory() {
       try {
         const r = await fetch(`${SERVER_URL}/api/tools/history?limit=50`);
@@ -1829,7 +2103,6 @@ export default function Home() {
       }
     }
     loadTools();
-    loadApprovals();
     loadHistory();
     return () => {
       cancelled = true;
@@ -2157,7 +2430,7 @@ export default function Home() {
         color: "#e5e7eb",
         padding: 24
       }}>
-        <div style={{ fontSize: 14, color: "#cbd5f5" }}>Checking sign-in…</div>
+        <div style={{ fontSize: 14, color: "#cbd5f5" }}>Checking sign-in...</div>
       </div>
     );
   }
@@ -2206,75 +2479,6 @@ export default function Home() {
         </div>
       </div>
     );
-  }
-
-  const integrationList = [
-    { key: "google_docs", label: "Google Docs", detail: "Create and update docs with meeting notes.", method: "oauth", connectUrl: "/api/auth/google/connect" },
-    { key: "google_drive", label: "Google Drive", detail: "Store recordings and transcripts.", method: "oauth", connectUrl: "/api/auth/google/connect" },
-    { key: "slack", label: "Slack", detail: "Team chat updates.", method: "oauth", connectUrl: "/api/integrations/slack/connect", connectLabel: "Connect OAuth" },
-    { key: "discord", label: "Discord", detail: "Community updates (OAuth identity).", method: "oauth", connectUrl: "/api/integrations/discord/connect", connectLabel: "Connect OAuth" },
-    { key: "coinbase", label: "Coinbase", detail: "Trading data + account connection.", method: "oauth", connectUrl: "/api/integrations/coinbase/connect", connectLabel: "Connect Coinbase" },
-    { key: "telegram", label: "Telegram", detail: "Message you directly (bot token).", method: "token" },
-    { key: "fireflies", label: "Fireflies.ai", detail: "Meeting transcription and summaries (API key).", method: "token" },
-    { key: "plex", label: "Plex", detail: "Check server status and library health.", method: "token" },
-    { key: "amazon", label: "Amazon", detail: "Product search via Product Advertising API.", method: "api_key" },
-    { key: "walmart", label: "Walmart+", detail: "Shopping list sync (requires developer API).", method: "api_key" },
-    { key: "facebook", label: "Facebook Pages", detail: "Posts, insights, sentiment (Meta app required).", method: "oauth", connectUrl: "/api/integrations/meta/connect?product=facebook", connectLabel: "Connect Meta" },
-    { key: "instagram", label: "Instagram", detail: "Posts and metrics (Meta app required).", method: "oauth", connectUrl: "/api/integrations/meta/connect?product=instagram", connectLabel: "Connect Meta" },
-    { key: "whatsapp", label: "WhatsApp", detail: "Messaging via Cloud API (Meta app required).", method: "oauth", connectUrl: "/api/integrations/meta/connect?product=whatsapp", connectLabel: "Connect Meta" }
-  ];
-
-  async function toggleIntegration(provider, next, item) {
-    try {
-      const configured = integrations[provider]?.configured;
-      if (configured === false) {
-        setChatError(`${provider}_not_configured`);
-        return;
-      }
-      if (item?.method === "oauth" && next) {
-        const url = item.connectUrl ? `${SERVER_URL}${item.connectUrl}` : null;
-        if (url) {
-          window.open(url, "_blank", "width=520,height=680");
-          return;
-        }
-        setChatError(`${provider}_oauth_not_implemented`);
-        return;
-      }
-      if (!next) {
-        if (provider === "google_docs" || provider === "google_drive") {
-          await fetch(`${SERVER_URL}/api/integrations/google/disconnect`, { method: "POST" });
-        } else if (provider === "slack") {
-          await fetch(`${SERVER_URL}/api/integrations/slack/disconnect`, { method: "POST" });
-        } else if (provider === "discord") {
-          await fetch(`${SERVER_URL}/api/integrations/discord/disconnect`, { method: "POST" });
-        } else if (provider === "coinbase") {
-          await fetch(`${SERVER_URL}/api/integrations/coinbase/disconnect`, { method: "POST" });
-        } else {
-          await fetch(`${SERVER_URL}/api/integrations/disconnect`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ provider })
-          });
-        }
-        setIntegrations(prev => ({
-          ...prev,
-          [provider]: { ...prev[provider], connected: false, connectedAt: undefined }
-        }));
-        return;
-      }
-      const url = "/api/integrations/connect";
-      await fetch(`${SERVER_URL}${url}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider })
-      });
-      setIntegrations(prev => ({
-        ...prev,
-        [provider]: { ...prev[provider], connected: next, connectedAt: next ? new Date().toISOString() : undefined }
-      }));
-    } catch {
-      // ignore
-    }
   }
 
   async function runAmazonSearch() {
@@ -2420,6 +2624,7 @@ export default function Home() {
       if (!r.ok) throw new Error(data?.error || "trading_settings_failed");
       const email = data?.email || {};
       const training = data?.training || {};
+      const engine = data?.engine || {};
       setTradingEmailSettings({
         enabled: Boolean(email.enabled),
         time: email.time || "08:00",
@@ -2434,6 +2639,10 @@ export default function Home() {
       });
       setTradingQuestions(Array.isArray(training.questions) ? training.questions : []);
       setTradingNotes(training.notes || "");
+      setTradingEngineSettings(prev => ({
+        tradeApiUrl: engine.tradeApiUrl || prev.tradeApiUrl,
+        alpacaFeed: engine.alpacaFeed || prev.alpacaFeed
+      }));
       setTradingSettingsStatus("Loaded settings.");
     } catch (err) {
       setTradingSettingsError(err?.message || "trading_settings_failed");
@@ -2468,6 +2677,10 @@ export default function Home() {
               answer: String(item.answer || "").trim()
             }))
             .filter(item => item.question.length > 0)
+        },
+        engine: {
+          tradeApiUrl: tradingEngineSettings.tradeApiUrl,
+          alpacaFeed: tradingEngineSettings.alpacaFeed
         }
       };
       const r = await fetch(`${SERVER_URL}/api/trading/settings`, {
@@ -2494,6 +2707,10 @@ export default function Home() {
         }));
         setTradingQuestions(Array.isArray(data.settings.training?.questions) ? data.settings.training.questions : []);
         setTradingNotes(data.settings.training?.notes || "");
+        setTradingEngineSettings(prev => ({
+          tradeApiUrl: data.settings.engine?.tradeApiUrl || prev.tradeApiUrl,
+          alpacaFeed: data.settings.engine?.alpacaFeed || prev.alpacaFeed
+        }));
       }
     } catch (err) {
       setTradingSettingsError(err?.message || "trading_settings_save_failed");
@@ -2692,6 +2909,8 @@ export default function Home() {
   async function callTool() {
     setToolCallResult("");
     setToolsError("");
+    setToolApproval(null);
+    setToolApprovalStatus("");
     try {
       const params = JSON.parse(toolCallParams || "{}");
       const r = await fetch(`${SERVER_URL}/api/tools/call`, {
@@ -2701,10 +2920,11 @@ export default function Home() {
       });
       const data = await r.json();
       setToolCallResult(JSON.stringify(data, null, 2));
+      if (data?.status === "approval_required" && data?.approval) {
+        setToolApproval(data.approval);
+        setToolApprovalStatus("Approval required.");
+      }
       await refreshToolHistory();
-      const approvalsResp = await fetch(`${SERVER_URL}/api/approvals`);
-      const approvalsData = await approvalsResp.json();
-      setApprovals(Array.isArray(approvalsData.approvals) ? approvalsData.approvals : []);
     } catch (err) {
       setToolsError(err?.message || "tool_call_failed");
     }
@@ -2721,48 +2941,152 @@ export default function Home() {
     }
   }
 
-  async function approveAction(id) {
-    setApprovalsError("");
+  async function loadRagModels() {
+    setRagModelsError("");
+    setRagModelsLoading(true);
     try {
-      const r = await fetch(`${SERVER_URL}/api/approvals/${id}/approve`, { method: "POST" });
-      if (!r.ok) throw new Error("approval_failed");
+      const r = await fetch(`${SERVER_URL}/api/rag/models`);
       const data = await r.json();
-      setApprovals(prev => prev.map(a => (a.id === id ? data.approval : a)));
-      await refreshToolHistory();
+      if (!r.ok) throw new Error(data?.error || "rag_models_failed");
+      setRagModels(Array.isArray(data.models) ? data.models : []);
     } catch (err) {
-      setApprovalsError(err?.message || "approval_failed");
+      setRagModels([]);
+      setRagModelsError(err?.message || "rag_models_failed");
+    } finally {
+      setRagModelsLoading(false);
     }
   }
 
-  async function denyAction(id) {
-    setApprovalsError("");
+  function resolveDownloadName(headerValue, fallbackName) {
+    if (!headerValue) return fallbackName;
+    const match = headerValue.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
+    if (!match) return fallbackName;
+    const raw = match[1].replace(/\"/g, "");
     try {
-      const r = await fetch(`${SERVER_URL}/api/approvals/${id}/deny`, { method: "POST" });
-      if (!r.ok) throw new Error("approval_deny_failed");
-      const data = await r.json();
-      setApprovals(prev => prev.map(a => (a.id === id ? data.approval : a)));
-      await refreshToolHistory();
-    } catch (err) {
-      setApprovalsError(err?.message || "approval_deny_failed");
+      return decodeURIComponent(raw);
+    } catch {
+      return raw || fallbackName;
     }
   }
 
-  async function executeAction(id, token) {
-    setApprovalsError("");
+  async function downloadRagBackup() {
+    setRagBackupError("");
+    setRagBackupStatus("");
+    setRagBackupBusy(true);
     try {
-      const r = await fetch(`${SERVER_URL}/api/approvals/${id}/execute`, {
+      const r = await fetch(`${SERVER_URL}/api/rag/backup/download`);
+      if (!r.ok) {
+        let errText = "rag_backup_failed";
+        try {
+          const data = await r.json();
+          errText = data?.error || errText;
+        } catch {
+          errText = await r.text();
+        }
+        throw new Error(errText || "rag_backup_failed");
+      }
+      const blob = await r.blob();
+      const fileName = resolveDownloadName(r.headers.get("content-disposition"), "rag-backup.zip");
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+      setRagBackupStatus(`Downloaded ${fileName}`);
+    } catch (err) {
+      setRagBackupError(err?.message || "rag_backup_failed");
+    } finally {
+      setRagBackupBusy(false);
+    }
+  }
+
+  async function exportRagModelsFile() {
+    setRagExportError("");
+    setRagExportStatus("");
+    setRagExportBusy(true);
+    try {
+      const r = await fetch(`${SERVER_URL}/api/rag/models/export`);
+      if (!r.ok) {
+        let errText = "rag_models_export_failed";
+        try {
+          const data = await r.json();
+          errText = data?.error || errText;
+        } catch {
+          errText = await r.text();
+        }
+        throw new Error(errText || "rag_models_export_failed");
+      }
+      const blob = await r.blob();
+      const fileName = resolveDownloadName(r.headers.get("content-disposition"), "rag-models.json");
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+      setRagExportStatus(`Exported ${fileName}`);
+    } catch (err) {
+      setRagExportError(err?.message || "rag_models_export_failed");
+    } finally {
+      setRagExportBusy(false);
+    }
+  }
+
+  async function importRagModelsFile(file) {
+    if (!file) return;
+    setRagImportError("");
+    setRagImportStatus("");
+    setRagImportBusy(true);
+    try {
+      const raw = await file.text();
+      const payload = JSON.parse(raw || "{}");
+      const r = await fetch(`${SERVER_URL}/api/rag/models/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token })
+        body: JSON.stringify(payload)
       });
       const data = await r.json();
-      setToolCallResult(JSON.stringify(data, null, 2));
-      await refreshToolHistory();
-      const approvalsResp = await fetch(`${SERVER_URL}/api/approvals`);
-      const approvalsData = await approvalsResp.json();
-      setApprovals(Array.isArray(approvalsData.approvals) ? approvalsData.approvals : []);
+      if (!r.ok) throw new Error(data?.error || "rag_models_import_failed");
+      const imported = data?.imported || {};
+      const sources = imported.sources || {};
+      setRagImportStatus(`Imported ${imported.models || 0} models, ${sources.trading || 0} trading sources, ${sources.rss || 0} RSS sources, ${sources.youtube || 0} YouTube sources.`);
+      await loadRagModels();
     } catch (err) {
-      setApprovalsError(err?.message || "approval_execute_failed");
+      setRagImportError(err?.message || "rag_models_import_failed");
+    } finally {
+      if (ragImportInputRef.current) ragImportInputRef.current.value = "";
+      setRagImportBusy(false);
+    }
+  }
+
+  async function updateToolApproval(action, token) {
+    if (!toolApproval?.id) return;
+    setToolApprovalStatus("");
+    try {
+      const endpoint = action === "approve" ? "approve" : action === "deny" ? "deny" : "execute";
+      const r = await fetch(`${SERVER_URL}/api/approvals/${toolApproval.id}/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(endpoint === "execute" ? { token } : {})
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "approval_update_failed");
+      if (endpoint === "execute") {
+        setToolApprovalStatus("Approved action executed.");
+        setToolApproval(null);
+        setToolCallResult(JSON.stringify(data, null, 2));
+      } else {
+        setToolApproval(data.approval || null);
+        setToolApprovalStatus(endpoint === "approve" ? "Approved. Ready to execute." : "Approval denied.");
+      }
+      await refreshToolHistory();
+    } catch (err) {
+      setToolApprovalStatus(err?.message || "approval_update_failed");
     }
   }
 
@@ -2926,6 +3250,7 @@ export default function Home() {
             isListening={micState === "listening"}
             modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
             fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
+            pngSet={avatarModels.find(m => m.id === avatarModelId)?.pngSet}
             backgroundSrc={AVATAR_BACKGROUNDS.find(bg => bg.id === avatarBackground)?.src}
           />
       </div>
@@ -2940,7 +3265,9 @@ export default function Home() {
           background: "var(--panel-bg)",
           color: "var(--text-primary)",
           borderLeft: "1px solid var(--panel-border-strong)",
-          backdropFilter: "blur(18px)"
+          backdropFilter: "blur(18px)",
+          minHeight: 0,
+          overflow: "hidden"
         }}
       >
         {!audioUnlocked && (
@@ -3016,17 +3343,6 @@ export default function Home() {
             Recordings
           </button>
             <button
-              onClick={() => setActiveTab("workbench")}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: activeTab === "workbench" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
-                background: activeTab === "workbench" ? "var(--chip-bg)" : "var(--panel-bg)"
-              }}
-            >
-              Aika Tools
-            </button>
-            <button
               onClick={() => setActiveTab("tools")}
               style={{
                 padding: "8px 12px",
@@ -3082,6 +3398,21 @@ export default function Home() {
               Trading
             </button>
             <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.location.href = "/email";
+                }
+              }}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--panel-border)",
+                background: "var(--panel-bg)"
+              }}
+            >
+              Email Full Screen
+            </button>
+            <button
               onClick={() => setActiveTab("safety")}
               style={{
                 padding: "8px 12px",
@@ -3117,7 +3448,7 @@ export default function Home() {
             <button
               onClick={() => {
                 setActiveTab("settings");
-                setSettingsTab("integrations");
+                setSettingsTab("connections");
               }}
               style={{
                 padding: "8px 12px",
@@ -3150,6 +3481,17 @@ export default function Home() {
           >
             Guide
           </button>
+          <button
+            onClick={() => setActiveTab("capabilities")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: activeTab === "capabilities" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+              background: activeTab === "capabilities" ? "var(--chip-bg)" : "var(--panel-bg)"
+            }}
+          >
+            Capabilities
+          </button>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             {currentUser ? (
               <div style={{ fontSize: 12, color: "#6b7280" }}>
@@ -3171,14 +3513,28 @@ export default function Home() {
           </div>
         </div>
 
+        <div
+          className="side-panel-body"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            overflow: activeTab === "chat" ? "hidden" : "auto",
+            paddingRight: 2
+          }}
+        >
           {activeTab === "settings" && (
             <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               {[
-                { key: "integrations", label: "Integrations" },
+                { key: "connections", label: "Connections" },
+                { key: "knowledge", label: "Knowledge" },
                 { key: "skills", label: "Skills" },
                 { key: "trading", label: "Trading" },
                 { key: "appearance", label: "Appearance" },
-                { key: "voice", label: "Voice" }
+                { key: "voice", label: "Voice" },
+                { key: "legacy", label: "Legacy" }
               ].map(item => (
                 <button
                   key={item.key}
@@ -3196,47 +3552,42 @@ export default function Home() {
             </div>
           )}
 
-          {activeTab === "settings" && settingsTab === "integrations" && (
+          {activeTab === "settings" && settingsTab === "connections" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-                Connect services for Aika's agent mode
+                Connections
               </div>
-            {integrationList.map(item => {
-              const status = integrations[item.key]?.connected ? "Connected" : "Not connected";
-              const configured = integrations[item.key]?.configured;
-              return (
-                <div key={item.key} style={{
-                  border: "1px solid var(--panel-border)",
-                  borderRadius: 12,
-                  padding: 12,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  background: "var(--panel-bg)"
-                }}>
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{item.label}</div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>{item.detail}</div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12, color: "#6b7280" }}>
-                      {status}{configured === false ? " · Missing config" : ""}
-                    </span>
-                    <button
-                      onClick={() => toggleIntegration(item.key, !integrations[item.key]?.connected, item)}
-                      style={{ padding: "6px 10px", borderRadius: 8 }}
-                    >
-                      {integrations[item.key]?.connected ? "Disconnect" : "Connect"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
               <div style={{ fontSize: 12, color: "#6b7280" }}>
-                Note: Real connections require API keys and OAuth setup. Configure them in `apps/server/.env`.
+                Link external services once. Aika will reuse them across chat, tools, and Telegram.
               </div>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Email identity</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+                  Used for voice commands like "email my work address". Saved locally to your profile.
+                </div>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Work email
+                  <input
+                    value={workEmail}
+                    onChange={(e) => setWorkEmail(e.target.value)}
+                    placeholder="you@work.com"
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                  Personal email (optional)
+                  <input
+                    value={personalEmail}
+                    onChange={(e) => setPersonalEmail(e.target.value)}
+                    placeholder="you@gmail.com"
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                  />
+                </label>
+              </div>
+              <ConnectionsPanel serverUrl={SERVER_URL} />
+
               <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>Integration Actions</div>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Integration Actions (advanced)</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <input
                     value={amazonQuery}
@@ -3270,6 +3621,106 @@ export default function Home() {
                 )}
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
                   Product analysis opens a recommendation popup with best-value pick and cart actions.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "settings" && settingsTab === "knowledge" && (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Knowledge Defaults
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Choose the default knowledge source for chat and Telegram. Aika will still auto-route when needed.
+              </div>
+              <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)", maxWidth: 320 }}>
+                Default RAG model
+                <select
+                  value={defaultRagModel}
+                  onChange={(e) => setDefaultRagModel(e.target.value)}
+                  style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                >
+                  <option value="auto">Auto (Aika decides)</option>
+                  <option value="all">All sources</option>
+                  {ragModels.map(model => (
+                    <option key={model.id} value={model.id}>
+                      {model.title || model.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button onClick={loadRagModels} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Refresh Models
+                </button>
+                {ragModelsLoading && <span style={{ fontSize: 12, color: "#6b7280" }}>Loading...</span>}
+                {assistantProfileError && (
+                  <span style={{ fontSize: 12, color: "#b91c1c" }}>{assistantProfileError}</span>
+                )}
+              </div>
+              {ragModelsError && (
+                <div style={{ fontSize: 12, color: "#b91c1c" }}>{ragModelsError}</div>
+              )}
+              {ragModels.length > 0 && (
+                <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
+                  {ragModels.map(model => (
+                    <div key={model.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 8, background: "var(--panel-bg)" }}>
+                      <div style={{ fontWeight: 600 }}>{model.title || model.id}</div>
+                      {model.description && (
+                        <div style={{ color: "#6b7280" }}>{model.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ marginTop: 6, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Backups & Transfers</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+                  Export model metadata, or download a full vector-store backup (SQLite + HNSW) so knowledge is retrievable.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <button
+                    onClick={downloadRagBackup}
+                    disabled={ragBackupBusy}
+                    style={{ padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    {ragBackupBusy ? "Preparing backup..." : "Download RAG Backup (zip)"}
+                  </button>
+                  <button
+                    onClick={exportRagModelsFile}
+                    disabled={ragExportBusy}
+                    style={{ padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    {ragExportBusy ? "Exporting..." : "Export RAG Models (JSON)"}
+                  </button>
+                  <button
+                    onClick={() => ragImportInputRef.current?.click()}
+                    disabled={ragImportBusy}
+                    style={{ padding: "6px 10px", borderRadius: 8 }}
+                  >
+                    {ragImportBusy ? "Importing..." : "Import RAG Models"}
+                  </button>
+                  <input
+                    ref={ragImportInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(e) => importRagModelsFile(e.target.files?.[0])}
+                    style={{ display: "none" }}
+                  />
+                </div>
+                {(ragBackupStatus || ragExportStatus || ragImportStatus) && (
+                  <div style={{ fontSize: 12, color: "#065f46", marginTop: 8 }}>
+                    {[ragBackupStatus, ragExportStatus, ragImportStatus].filter(Boolean).join(" ")}
+                  </div>
+                )}
+                {(ragBackupError || ragExportError || ragImportError) && (
+                  <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>
+                    {[ragBackupError, ragExportError, ragImportError].filter(Boolean).join(" ")}
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>
+                  Model import restores collection definitions + trading/RSS/YouTube sources. Use the full backup to restore embeddings.
                 </div>
               </div>
             </div>
@@ -3404,7 +3855,7 @@ export default function Home() {
                 Webhooks (automation)
               </div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>
-                Add a webhook and say: “Trigger &lt;name&gt;” or “Run &lt;name&gt;”.
+                Add a webhook and say: "Trigger &lt;name&gt;" or "Run &lt;name&gt;".
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <input
@@ -3443,7 +3894,7 @@ export default function Home() {
                 Scenes
               </div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>
-                Scenes trigger multiple webhooks in sequence. Example: “Run scene morning”.
+                Scenes trigger multiple webhooks in sequence. Example: "Run scene morning".
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <input
@@ -3498,7 +3949,7 @@ export default function Home() {
               }}>
                 {skillEvents.length ? skillEvents.map((evt, idx) => (
                   <div key={`${evt.time}-${idx}`} style={{ marginBottom: 6 }}>
-                    <b>{evt.skill}</b> · {evt.type} · {evt.time}
+                    <b>{evt.skill}</b> | {evt.type} | {evt.time}
                   </div>
                 )) : (
                   <div>No skill activity yet.</div>
@@ -3550,6 +4001,33 @@ export default function Home() {
 
         {activeTab === "settings" && settingsTab === "trading" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              Trading Engine
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Configure the local trading API and market data feed. This applies to the Trading terminal and paper workflows.
+            </div>
+            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                Trading API base URL
+                <input
+                  value={tradingEngineSettings.tradeApiUrl}
+                  onChange={(e) => setTradingEngineSettings(prev => ({ ...prev, tradeApiUrl: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                Alpaca data feed
+                <select
+                  value={tradingEngineSettings.alpacaFeed}
+                  onChange={(e) => setTradingEngineSettings(prev => ({ ...prev, alpacaFeed: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                >
+                  <option value="iex">IEX (free)</option>
+                  <option value="sip">SIP (paid)</option>
+                </select>
+              </label>
+            </div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
               Trading Emails
             </div>
@@ -3759,31 +4237,129 @@ export default function Home() {
                   ))}
                 </select>
               </label>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
-                <input
-                  type="checkbox"
-                  checked={meetingCommandListening}
-                  onChange={(e) => setMeetingCommandListening(e.target.checked)}
-                />
-                Listening for recording commands ("hey Aika, start recording")
-              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 520 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>Avatar Model</div>
+                {(() => {
+                  const current = avatarModels.find(m => m.id === avatarModelId);
+                  const thumb = current?.thumbnailAvailable ? current.thumbnail : "/assets/aika/live2d/placeholder.svg";
+                  return (
+                    <button
+                      onClick={() => setShowAvatarPicker(v => !v)}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        border: "1px solid var(--panel-border-strong)",
+                        textAlign: "left",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8
+                      }}
+                    >
+                      <img
+                        src={thumb}
+                        alt={current?.label || "avatar"}
+                        style={{ width: 28, height: 38, objectFit: "cover", borderRadius: 6 }}
+                      />
+                      <span>{current?.label || "(no model selected)"}</span>
+                    </button>
+                  );
+                })()}
+                {showAvatarPicker && (
+                  <div style={{
+                    border: "1px solid var(--panel-border)",
+                    borderRadius: 10,
+                    padding: 8,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 8,
+                    background: "var(--panel-bg)"
+                  }}>
+                    {avatarModels.length === 0 && (
+                      <div style={{ fontSize: 12 }}>No models found. Import one below.</div>
+                    )}
+                    {avatarModels.map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          if (!m.available) return;
+                          setAvatarModelId(m.id);
+                          setShowAvatarPicker(false);
+                        }}
+                        style={{
+                          border: m.id === avatarModelId ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                          borderRadius: 10,
+                          padding: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          background: m.available ? "var(--panel-bg)" : "var(--panel-bg-soft)",
+                          opacity: m.available ? 1 : 0.6,
+                          cursor: m.available ? "pointer" : "not-allowed"
+                        }}
+                      >
+                        <img
+                          src={m.thumbnail || "/assets/aika/live2d/placeholder.svg"}
+                          alt={m.label || m.id}
+                          style={{ width: 32, height: 40, objectFit: "cover", borderRadius: 6 }}
+                        />
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{m.label || m.id}</div>
+                          <div style={{ fontSize: 10, color: "#6b7280" }}>{m.available ? "Ready" : "Missing files"}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {avatarImportError && (
+                  <div style={{ fontSize: 11, color: "#b91c1c" }}>{avatarImportError}</div>
+                )}
+                {avatarImportNotice && (
+                  <div style={{ fontSize: 11, color: "var(--accent)" }}>{avatarImportNotice}</div>
+                )}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                  <label style={{ fontSize: 12 }}>
+                    Import Live2D ZIP
+                    <input
+                      type="file"
+                      accept=".zip"
+                      onChange={(e) => importAvatarZip(e.target.files?.[0])}
+                      disabled={avatarImporting}
+                    />
+                  </label>
+                  <button onClick={refreshAvatarModels} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                    Refresh Models
+                  </button>
+                </div>
+                <div style={{ fontSize: 10, color: "#6b7280" }}>
+                  Install core once, then import ZIPs from your Live2D packs.
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={() => document.getElementById("avatar-core-input")?.click()} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                    Upload Core
+                  </button>
+                  <input
+                    id="avatar-core-input"
+                    type="file"
+                    accept=".zip"
+                    style={{ display: "none" }}
+                    onChange={(e) => uploadAvatarCore(e.target.files?.[0])}
+                  />
+                  <div style={{ fontSize: 10, color: "#6b7280" }}>
+                    Core JS: {avatarCoreInfo.coreJs ? "OK" : "missing"} | Core WASM: {avatarCoreInfo.coreWasm ? "OK" : "missing"}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
           {activeTab === "settings" && settingsTab === "voice" && (
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gap: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
                 Voice & Audio
               </div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>
-                Voice settings are in the panel below. Open it here to edit.
+                Tune Aika's voice, pacing, and engine. Changes apply everywhere.
               </div>
-              <button
-                onClick={() => setShowSettings(true)}
-                style={{ padding: "6px 10px", borderRadius: 8, maxWidth: 200 }}
-              >
-                Open Voice Settings
-              </button>
               <label style={{ display: "grid", gap: 4, maxWidth: 360, fontSize: 12, color: "var(--text-muted)" }}>
                 Send after silence: {(sttSilenceMs / 1000).toFixed(1)}s
                 <input
@@ -3795,6 +4371,181 @@ export default function Home() {
                   onChange={(e) => setSttSilenceMs(Number(e.target.value))}
                 />
               </label>
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                  Voice prompt text
+                  <textarea
+                    rows={3}
+                    value={voicePromptText}
+                    onChange={(e) => {
+                      setVoicePromptText(e.target.value);
+                      setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: e.target.value } }));
+                    }}
+                    placeholder="Describe Aika's voice/persona..."
+                    style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                  />
+                </label>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  <button onClick={testVoice} style={{ padding: "8px 12px", borderRadius: 8 }}>
+                    Test Voice
+                  </button>
+                  <button
+                    onClick={() => setShowAdvanced(v => !v)}
+                    style={{ padding: "8px 12px", borderRadius: 8 }}
+                  >
+                    {showAdvanced ? "Hide Advanced" : "Advanced Controls"}
+                  </button>
+                </div>
+                <div style={{ display: "grid", gap: 8, marginTop: 10, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                    Style
+                    <select
+                      value={ttsSettings.style}
+                      onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
+                      style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                    >
+                      <option value="brat_baddy">brat_baddy</option>
+                      <option value="brat_soft">brat_soft</option>
+                      <option value="brat_firm">brat_firm</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                    Engine
+                    <select
+                      value={ttsSettings.engine || statusInfo?.tts?.engine || ""}
+                      onChange={(e) => setTtsSettings(s => ({ ...s, engine: e.target.value }))}
+                      style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                    >
+                      <option value="">default</option>
+                      <option value="gptsovits">gptsovits</option>
+                      <option value="piper">piper</option>
+                    </select>
+                  </label>
+                </div>
+                {showAdvanced && (
+                  <div style={{ display: "grid", gap: 8, marginTop: 10, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                      Output format
+                      <select
+                        value={ttsSettings.format}
+                        onChange={(e) => setTtsSettings(s => ({ ...s, format: e.target.value }))}
+                        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                      >
+                        <option value="wav">wav</option>
+                        <option value="mp3">mp3</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                      Rate
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.6"
+                        max="1.4"
+                        value={ttsSettings.rate}
+                        onChange={(e) => setTtsSettings(s => ({ ...s, rate: Number(e.target.value) }))}
+                        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                      />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                      Pitch
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="-5"
+                        max="5"
+                        value={ttsSettings.pitch}
+                        onChange={(e) => setTtsSettings(s => ({ ...s, pitch: Number(e.target.value) }))}
+                        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                      />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                      Energy
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.5"
+                        max="1.5"
+                        value={ttsSettings.energy}
+                        onChange={(e) => setTtsSettings(s => ({ ...s, energy: Number(e.target.value) }))}
+                        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                      />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                      Pause
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.8"
+                        max="1.8"
+                        value={ttsSettings.pause}
+                        onChange={(e) => setTtsSettings(s => ({ ...s, pause: Number(e.target.value) }))}
+                        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                      />
+                    </label>
+                  </div>
+                )}
+                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                  {(ttsSettings.engine || statusInfo?.tts?.engine) === "piper" ? (
+                    <>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                        Piper Voice
+                        <select
+                          value={ttsSettings.voice.name || ""}
+                          onChange={(e) => setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: e.target.value } }))}
+                          style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                        >
+                          {availableVoices.length === 0 && <option value="">(no voices found)</option>}
+                          {availableVoices.map(v => (
+                            <option key={v.id} value={v.id}>{v.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        Place Piper .onnx + .onnx.json files in `apps/server/piper_voices`.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                        Reference WAV (apps/server/voices)
+                        <input
+                          type="text"
+                          placeholder="example.wav"
+                          value={ttsSettings.voice.reference_wav_path}
+                          onChange={(e) => setTtsSettings(s => ({ ...s, voice: { reference_wav_path: e.target.value } }))}
+                          style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                        />
+                      </label>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        Reference file must be inside apps/server/voices. Leave blank for default voice.
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        For a more feminine voice, add a speaker WAV and set it above.
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "settings" && settingsTab === "legacy" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Legacy: Aika Tools
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Kept for reference and likely unused in the beta release.
+              </div>
+              <AikaToolsWorkbench
+                serverUrl={SERVER_URL}
+                onOpenConnections={() => {
+                  setActiveTab("settings");
+                  setSettingsTab("connections");
+                }}
+                onOpenSafety={() => setActiveTab("safety")}
+              />
             </div>
           )}
 
@@ -3813,7 +4564,7 @@ export default function Home() {
                 <div style={{ fontWeight: 600, color: statusInfo?.server?.ok ? "#059669" : "#b91c1c" }}>
                   {statusInfo?.server?.ok ? "Online" : "Offline"}
                 </div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>Uptime: {statusInfo?.server?.uptimeSec ?? "—"}s</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Uptime: {statusInfo?.server?.uptimeSec ?? "-"}s</div>
               </div>
               <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>TTS</div>
@@ -3826,7 +4577,7 @@ export default function Home() {
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
                     Piper: {statusInfo?.tts?.engines?.piper?.enabled ? (statusInfo?.tts?.engines?.piper?.ready ? "Ready" : "Missing voices") : "Inactive"}
                   </div>
-                  <div style={{ fontSize: 12, color: "#6b7280" }}>Model: {statusInfo?.openai?.model || "—"}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>Model: {statusInfo?.openai?.model || "-"}</div>
                 </div>
               <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Audio</div>
@@ -3847,7 +4598,7 @@ export default function Home() {
                 <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>Integrations</div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
-                    {Object.keys(integrations || {}).length ? "Loaded" : "—"}
+                    {Object.keys(integrations || {}).length ? "Loaded" : "-"}
                   </div>
                 </div>
                 <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10 }}>
@@ -3862,7 +4613,7 @@ export default function Home() {
                     {statusInfo?.skills?.enabled ?? 0}/{statusInfo?.skills?.total ?? 0} enabled
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
-                    Last: {statusInfo?.skills?.lastEvent?.skill || "—"}
+                    Last: {statusInfo?.skills?.lastEvent?.skill || "-"}
                   </div>
                 </div>
               </div>
@@ -3911,13 +4662,13 @@ export default function Home() {
                 {ttsDiagnostics ? (
                   <>
                     <div>Engine: <b>{ttsDiagnostics.engine}</b></div>
-                    <div>GPT-SoVITS URL: {ttsDiagnostics.gptsovits?.url || "—"}</div>
-                    <div>Docs URL: {ttsDiagnostics.gptsovits?.docsUrl || "—"}</div>
+                    <div>GPT-SoVITS URL: {ttsDiagnostics.gptsovits?.url || "-"}</div>
+                    <div>Docs URL: {ttsDiagnostics.gptsovits?.docsUrl || "-"}</div>
                     <div>Status: {ttsDiagnostics.gptsovits?.online ? "online" : "offline"} {ttsDiagnostics.gptsovits?.status ? `(${ttsDiagnostics.gptsovits.status})` : ""}</div>
-                    <div>Config: {ttsDiagnostics.gptsovits?.configPath || "—"} {ttsDiagnostics.gptsovits?.configExists ? "(found)" : "(missing)"}</div>
-                    <div>Default reference: {ttsDiagnostics.reference?.default || "—"}</div>
-                    <div>Reference path: {ttsDiagnostics.reference?.resolved || "—"}</div>
-                    <div>Reference ok: {ttsDiagnostics.reference?.exists ? "yes" : "no"}{ttsDiagnostics.reference?.duration ? ` · ${ttsDiagnostics.reference.duration.toFixed(2)}s` : ""}</div>
+                    <div>Config: {ttsDiagnostics.gptsovits?.configPath || "-"} {ttsDiagnostics.gptsovits?.configExists ? "(found)" : "(missing)"}</div>
+                    <div>Default reference: {ttsDiagnostics.reference?.default || "-"}</div>
+                    <div>Reference path: {ttsDiagnostics.reference?.resolved || "-"}</div>
+                    <div>Reference ok: {ttsDiagnostics.reference?.exists ? "yes" : "no"}{ttsDiagnostics.reference?.duration ? ` | ${ttsDiagnostics.reference.duration.toFixed(2)}s` : ""}</div>
                   </>
                 ) : (
                   <div>Diagnostics unavailable.</div>
@@ -4001,36 +4752,41 @@ export default function Home() {
             </div>
 
             <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Approvals</div>
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-                Pending approvals: {approvals.filter(a => a.status === "pending").length}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
-                {approvals.map(a => (
-                  <div key={a.id} style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 8 }}>
-                    <div style={{ fontWeight: 600 }}>{a.toolName}</div>
-                    <div>Status: {a.status}</div>
-                    <div>Summary: {a.humanSummary}</div>
-                    {a.status === "pending" && (
-                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        <button onClick={() => approveAction(a.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Pending approval</div>
+              {!toolApproval && (
+                <div style={{ fontSize: 12, color: "#6b7280" }}>No approvals from recent tool calls.</div>
+              )}
+              {toolApproval && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                  <div><b>Tool:</b> {toolApproval.toolName}</div>
+                  <div><b>Status:</b> {toolApproval.status}</div>
+                  <div><b>Summary:</b> {toolApproval.humanSummary || "Approval required"}</div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                    {toolApproval.status === "pending" && (
+                      <>
+                        <button onClick={() => updateToolApproval("approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
                           Approve
                         </button>
-                        <button onClick={() => denyAction(a.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                        <button onClick={() => updateToolApproval("deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
                           Deny
                         </button>
-                      </div>
+                      </>
                     )}
-                    {a.status === "approved" && (
-                      <button onClick={() => executeAction(a.id, a.token)} style={{ marginTop: 6, padding: "4px 8px", borderRadius: 6 }}>
+                    {toolApproval.status === "approved" && (
+                      <button onClick={() => updateToolApproval("execute", toolApproval.token)} style={{ padding: "4px 8px", borderRadius: 6 }}>
                         Execute
                       </button>
                     )}
+                    <button
+                      onClick={() => setActiveTab("safety")}
+                      style={{ padding: "4px 8px", borderRadius: 6 }}
+                    >
+                      Open Safety
+                    </button>
                   </div>
-                ))}
-                {approvals.length === 0 && <div>No approvals yet.</div>}
-              </div>
-              {approvalsError && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{approvalsError}</div>}
+                </div>
+              )}
+              {toolApprovalStatus && <div style={{ fontSize: 12, color: "var(--accent)", marginTop: 6 }}>{toolApprovalStatus}</div>}
             </div>
 
             <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
@@ -4082,15 +4838,12 @@ export default function Home() {
           <CanvasPanel serverUrl={SERVER_URL} />
         )}
 
-        {activeTab === "workbench" && (
-          <AikaToolsWorkbench serverUrl={SERVER_URL} />
-        )}
-
         <MeetingCopilot
           serverUrl={SERVER_URL}
           registerControls={registerMeetingCopilotControls}
           onActivateTab={() => setActiveTab("recordings")}
           onRecordingStateChange={setMeetingRecordingActive}
+          onSelectedRecordingChange={setActiveRecordingId}
           visible={activeTab === "recordings"}
           commandListening={meetingCommandListening}
           onCommandListeningChange={setMeetingCommandListening}
@@ -4099,40 +4852,15 @@ export default function Home() {
         {activeTab === "features" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button
-                  onClick={() => setFeaturesView("mcp")}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: featuresView === "mcp" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
-                    background: featuresView === "mcp" ? "var(--chip-bg)" : "var(--panel-bg)"
-                  }}
-                >
-                  MCP Features
+              <div style={{ fontWeight: 600, fontSize: 14 }}>MCP Features</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={refreshFeatures} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Refresh
                 </button>
-                <button
-                  onClick={() => setFeaturesView("connections")}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: featuresView === "connections" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
-                    background: featuresView === "connections" ? "var(--chip-bg)" : "var(--panel-bg)"
-                  }}
-                >
-                  Connections
+                <button onClick={copyDiagnostics} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Copy Diagnostics
                 </button>
               </div>
-              {featuresView === "mcp" && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={refreshFeatures} style={{ padding: "6px 10px", borderRadius: 8 }}>
-                    Refresh
-                  </button>
-                  <button onClick={copyDiagnostics} style={{ padding: "6px 10px", borderRadius: 8 }}>
-                    Copy Diagnostics
-                  </button>
-                </div>
-              )}
             </div>
 
             {featuresView === "mcp" && (
@@ -4241,7 +4969,7 @@ export default function Home() {
                   )}
                   {connectModal.connectSpec?.method === "api_key" && (
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                      Set the following env vars, then click “Mark Connected”:
+                      Set the following env vars, then click "Mark Connected":
                       <ul>
                         {connectModal.connectSpec.fields?.map(f => (
                           <li key={f.key}><code>{f.key}</code></li>
@@ -4274,14 +5002,18 @@ export default function Home() {
               </>
             )}
 
-            {featuresView === "connections" && (
-              <ConnectionsPanel serverUrl={SERVER_URL} />
-            )}
           </div>
         )}
 
         {activeTab === "guide" && (
           <GuidePanel />
+        )}
+        {activeTab === "capabilities" && (
+          <GuidePanel
+            docPath="/docs/capabilities.md"
+            title="What Aika Can Do"
+            openLabel="Open Capabilities"
+          />
         )}
         {activeTab === "chat" && (
         <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--panel-border)", borderRadius: 14, padding: 12, background: "var(--panel-bg)", color: "var(--text-primary)" }}>
@@ -4292,9 +5024,19 @@ export default function Home() {
           )}
           {log.map((m, i) => (
             <div key={m.id || i} style={{ marginBottom: 10 }}>
-              <div><b>{m.role === "user" ? "You" : "Aika"}:</b> {m.text}</div>
+              <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                <b>{m.role === "user" ? "You" : "Aika"}:</b>
+                <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", flex: 1 }}>
+                  {m.text}
+                </div>
+              </div>
               {m.memoryNote && (
                 <div style={{ marginTop: 4, fontSize: 12, color: "var(--accent)" }}>{m.memoryNote}</div>
+              )}
+              {m.actionMeta && (
+                <div style={{ marginTop: 4, fontSize: 12, color: m.actionMeta.status === "error" ? "#b91c1c" : "#6b7280" }}>
+                  Action: {formatActionLabel(m.actionMeta.type)} - {formatActionStatus(m.actionMeta.status)}
+                </div>
               )}
               {Array.isArray(m.citations) && m.citations.length > 0 && (
                 <details style={{ marginTop: 6 }}>
@@ -4422,7 +5164,7 @@ export default function Home() {
             onClick={() => setShowSettings(v => !v)}
             style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)" }}
           >
-            {showSettings ? "Close Settings" : "Settings"}
+            {showSettings ? "Close Quick" : "Quick Settings"}
           </button>
         </div>
         )}
@@ -4479,342 +5221,26 @@ export default function Home() {
             />
               Text only (no voice)
             </label>
-            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginTop: 6 }}>
-              Appearance
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Theme
-              <select
-                value={themeId}
-                onChange={(e) => setThemeId(e.target.value)}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-              >
-                {THEMES.map(t => (
-                  <option key={t.id} value={t.id}>{t.label}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              App background image
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => handleBackgroundUpload(e.target.files?.[0])}
-              />
+            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
               <button
-                onClick={() => setAppBackground("")}
-                style={{ marginTop: 4, padding: "4px 8px", borderRadius: 6 }}
-              >
-                Clear background
-              </button>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Avatar background
-              <select
-                value={avatarBackground}
-                onChange={(e) => setAvatarBackground(e.target.value)}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-              >
-                {AVATAR_BACKGROUNDS.map(bg => (
-                  <option key={bg.id} value={bg.id}>{bg.label}</option>
-                ))}
-              </select>
-            </label>
-            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginTop: 6 }}>
-              Meeting Copilot
-            </div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
-              <input
-                type="checkbox"
-                checked={meetingCommandListening}
-                onChange={(e) => setMeetingCommandListening(e.target.checked)}
-              />
-              Listening for recording commands (“hey Aika, start recording”)
-            </label>
-          </div>
-          )}
-          {showSettings && showAdvanced && (
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-            gap: 8,
-            padding: 10,
-            border: "1px solid var(--panel-border)",
-            borderRadius: 10,
-            background: "#fafafa"
-          }}>
-            <div style={{ gridColumn: "1 / -1", fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
-              Aika Voice Settings
-            </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)", gridColumn: "1 / -1" }}>
-              Voice prompt text
-              <textarea
-                rows={3}
-                value={voicePromptText}
-                onChange={(e) => {
-                  setVoicePromptText(e.target.value);
-                  setTtsSettings(s => ({ ...s, voice: { ...s.voice, prompt_text: e.target.value } }));
+                onClick={() => {
+                  setActiveTab("settings");
+                  setSettingsTab("voice");
                 }}
-                placeholder="Describe Aika's voice/persona..."
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-              />
-            </label>
-              <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-                <button
-                  onClick={testVoice}
-                  style={{ padding: "8px 12px", borderRadius: 8 }}
-                >
-                  Test Voice
-                </button>
-              </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                Style
-                <select
-                  value={ttsSettings.style}
-                  onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-                >
-                  <option value="brat_baddy">brat_baddy</option>
-                  <option value="brat_soft">brat_soft</option>
-                  <option value="brat_firm">brat_firm</option>
-                </select>
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                Engine
-                <select
-                  value={ttsSettings.engine || statusInfo?.tts?.engine || ""}
-                  onChange={(e) => setTtsSettings(s => ({ ...s, engine: e.target.value }))}
-                  style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-                >
-                  <option value="">default</option>
-                  <option value="gptsovits">gptsovits</option>
-                  <option value="piper">piper</option>
-                </select>
-              </label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Avatar Model</div>
-                {(() => {
-                  const current = avatarModels.find(m => m.id === avatarModelId);
-                  const thumb = current?.thumbnailAvailable ? current.thumbnail : "/assets/aika/live2d/placeholder.svg";
-                  return (
-                    <button
-                      onClick={() => setShowAvatarPicker(v => !v)}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 8,
-                        border: "1px solid var(--panel-border-strong)",
-                        textAlign: "left",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8
-                      }}
-                    >
-                      <img
-                        src={thumb}
-                        alt={current?.label || "avatar"}
-                        style={{ width: 28, height: 38, objectFit: "cover", borderRadius: 6 }}
-                      />
-                      <span>{current?.label || "(no model selected)"}</span>
-                    </button>
-                  );
-                })()}
-                  {showAvatarPicker && (
-                    <div style={{
-                      border: "1px solid var(--panel-border)",
-                      borderRadius: 10,
-                      padding: 8,
-                      display: "grid",
-                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                      gap: 8,
-                      background: "#fafafa"
-                    }}>
-                    {avatarModels.length === 0 && (
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>(no models installed)</div>
-                    )}
-                    {avatarModels.map(m => {
-                      const thumb = m.thumbnailAvailable ? m.thumbnail : "/assets/aika/live2d/placeholder.svg";
-                      return (
-                        <button
-                          key={m.id}
-                          onClick={() => {
-                            setAvatarModelId(m.id);
-                            if (typeof window !== "undefined") {
-                              window.localStorage.setItem("aika_avatar_model", m.id);
-                            }
-                            setShowAvatarPicker(false);
-                          }}
-                          style={{
-                            border: m.id === avatarModelId ? "1px solid var(--accent)" : "1px solid var(--panel-border-strong)",
-                            borderRadius: 10,
-                            padding: 6,
-                            background: "var(--panel-bg)",
-                            textAlign: "left",
-                            display: "flex",
-                            gap: 8,
-                            alignItems: "center"
-                          }}
-                        >
-                          <img
-                            src={thumb}
-                            alt={m.label}
-                            style={{ width: 46, height: 62, objectFit: "cover", borderRadius: 6 }}
-                          />
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 600 }}>{m.label}</div>
-                            <div style={{ fontSize: 11, color: m.available ? "#059669" : "#b45309" }}>
-                              {m.available ? "Ready" : "Missing files"}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    Import Live2D zip
-                    <input
-                      type="file"
-                      accept=".zip"
-                      onChange={(e) => importAvatarZip(e.target.files?.[0])}
-                      disabled={avatarImporting}
-                      style={{ display: "block", marginTop: 4 }}
-                    />
-                  </label>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    Live2D core: {avatarCoreInfo.coreJs ? "Ready" : "Missing"}{avatarCoreInfo.coreWasm ? " + WASM" : ""}
-                  </div>
-                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    Upload live2dcubismcore.js / .wasm
-                    <input
-                      type="file"
-                      accept=".js,.wasm"
-                      onChange={(e) => uploadAvatarCore(e.target.files?.[0])}
-                      style={{ display: "block", marginTop: 4 }}
-                    />
-                  </label>
-                  <button
-                    onClick={refreshAvatarModels}
-                    style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
-                  >
-                    Refresh Models
-                  </button>
-                  {avatarImporting && (
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>Importing...</div>
-                  )}
-                  {avatarImportNotice && (
-                    <div style={{ fontSize: 12, color: "var(--accent)" }}>{avatarImportNotice}</div>
-                  )}
-                  {avatarImportError && (
-                    <div style={{ fontSize: 12, color: "#b91c1c" }}>{avatarImportError}</div>
-                  )}
-                  {avatarCoreError && (
-                    <div style={{ fontSize: 12, color: "#b91c1c" }}>{avatarCoreError}</div>
-                  )}
-                </div>
-              </div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Format
-              <select
-                value={ttsSettings.format}
-                onChange={(e) => setTtsSettings(s => ({ ...s, format: e.target.value }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                style={{ padding: "6px 10px", borderRadius: 8 }}
               >
-                <option value="wav">wav</option>
-                <option value="mp3">mp3</option>
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Rate
-              <input
-                type="number"
-                step="0.05"
-                min="0.8"
-                max="1.3"
-                value={ttsSettings.rate}
-                onChange={(e) => setTtsSettings(s => ({ ...s, rate: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-              />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Pitch
-              <input
-                type="number"
-                step="0.5"
-                min="-5"
-                max="5"
-                value={ttsSettings.pitch}
-                onChange={(e) => setTtsSettings(s => ({ ...s, pitch: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-              />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Energy
-              <input
-                type="number"
-                step="0.1"
-                min="0.5"
-                max="1.5"
-                value={ttsSettings.energy}
-                onChange={(e) => setTtsSettings(s => ({ ...s, energy: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-              />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Pause
-              <input
-                type="number"
-                step="0.1"
-                min="0.8"
-                max="1.8"
-                value={ttsSettings.pause}
-                onChange={(e) => setTtsSettings(s => ({ ...s, pause: Number(e.target.value) }))}
-                style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-              />
-            </label>
-              {(ttsSettings.engine || statusInfo?.tts?.engine) === "piper" ? (
-                <>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                    Piper Voice
-                    <select
-                      value={ttsSettings.voice.name || ""}
-                      onChange={(e) => setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: e.target.value } }))}
-                      style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-                    >
-                      {availableVoices.length === 0 && <option value="">(no voices found)</option>}
-                      {availableVoices.map(v => (
-                        <option key={v.id} value={v.id}>{v.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-                    Place Piper .onnx + .onnx.json files in `apps/server/piper_voices`.
-                  </div>
-                </>
-                ) : (
-                  <>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                      Reference WAV (apps/server/voices)
-                    <input
-                      type="text"
-                      placeholder="example.wav"
-                      value={ttsSettings.voice.reference_wav_path}
-                      onChange={(e) => setTtsSettings(s => ({ ...s, voice: { reference_wav_path: e.target.value } }))}
-                      style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
-                    />
-                  </label>
-                  <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-                    Reference file must be inside apps/server/voices. Leave blank for default voice.
-                  </div>
-                    <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-                      For a more feminine voice, add a speaker WAV and set it above.
-                    </div>
-                  </>
-                )}
-                <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#6b7280" }}>
-                  Live2D models load from `apps/web/public/assets/aika/live2d/`. Drop free sample runtime folders into
-                  `hiyori/`, `mao/`, or `tororo_hijiki/` to enable them.
-                </div>
+                Voice Settings
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("settings");
+                  setSettingsTab("appearance");
+                }}
+                style={{ padding: "6px 10px", borderRadius: 8 }}
+              >
+                Appearance
+              </button>
+            </div>
           </div>
           )}
           {micState === "unsupported" && (
@@ -4830,16 +5256,6 @@ export default function Home() {
           <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
             {micStatus}
           </div>
-          {showSettings && (
-          <>
-          <button
-            onClick={() => setShowAdvanced(v => !v)}
-            style={{ padding: "6px 10px", borderRadius: 8, width: "fit-content" }}
-          >
-            {showAdvanced ? "Hide Advanced Voice" : "Advanced Voice"}
-          </button>
-          </>
-          )}
           <div style={{ color: "#6b7280", fontSize: 12 }}>
             Voice: {ttsStatus}
           </div>
@@ -4988,7 +5404,7 @@ export default function Home() {
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600 }}>{option.title || "(untitled)"}</div>
                         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                          {option.priceDisplay || "Price unavailable"}{option.asin ? ` • ASIN ${option.asin}` : ""}
+                          {option.priceDisplay || "Price unavailable"}{option.asin ? ` - ASIN ${option.asin}` : ""}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -5020,6 +5436,7 @@ export default function Home() {
             </div>
           </div>
         )}
+        </div>
       </div>
       <style jsx global>{`
         @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700&display=swap");

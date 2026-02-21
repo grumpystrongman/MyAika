@@ -1568,25 +1568,6 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   };
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem("trading_api_url");
-      if (stored) setTradeApiUrl(stored);
-      const feed = window.localStorage.getItem("alpaca_feed");
-      if (feed === "iex" || feed === "sip") setAlpacaFeed(feed);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("alpaca_feed", alpacaFeed);
-    } catch {
-      // ignore
-    }
-  }, [alpacaFeed]);
-
-  useEffect(() => {
     let mounted = true;
     async function loadTradingProfile() {
       if (!serverUrl) return;
@@ -1596,6 +1577,30 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         if (!mounted) return;
         if (!resp.ok) throw new Error(data?.error || "trading_settings_failed");
         setTradingProfile(data || { training: { questions: [], notes: "" } });
+        const engine = data?.engine || {};
+        const engineUrl = engine.tradeApiUrl || "";
+        const engineFeed = engine.alpacaFeed || "";
+        let legacyUrl = "";
+        let legacyFeed = "";
+        try {
+          legacyUrl = window.localStorage.getItem("trading_api_url") || "";
+          const storedFeed = window.localStorage.getItem("alpaca_feed") || "";
+          legacyFeed = storedFeed === "iex" || storedFeed === "sip" ? storedFeed : "";
+        } catch {
+          legacyUrl = "";
+          legacyFeed = "";
+        }
+        const nextUrl = engineUrl || legacyUrl || tradeApiUrl;
+        const nextFeed = engineFeed || legacyFeed || alpacaFeed;
+        if (nextUrl) setTradeApiUrl(nextUrl);
+        if (nextFeed) setAlpacaFeed(nextFeed);
+        if ((legacyUrl || legacyFeed) && (!engineUrl || !engineFeed)) {
+          fetch(`${serverUrl}/api/trading/settings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ engine: { tradeApiUrl: nextUrl, alpacaFeed: nextFeed } })
+          }).catch(() => {});
+        }
         setTradingProfileError("");
       } catch (err) {
         if (!mounted) return;
@@ -1879,7 +1884,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       if (modelId) {
         setActiveRagModel(modelId);
         try {
-          localStorage.setItem("aika_active_rag_model", modelId);
+          localStorage.setItem("aika_trading_rag_model", modelId);
         } catch {
           // ignore
         }
@@ -1915,7 +1920,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   useEffect(() => {
     if (!serverUrl) return;
     try {
-      const stored = localStorage.getItem("aika_active_rag_model");
+      const stored = localStorage.getItem("aika_trading_rag_model");
       if (stored) setActiveRagModel(stored);
     } catch {
       // ignore
@@ -1925,7 +1930,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   useEffect(() => {
     try {
-      if (activeRagModel) localStorage.setItem("aika_active_rag_model", activeRagModel);
+      if (activeRagModel) localStorage.setItem("aika_trading_rag_model", activeRagModel);
     } catch {
       // ignore
     }
@@ -1983,12 +1988,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   useEffect(() => {
     let mounted = true;
     let pollId = null;
+    const apiBase = serverUrl || "";
     async function loadCandles() {
       setLoading(true);
       setError("");
       setMarketNote("");
       try {
-        const resp = await fetch(`/api/market/candles?symbol=${encodeURIComponent(symbol)}&asset=${assetClass}&interval=${interval}`);
+        const resp = await fetch(`${apiBase}/api/market/candles?symbol=${encodeURIComponent(symbol)}&asset=${assetClass}&interval=${interval}`);
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
           const detail = data?.error ? `Market feed unavailable (${data.error}).` : `Market feed unavailable (${resp.status}).`;
@@ -2024,7 +2030,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       mounted = false;
       if (pollId) clearInterval(pollId);
     };
-  }, [symbol, assetClass, interval]);
+  }, [symbol, assetClass, interval, serverUrl]);
 
   useEffect(() => {
     if (assetClass !== "crypto" || !symbol) {
@@ -2079,13 +2085,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   }, [assetClass, symbol, interval]);
 
   useEffect(() => {
-    if (assetClass !== "stock" || !symbol || !serverUrl) {
+    if (assetClass !== "stock" || !symbol) {
       setLiveStatus("");
       return undefined;
     }
     const intervalMs = intervalToMs(interval);
     const feedParam = alpacaFeed || "iex";
-    const url = `${serverUrl}/api/trading/stream?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&feed=${encodeURIComponent(feedParam)}`;
+    const base = serverUrl || "";
+    const url = `${base}/api/trading/stream?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&feed=${encodeURIComponent(feedParam)}`;
     let source;
     try {
       source = new EventSource(url);
@@ -3569,17 +3576,17 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
             </div>
             {approvalId && <div style={{ fontSize: 11, color: "var(--accent)" }}>Approval ID: {approvalId}</div>}
             {orderId && <div style={{ fontSize: 11, color: "var(--accent)" }}>Order ID: {orderId}</div>}
-            <label style={{ marginTop: 8, fontSize: 12, display: "block" }}>
-              Trading API Base URL
-              <input
-                value={tradeApiUrl}
-                onChange={(e) => {
-                  setTradeApiUrl(e.target.value);
-                  try { window.localStorage.setItem("trading_api_url", e.target.value); } catch {}
-                }}
-                style={{ width: "100%", padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", marginTop: 4 }}
-              />
-            </label>
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 6 }}>
+              <div>
+                Engine: {tradeApiUrl || "not set"} | Feed: {(alpacaFeed || "iex").toUpperCase()}
+              </div>
+              <button
+                onClick={() => { if (typeof window !== "undefined") window.location.href = "/?tab=settings&settingsTab=trading"; }}
+                style={{ padding: "4px 8px", borderRadius: 6, width: "fit-content" }}
+              >
+                Open Trading Settings
+              </button>
+            </div>
           </div>
 
           <div style={{ background: "var(--panel-bg)", borderRadius: 14, padding: 14, border: "1px solid var(--panel-border)" }}>
@@ -3793,7 +3800,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         </div>
                       </div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                        Qty {trade.quantity} · Entry {formatNumber(trade.entryPrice)} · Exit {trade.exitPrice != null ? formatNumber(trade.exitPrice) : "--"} · Fees {formatNumber(trade.fees || 0)}
+                        Qty {trade.quantity} | Entry {formatNumber(trade.entryPrice)} | Exit {trade.exitPrice != null ? formatNumber(trade.exitPrice) : "--"} | Fees {formatNumber(trade.fees || 0)}
                       </div>
                       <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                         <button
@@ -3852,7 +3859,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                 <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} />
                 MACD
               </label>
-              <span style={{ color: "var(--text-muted)" }}>Scroll to zoom • Drag to pan</span>
+              <span style={{ color: "var(--text-muted)" }}>Scroll to zoom - Drag to pan</span>
               {assetClass === "stock" && (
                 <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   Alpaca feed
@@ -3983,7 +3990,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         background: signal.bias === "bullish" ? "#22c55e" : signal.bias === "bearish" ? "#ef4444" : "#94a3b8"
                       }} />
                       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                        {signal.pattern} · {signal.bias}
+                        {signal.pattern} | {signal.bias}
                       </div>
                     </div>
                   ))}
@@ -4056,7 +4063,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         onClick={() => removeFromWatchlist(symbolValue, "stock")}
                         style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)", fontSize: 11 }}
                       >
-                        {symbolValue} ×
+                        {symbolValue} x
                       </button>
                     ))}
                   </div>
@@ -4074,7 +4081,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         onClick={() => removeFromWatchlist(symbolValue, "crypto")}
                         style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid var(--panel-border)", background: "var(--panel-bg-soft)", fontSize: 11 }}
                       >
-                        {symbolValue} ×
+                        {symbolValue} x
                       </button>
                     ))}
                   </div>
@@ -4114,14 +4121,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   {weeklyPlan.map((item, idx) => (
                     <div key={`${item.symbol}-${idx}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11 }}>
                       <div style={{ fontWeight: 600 }}>{item.symbol}</div>
-                      <div style={{ color: "var(--text-muted)" }}>{item.signal?.action || "HOLD"} · score {item.signal?.score}</div>
+                      <div style={{ color: "var(--text-muted)" }}>{item.signal?.action || "HOLD"} | score {item.signal?.score}</div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
             {recommendationsLoading && (
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Loading picks…</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Loading picks...</div>
             )}
             {recommendationsError && (
               <div style={{ fontSize: 11, color: "#b91c1c", marginTop: 6 }}>{recommendationsError}</div>
@@ -4803,7 +4810,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   <option value="high">High Risk</option>
                 </select>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  <strong>Suggested:</strong> {optionsRecommendation.strategy.replace("_", " ")} — {optionsRecommendation.note}
+                  <strong>Suggested:</strong> {optionsRecommendation.strategy.replace("_", " ")} - {optionsRecommendation.note}
                 </div>
                 <button
                   onClick={applyOptionsRecommendation}
@@ -5152,7 +5159,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "var(--text-muted)", background: "var(--panel-bg-soft)", padding: 8, borderRadius: 8 }}>
                       <div style={{ fontWeight: 600 }}>{cite.meeting_title}</div>
                       <div>{cite.chunk_id}</div>
-                      <div>{cite.snippet}</div>
+                      <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{cite.snippet}</div>
                     </div>
                   ))}
                 </div>
@@ -5511,7 +5518,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "var(--text-muted)", background: "var(--panel-bg-soft)", padding: 8, borderRadius: 8 }}>
                       <div style={{ fontWeight: 600 }}>{cite.meeting_title}</div>
                       <div>{cite.chunk_id}</div>
-                      <div>{cite.snippet}</div>
+                      <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{cite.snippet}</div>
                     </div>
                   ))}
                 </div>
@@ -5883,7 +5890,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   {recommendationDetail.symbol || "Recommendation"} {recommendationDetail.assetClass ? `(${recommendationDetail.assetClass})` : ""}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  Bias: {recommendationDetail.bias || "WATCH"} {recommendationDetail.provider ? `· Provider: ${recommendationDetail.provider}` : ""} {recommendationDetail.generatedAt ? `· ${recommendationDetail.generatedAt}` : ""}
+                  Bias: {recommendationDetail.bias || "WATCH"} {recommendationDetail.provider ? ` |  Provider: ${recommendationDetail.provider}` : ""} {recommendationDetail.generatedAt ? ` |  ${recommendationDetail.generatedAt}` : ""}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -5949,7 +5956,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     {section.bullets?.length ? (
                       <div style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>
                         {section.bullets.map((bullet, bIdx) => (
-                          <div key={`${section.title}-bullet-${bIdx}`}>• {bullet}</div>
+                          <div key={`${section.title}-bullet-${bIdx}`}>- {bullet}</div>
                         ))}
                       </div>
                     ) : null}
@@ -5963,7 +5970,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                         <div key={`${cite.chunk_id || idx}`} style={{ fontSize: 11, color: "var(--text-muted)", background: "#f1f5f9", padding: 8, borderRadius: 8 }}>
                           <div style={{ fontWeight: 600 }}>{cite.meeting_title || "Knowledge"}</div>
                           <div>{cite.chunk_id}</div>
-                          <div>{cite.snippet}</div>
+                          <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{cite.snippet}</div>
                         </div>
                       ))}
                     </div>
@@ -6002,7 +6009,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   {scenarioDetail.symbol || "Scenario Detail"} {scenarioDetail.assetClass ? `(${scenarioDetail.assetClass})` : ""}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  Window: {scenarioDetail.windowDays || scenarioWindow} days · Provider: {scenarioDetail.provider || "unknown"} · Bars: {scenarioDetail.points || "n/a"}
+                  Window: {scenarioDetail.windowDays || scenarioWindow} days | Provider: {scenarioDetail.provider || "unknown"} | Bars: {scenarioDetail.points || "n/a"}
                 </div>
               </div>
               <button onClick={() => { setScenarioDetail(null); setScenarioDetailStatus(""); }} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--panel-border)", background: "var(--panel-bg)", fontSize: 12 }}>
@@ -6031,7 +6038,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Return</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.returnPct, "%")}</div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                        Start {formatScenarioValue(scenarioDetail.startPrice, "")} · End {formatScenarioValue(scenarioDetail.endPrice, "")}
+                        Start {formatScenarioValue(scenarioDetail.startPrice, "")} | End {formatScenarioValue(scenarioDetail.endPrice, "")}
                       </div>
                     </div>
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
@@ -6054,19 +6061,19 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Drawdown</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.maxDrawdownPct, "%")}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Best {formatScenarioValue(scenarioDetail.bestDayPct, "%")} · Worst {formatScenarioValue(scenarioDetail.worstDayPct, "%")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Best {formatScenarioValue(scenarioDetail.bestDayPct, "%")} | Worst {formatScenarioValue(scenarioDetail.worstDayPct, "%")}</div>
                     </div>
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Momentum</div>
                       <div style={{ fontWeight: 600 }}>RSI {formatScenarioValue(scenarioDetail.rsi14, "")}</div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                        5d {formatScenarioValue(scenarioDetail.momentum5, "%")} · 10d {formatScenarioValue(scenarioDetail.momentum10, "%")} · 20d {formatScenarioValue(scenarioDetail.momentum20, "%")}
+                        5d {formatScenarioValue(scenarioDetail.momentum5, "%")} | 10d {formatScenarioValue(scenarioDetail.momentum10, "%")} | 20d {formatScenarioValue(scenarioDetail.momentum20, "%")}
                       </div>
                     </div>
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Moving Averages</div>
                       <div style={{ fontWeight: 600 }}>10d {formatScenarioValue(scenarioDetail.ma10, "")}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>20d {formatScenarioValue(scenarioDetail.ma20, "")} · 50d {formatScenarioValue(scenarioDetail.ma50, "")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>20d {formatScenarioValue(scenarioDetail.ma20, "")} | 50d {formatScenarioValue(scenarioDetail.ma50, "")}</div>
                     </div>
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Long-Term Trend</div>
@@ -6077,20 +6084,20 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Win / Loss Tape</div>
                       <div style={{ fontWeight: 600 }}>Win rate {formatScenarioValue(scenarioDetail.winRate, "%")}</div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                        Avg up {formatScenarioValue(scenarioDetail.avgUp, "%")} · Avg down {formatScenarioValue(scenarioDetail.avgDown, "%")}
+                        Avg up {formatScenarioValue(scenarioDetail.avgUp, "%")} | Avg down {formatScenarioValue(scenarioDetail.avgDown, "%")}
                       </div>
                     </div>
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>ATR & Vol Regime</div>
                       <div style={{ fontWeight: 600 }}>ATR {formatScenarioValue(scenarioDetail.atr14, "")}</div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                        {scenarioDetail.volRegime || "Vol regime n/a"} · 10d {formatScenarioValue(scenarioDetail.volShort, "%")} · 30d {formatScenarioValue(scenarioDetail.volLong, "%")}
+                        {scenarioDetail.volRegime || "Vol regime n/a"} | 10d {formatScenarioValue(scenarioDetail.volShort, "%")} | 30d {formatScenarioValue(scenarioDetail.volLong, "%")}
                       </div>
                     </div>
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Liquidity</div>
                       <div style={{ fontWeight: 600 }}>{formatScenarioValue(scenarioDetail.avgVolume, "")}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Recent {formatScenarioValue(scenarioDetail.recentVolume, "")} · Last {formatScenarioValue(scenarioDetail.lastVolume, "")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Recent {formatScenarioValue(scenarioDetail.recentVolume, "")} | Last {formatScenarioValue(scenarioDetail.lastVolume, "")}</div>
                     </div>
                     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Support/Resistance</div>

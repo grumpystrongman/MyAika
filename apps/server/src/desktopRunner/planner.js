@@ -1,14 +1,7 @@
-﻿import OpenAI from "openai";
 import { planWithAgents } from "../agent/multiAgent.js";
+import { responsesCreate } from "../llm/openaiClient.js";
+// OpenAI client handled by shared wrapper.
 
-let openaiClient = null;
-
-function getClient() {
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  if (!apiKey) return null;
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
 
 function extractJson(text) {
   if (!text) return null;
@@ -37,8 +30,7 @@ export async function planDesktopAction({ instruction } = {}) {
     }
   }
 
-  const client = getClient();
-  if (!client) {
+  if (!process.env.OPENAI_API_KEY) {
     return {
       plan: {
         taskName: cleanInstruction.slice(0, 80) || "Desktop Plan",
@@ -86,8 +78,8 @@ export async function planDesktopAction({ instruction } = {}) {
 
   const user = `Instruction: ${cleanInstruction}`;
 
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const response = await client.responses.create({
+  const model = process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const response = await responsesCreate({
     model,
     input: [
       { role: "system", content: [{ type: "input_text", text: system }] },
@@ -126,3 +118,5 @@ export async function planDesktopAction({ instruction } = {}) {
     explanation: "Plan generated from instruction."
   };
 }
+
+

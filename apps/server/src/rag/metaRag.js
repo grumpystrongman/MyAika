@@ -90,7 +90,7 @@ function nowIso() {
 }
 
 function metaRagEnabled() {
-  return String(process.env.META_RAG_ENABLED || "0") === "1";
+  return String(process.env.META_RAG_ENABLED || "1") === "1";
 }
 
 function autoCreateEnabled() {
@@ -416,7 +416,7 @@ export async function maybeCreateAutoRagProposal({ topic, question = "", userId 
 export function startMetaRagLoop() {
   if (refreshTimer || !metaRagEnabled()) return;
   const intervalMinutes = Number(process.env.META_RAG_REFRESH_INTERVAL_MINUTES || 0);
-  const runOnStartup = String(process.env.META_RAG_REFRESH_ON_STARTUP || "0") === "1";
+  const runOnStartup = String(process.env.META_RAG_REFRESH_ON_STARTUP || "1") === "1";
   if (runOnStartup) {
     refreshMetaRag().catch(() => {});
   }
@@ -426,4 +426,3 @@ export function startMetaRagLoop() {
     }, Math.max(60_000, intervalMinutes * 60_000));
   }
 }
-

@@ -185,12 +185,31 @@ registry.register(
 registry.register(
   {
     name: "email.send",
-    description: "Send a drafted email (approval required).",
-    paramsSchema: { draftId: "string", sendTo: "string[]", cc: "string[]", bcc: "string[]" },
+    description: "Send a drafted email or quick message (approval required unless autonomy-safe).",
+    paramsSchema: {
+      draftId: "string",
+      sendTo: "string[]",
+      to: "string[]",
+      subject: "string",
+      body: "string",
+      cc: "string[]",
+      bcc: "string[]",
+      autonomy: "string"
+    },
     requiresApproval: true,
     outbound: true,
     riskLevel: "high",
-    humanSummary: params => `Send email draft ${params?.draftId || ""}`
+    humanSummary: params => {
+      const target = Array.isArray(params?.sendTo) && params.sendTo.length
+        ? params.sendTo.join(", ")
+        : Array.isArray(params?.to) && params.to.length
+          ? params.to.join(", ")
+          : params?.draftId
+            ? `draft ${params.draftId}`
+            : "email";
+      const subject = params?.subject ? ` (${params.subject})` : "";
+      return `Send ${target}${subject}`;
+    }
   },
   sendEmail
 );

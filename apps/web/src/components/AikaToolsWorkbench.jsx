@@ -90,7 +90,7 @@ const TOOL_HELP = {
   integrations: {
     title: "Integrations Status",
     why: "Verify external services are connected and healthy.",
-    how: "Open the Integrations tab and refresh for current status."
+    how: "Open Settings / Connections to connect services and review status."
   },
   messaging: {
     title: "Messaging",
@@ -167,9 +167,11 @@ function SectionHeader({ title, helpKey }) {
   );
 }
 
-export default function AikaToolsWorkbench({ serverUrl }) {
+export default function AikaToolsWorkbench({ serverUrl, onOpenConnections, onOpenSafety }) {
   const [active, setActive] = useState("meetings");
   const [error, setError] = useState("");
+  const [pendingApproval, setPendingApproval] = useState(null);
+  const [pendingApprovalStatus, setPendingApprovalStatus] = useState("");
   const [meetingTitle, setMeetingTitle] = useState("Meeting Summary");
   const [meetingTranscript, setMeetingTranscript] = useState("");
   const [meetingResult, setMeetingResult] = useState(null);
@@ -356,10 +358,39 @@ export default function AikaToolsWorkbench({ serverUrl }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, params })
       });
-      return await r.json();
+      const data = await r.json();
+      if (data?.status === "approval_required" && data?.approval) {
+        setPendingApproval(data.approval);
+        setPendingApprovalStatus("Approval required.");
+      }
+      return data;
     } catch (err) {
       setError(err?.message || "tool_call_failed");
       return null;
+    }
+  }
+
+  async function updateApproval(id, action, token) {
+    if (!id) return;
+    setPendingApprovalStatus("");
+    try {
+      const endpoint = action === "approve" ? "approve" : action === "deny" ? "deny" : "execute";
+      const resp = await fetchWithCreds(`${serverUrl}/api/approvals/${id}/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(endpoint === "execute" ? { token } : {})
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "approval_update_failed");
+      if (endpoint === "execute") {
+        setPendingApprovalStatus("Approved action executed.");
+        setPendingApproval(null);
+      } else {
+        setPendingApproval(data.approval || null);
+        setPendingApprovalStatus(endpoint === "approve" ? "Approved. Ready to execute." : "Approval denied.");
+      }
+    } catch (err) {
+      setPendingApprovalStatus(err?.message || "approval_update_failed");
     }
   }
 
@@ -941,8 +972,41 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>Aika Tools v2</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>Aika Tools v2 (Legacy)</div>
       {error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{error}</div>}
+      {pendingApproval && (
+        <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 10, background: "var(--panel-bg)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Approval required</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {pendingApproval.humanSummary || pendingApproval.toolName || "Tool approval pending"}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            {pendingApproval.status === "pending" && (
+              <>
+                <button onClick={() => updateApproval(pendingApproval.id, "approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                  Approve
+                </button>
+                <button onClick={() => updateApproval(pendingApproval.id, "deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                  Deny
+                </button>
+              </>
+            )}
+            {pendingApproval.status === "approved" && (
+              <button onClick={() => updateApproval(pendingApproval.id, "execute", pendingApproval.token)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                Execute
+              </button>
+            )}
+            {onOpenSafety && (
+              <button onClick={onOpenSafety} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                Open Safety
+              </button>
+            )}
+          </div>
+          {pendingApprovalStatus && (
+            <div style={{ marginTop: 6, fontSize: 12, color: "var(--accent)" }}>{pendingApprovalStatus}</div>
+          )}
+        </div>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {["meetings", "notes", "todos", "vault", "calendar", "email", "spreadsheet", "memory", "integrations", "messaging"].map(tab => (
           <button
@@ -2446,73 +2510,14 @@ export default function AikaToolsWorkbench({ serverUrl }) {
 
       {active === "integrations" && (
         <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
-          <SectionHeader title="Integration Checks" helpKey="integrations" />
-          <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
-            Google status: {googleStatus?.connected ? "connected" : "not connected"}
-            {integrationsStatus?.google_docs?.configured === false ? " (missing config)" : ""}
+          <SectionHeader title="Connections" helpKey="integrations" />
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+            Connections are managed in Settings / Connections. Use that panel for OAuth and token setup.
           </div>
-          <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
-            Gmail scope: {googleStatus?.scopes?.some(s => String(s).includes("gmail")) ? "enabled" : "not enabled"}
-          </div>
-          <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>
-            Microsoft status: {microsoftStatus?.connected ? "connected" : "not connected"}
-            {integrationsStatus?.microsoft?.configured === false ? " (missing config)" : ""}
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            <button
-              onClick={() => window.open(`${serverUrl}/api/auth/google/connect?ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
-              style={{ padding: "6px 10px", borderRadius: 8 }}
-            >
-              Connect Google Docs
+          {onOpenConnections && (
+            <button onClick={onOpenConnections} style={{ padding: "6px 10px", borderRadius: 8 }}>
+              Open Connections
             </button>
-            <button
-              onClick={() => window.open(`${serverUrl}/api/integrations/google/connect?preset=gmail_full&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
-              style={{ padding: "6px 10px", borderRadius: 8 }}
-            >
-              Connect Gmail (Inbox + Send)
-            </button>
-            <button
-              onClick={() => window.open(`${serverUrl}/api/integrations/microsoft/connect?preset=mail_read&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
-              style={{ padding: "6px 10px", borderRadius: 8 }}
-            >
-              Connect Microsoft
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  const integrationsResp = await fetchWithCreds(`${serverUrl}/api/integrations`);
-                  const integrationsData = await integrationsResp.json();
-                  setIntegrationsStatus(integrationsData.integrations || {});
-                  const googleResp = await fetchWithCreds(`${serverUrl}/api/integrations/google/status`);
-                  setGoogleStatus(await googleResp.json());
-                  const microsoftResp = await fetchWithCreds(`${serverUrl}/api/integrations/microsoft/status`);
-                  setMicrosoftStatus(await microsoftResp.json());
-                } catch {
-                  // ignore
-                }
-              }}
-              style={{ padding: "6px 10px", borderRadius: 8 }}
-            >
-              Refresh Status
-            </button>
-          </div>
-          {configStatus && (
-            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
-              Server: {configStatus?.server?.ok ? "ok" : "unknown"} | Tools: {configStatus?.skills?.total ?? 0} skills
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={async () => { const resp = await runTool("integrations.plexIdentity", { mode: "localStub" }); setIntegrationResult(resp); }} style={{ padding: "6px 10px", borderRadius: 8 }}>
-              Plex Identity (stub)
-            </button>
-            <button onClick={async () => { const resp = await runTool("integrations.firefliesTranscripts", { mode: "stub", limit: 5 }); setIntegrationResult(resp); }} style={{ padding: "6px 10px", borderRadius: 8 }}>
-              Fireflies Transcripts (stub)
-            </button>
-          </div>
-          {integrationResult && (
-            <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11 }}>
-{JSON.stringify(integrationResult, null, 2)}
-            </pre>
           )}
         </div>
       )}

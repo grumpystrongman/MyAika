@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { responsesCreate } from "../llm/openaiClient.js";
 import { writeOutbox } from "../../storage/outbox.js";
 import { nowIso } from "../../storage/utils.js";
 import {
@@ -16,14 +16,7 @@ import { listAuditEvents } from "../safety/auditLog.js";
 
 let runnerInterval = null;
 let runnerActive = false;
-let openaiClient = null;
-
-function getOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  if (!apiKey) return null;
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
+// OpenAI client handled by shared wrapper.
 
 function parseList(value) {
   return String(value || "")
@@ -110,13 +103,12 @@ async function runTaskPrompt(task) {
   prompt = injectTradingKnowledgeSnapshot(prompt);
   prompt = injectOpsSnapshots(prompt, task);
   if (!prompt) throw new Error("task_prompt_missing");
-  const client = getOpenAIClient();
-  if (!client) {
+  if (!process.env.OPENAI_API_KEY) {
     return "Task executed. Configure OPENAI_API_KEY for AI-generated output.";
   }
   const system = "You are Aika, a personal assistant. Provide a concise, actionable response for the scheduled task.";
-  const response = await client.responses.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+  const response = await responsesCreate({
+    model: process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini",
     input: [
       { role: "system", content: [{ type: "input_text", text: system }] },
       { role: "user", content: [{ type: "input_text", text: prompt }] }
@@ -305,3 +297,4 @@ export function stopAssistantTasksLoop() {
   if (runnerInterval) clearInterval(runnerInterval);
   runnerInterval = null;
 }
+

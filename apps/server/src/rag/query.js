@@ -1,17 +1,9 @@
-﻿import OpenAI from "openai";
+import { responsesCreate } from "../llm/openaiClient.js";
 import { getEmbedding } from "./embeddings.js";
 import { searchChunkIds, searchChunkIdsLexical, getChunksByIds, listMeetingSummaries } from "./vectorStore.js";
 import { buildFtsQuery, mergeHybridMatches } from "./hybrid.js";
 
-let openaiClient = null;
-
-function getOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY || "";
-  if (!apiKey) return null;
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey });
-  return openaiClient;
-}
-
+// OpenAI client handled by shared wrapper.
 function buildContext(chunks) {
   return chunks.map((chunk, idx) => {
     const header = `[${idx + 1}] ${chunk.meeting_title || "Meeting"} (${chunk.occurred_at || ""}) | ${chunk.chunk_id}`;
@@ -152,12 +144,11 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
     if (summaryRows.length) {
       const context = buildSummaryContext(summaryRows);
       let answer = "I don't know based on the provided context.";
-      const client = getOpenAIClient();
-      if (!skipAnswer && client && context) {
+      if (!skipAnswer && process.env.OPENAI_API_KEY && context) {
         const system = "Answer using ONLY the provided context. If the answer is not in the context, say you don't know.";
         const user = `${convoPrefix}Question: ${query}\n\nContext:\n${context}`;
-        const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-        const response = await client.responses.create({
+        const model = process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+        const response = await responsesCreate({
           model,
           input: [
             { role: "system", content: [{ type: "input_text", text: system }] },
@@ -233,12 +224,11 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
 
   let answer = "I don't know based on the provided context.";
   const context = buildContext(top);
-  const client = getOpenAIClient();
-  if (!skipAnswer && client && context) {
+  if (!skipAnswer && process.env.OPENAI_API_KEY && context) {
     const system = "Answer using ONLY the provided context. If the answer is not in the context, say you don't know.";
     const user = `${convoPrefix}Question: ${query}\n\nContext:\n${context}`;
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-    const response = await client.responses.create({
+    const model = process.env.OPENAI_PRIMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const response = await responsesCreate({
       model,
       input: [
         { role: "system", content: [{ type: "input_text", text: system }] },
@@ -279,3 +269,5 @@ export async function answerRagQuestion(question, { topK = 8, filters = {}, conv
     }
   };
 }
+
+

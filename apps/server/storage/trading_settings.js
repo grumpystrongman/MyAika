@@ -84,6 +84,13 @@ function defaultTrainingSettings() {
   };
 }
 
+function defaultEngineSettings() {
+  return {
+    tradeApiUrl: String(process.env.TRADING_API_URL || "http://localhost:8088"),
+    alpacaFeed: String(process.env.ALPACA_FEED || "iex")
+  };
+}
+
 function applyOverrides(defaults, overrides) {
   const output = { ...defaults };
   if (!overrides || typeof overrides !== "object") return output;
@@ -158,28 +165,46 @@ function sanitizeTrainingSettings(input, fallback) {
   return base;
 }
 
+function sanitizeEngineSettings(input, fallback) {
+  const base = { ...fallback };
+  if (!input || typeof input !== "object") return base;
+  const url = input.tradeApiUrl || input.trade_api_url;
+  if (typeof url === "string") {
+    base.tradeApiUrl = url.trim() || base.tradeApiUrl;
+  }
+  const feed = String(input.alpacaFeed || input.alpaca_feed || "").trim().toLowerCase();
+  if (feed === "iex" || feed === "sip") {
+    base.alpacaFeed = feed;
+  }
+  return base;
+}
+
 export function getTradingSettings(userId = "local") {
   const db = getDb();
   const row = db.prepare("SELECT * FROM trading_settings WHERE id = ?").get(userId);
   const defaults = {
     email: defaultEmailSettings(),
-    training: defaultTrainingSettings()
+    training: defaultTrainingSettings(),
+    engine: defaultEngineSettings()
   };
   if (!row) {
     return {
       id: userId,
       email: defaults.email,
       training: defaults.training,
+      engine: defaults.engine,
       createdAt: null,
       updatedAt: null
     };
   }
   const emailStored = safeJsonParse(row.email_json, {});
   const trainingStored = safeJsonParse(row.training_json, {});
+  const engineStored = safeJsonParse(row.engine_json, {});
   return {
     id: userId,
     email: sanitizeEmailSettings(emailStored, defaults.email),
     training: sanitizeTrainingSettings(trainingStored, defaults.training),
+    engine: sanitizeEngineSettings(engineStored, defaults.engine),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
   };
@@ -196,19 +221,25 @@ export function updateTradingSettings(userId = "local", patch = {}) {
     applyOverrides(current.training, patch.training),
     current.training
   );
+  const engine = sanitizeEngineSettings(
+    applyOverrides(current.engine, patch.engine),
+    current.engine
+  );
   const now = nowIso();
   const createdAt = current.createdAt || now;
   db.prepare(
-    `INSERT INTO trading_settings (id, email_json, training_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO trading_settings (id, email_json, training_json, engine_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        email_json = excluded.email_json,
        training_json = excluded.training_json,
+       engine_json = excluded.engine_json,
        updated_at = excluded.updated_at`
   ).run(
     userId,
     JSON.stringify(email),
     JSON.stringify(training),
+    JSON.stringify(engine),
     createdAt,
     now
   );
@@ -216,6 +247,7 @@ export function updateTradingSettings(userId = "local", patch = {}) {
     id: userId,
     email,
     training,
+    engine,
     createdAt,
     updatedAt: now
   };
