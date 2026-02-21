@@ -17,7 +17,11 @@ def _resolve_env_file() -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=_resolve_env_file(), env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=_resolve_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: str = Field(default="development", alias="APP_ENV")
     app_name: str = Field(default="Aika Trading Assistant", alias="APP_NAME")
