@@ -1,9 +1,23 @@
+from pathlib import Path
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 
+def _resolve_env_file() -> str:
+    override = os.getenv("AIKA_TRADING_ENV_FILE")
+    if override:
+        return override
+    explicit = Path.cwd() / ".env"
+    if explicit.exists():
+        return str(explicit)
+    project_root = Path(__file__).resolve().parents[2]
+    candidate = project_root / ".env"
+    return str(candidate)
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=_resolve_env_file(), env_file_encoding="utf-8")
 
     app_env: str = Field(default="development", alias="APP_ENV")
     app_name: str = Field(default="Aika Trading Assistant", alias="APP_NAME")
