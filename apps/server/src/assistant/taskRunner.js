@@ -1,5 +1,4 @@
 import { responsesCreate } from "../llm/openaiClient.js";
-import { writeOutbox } from "../../storage/outbox.js";
 import { nowIso } from "../../storage/utils.js";
 import {
   listAssistantTasks,
@@ -9,10 +8,11 @@ import {
 } from "../../storage/assistant_tasks.js";
 import { listAssistantProposals } from "../../storage/assistant_change_proposals.js";
 import { executeAction } from "../safety/executeAction.js";
-import { sendGmailMessage, getGoogleStatus } from "../../integrations/google.js";
+import { executor } from "../../mcp/index.js";
 import { sendTelegramMessage } from "../../integrations/messaging.js";
 import { getTradingKnowledgeHealthSnapshot } from "../trading/knowledgeRag.js";
 import { listAuditEvents } from "../safety/auditLog.js";
+import { injectCalendarBriefing } from "../calendar/briefing.js";
 
 let runnerInterval = null;
 let runnerActive = false;
@@ -102,8 +102,15 @@ async function runTaskPrompt(task) {
   let prompt = String(task.prompt || "").trim();
   prompt = injectTradingKnowledgeSnapshot(prompt);
   prompt = injectOpsSnapshots(prompt, task);
+  let fallbackOutput = "";
+  if (prompt.includes("{{calendar_briefing_context}}")) {
+    const injected = await injectCalendarBriefing(prompt, task);
+    prompt = injected.prompt || prompt;
+    fallbackOutput = injected.fallbackOutput || "";
+  }
   if (!prompt) throw new Error("task_prompt_missing");
   if (!process.env.OPENAI_API_KEY) {
+    if (fallbackOutput) return fallbackOutput;
     return "Task executed. Configure OPENAI_API_KEY for AI-generated output.";
   }
   const system = "You are Aika, a personal assistant. Provide a concise, actionable response for the scheduled task.";
@@ -126,40 +133,11 @@ async function sendTaskEmail({ task, output }) {
   const subjectPrefix = process.env.ASSISTANT_TASK_EMAIL_SUBJECT_PREFIX || "Aika Task";
   const subject = `${subjectPrefix}: ${task.title}`;
   const text = limitText(output, 12000);
-  const fromName = String(process.env.EMAIL_FROM_NAME || "Aika Assistant");
-  const allowOutboxFallback = String(process.env.EMAIL_OUTBOX_FALLBACK || "0").toLowerCase() === "1";
 
-  const result = await executeAction({
-    actionType: "email.send",
-    params: { to: recipients, subject },
-    context: { userId: "system" },
-    outboundTargets: ["https://www.googleapis.com"],
-    summary: `Send task update email for ${task.title}`,
-    handler: async () => {
-      const googleStatus = getGoogleStatus("local");
-      const scopes = new Set(Array.isArray(googleStatus?.scopes) ? googleStatus.scopes : []);
-      const hasSendScope = scopes.has("https://www.googleapis.com/auth/gmail.send");
-      if (!googleStatus?.connected || !hasSendScope) {
-        if (!allowOutboxFallback) throw new Error("gmail_send_scope_missing");
-        const outbox = writeOutbox({
-          type: "assistant_task_email",
-          to: recipients,
-          subject,
-          text,
-          taskId: task.id,
-          reason: "gmail_send_scope_missing"
-        });
-        return { transport: "outbox", outboxId: outbox.id };
-      }
-      const sent = await sendGmailMessage({
-        to: recipients,
-        subject,
-        text,
-        fromName,
-        userId: "local"
-      });
-      return { transport: "gmail", messageId: sent?.id || null };
-    }
+  const result = await executor.callTool({
+    name: "email.send",
+    params: { to: recipients, subject, body: text },
+    context: { userId: task?.ownerId || "local", source: "assistant_task" }
   });
 
   if (result.status === "approval_required") {

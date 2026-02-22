@@ -171,12 +171,13 @@ export function evaluateAction({ actionType, params = {}, outboundTargets = [], 
     };
   }
 
+  const approvalExempt = actionInList(actionType, policy.approval_exempt_actions || []);
   const requiresApproval =
-    actionInList(actionType, policy.requires_approval || []) ||
+    (!approvalExempt && actionInList(actionType, policy.requires_approval || [])) ||
     protectedHit ||
-    (unknownDomain && policy?.network_rules?.require_approval_for_new_domains) ||
-    riskScore >= Number(policy.risk_threshold || 60) ||
-    (classification.sensitivity?.phi && actionType !== "memory.read" && !isEncryptedMemoryWrite);
+    (!approvalExempt && unknownDomain && policy?.network_rules?.require_approval_for_new_domains) ||
+    (!approvalExempt && riskScore >= Number(policy.risk_threshold || 60)) ||
+    (!approvalExempt && classification.sensitivity?.phi && actionType !== "memory.read" && !isEncryptedMemoryWrite);
 
   if (requiresApproval) {
     return {

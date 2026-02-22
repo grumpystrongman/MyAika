@@ -118,13 +118,42 @@ export default function SafetyPanel({ serverUrl }) {
   }
 
   async function handleApproval(id, action) {
-    const endpoint = action === "approve" ? "approve" : "reject";
+    const endpoint = action === "approve" ? "approve" : "deny";
     const resp = await fetch(`${serverUrl}/api/approvals/${id}/${endpoint}`, {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({})
     });
     await resp.json();
+    await loadApprovals();
+  }
+
+  async function handleApproveExecute(id) {
+    setMessage("");
+    try {
+      const approveResp = await fetch(`${serverUrl}/api/approvals/${id}/approve`, {
+        method: "POST",
+        headers: authHeaders()
+      });
+      const approved = await approveResp.json();
+      if (!approveResp.ok) throw new Error(approved?.error || "approval_failed");
+      const token = approved?.approval?.token;
+      if (!token) {
+        setMessage("Approved.");
+        await loadApprovals();
+        return;
+      }
+      const execResp = await fetch(`${serverUrl}/api/approvals/${id}/execute`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ token })
+      });
+      const execData = await execResp.json();
+      if (!execResp.ok) throw new Error(execData?.error || "approval_execute_failed");
+      setMessage("Approved action executed.");
+    } catch (err) {
+      setMessage(err?.message || "approval_execute_failed");
+    }
     await loadApprovals();
   }
 
@@ -308,6 +337,9 @@ export default function SafetyPanel({ serverUrl }) {
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
                 <button onClick={() => handleApproval(item.id, "approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
                   Approve
+                </button>
+                <button onClick={() => handleApproveExecute(item.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                  Approve + Execute
                 </button>
                 <button onClick={() => handleApproval(item.id, "reject")} style={{ padding: "4px 8px", borderRadius: 6 }}>
                   Reject

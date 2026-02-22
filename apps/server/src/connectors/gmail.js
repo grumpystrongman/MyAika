@@ -1,7 +1,7 @@
 import { getGoogleAccessToken } from "../../integrations/google.js";
 import { getProvider } from "../../integrations/store.js";
 import { ingestConnectorDocument } from "./ingest.js";
-import { fetchJson, normalizeText, parseList } from "./utils.js";
+import { fetchJson, normalizeText, parseList, stripHtml } from "./utils.js";
 import { setRagMeta } from "../rag/vectorStore.js";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
@@ -25,6 +25,26 @@ function getHeader(headers = [], name) {
   const key = String(name || "").toLowerCase();
   const found = headers.find(h => String(h?.name || "").toLowerCase() === key);
   return found?.value || "";
+}
+
+function decodeBase64Url(data = "") {
+  const safe = String(data || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = safe.length % 4 ? `${safe}${"=".repeat(4 - (safe.length % 4))}` : safe;
+  try {
+    return Buffer.from(padded, "base64").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function collectBodies(part, bodies) {
+  if (!part) return;
+  if (part?.body?.data) {
+    bodies.push({ mimeType: part?.mimeType || "", data: decodeBase64Url(part.body.data) });
+  }
+  if (Array.isArray(part?.parts)) {
+    part.parts.forEach(item => collectBodies(item, bodies));
+  }
 }
 
 async function listMessageIds(token, { limit = 50, query = "", labelIds = [] } = {}) {
@@ -79,6 +99,58 @@ export async function listGmailPreview({ userId = "local", limit = 20, lookbackD
     });
   }
   return previews;
+}
+
+export async function getGmailMessage({ userId = "local", messageId = "" } = {}) {
+  const safeId = String(messageId || "").trim();
+  if (!safeId) throw new Error("message_id_required");
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/gmail.readonly"], userId);
+  const url = new URL(`${GMAIL_API}/users/me/messages/${encodeURIComponent(safeId)}`);
+  url.searchParams.set("format", "full");
+  const detail = await fetchJson(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const headers = detail?.payload?.headers || [];
+  const subject = getHeader(headers, "Subject") || "(no subject)";
+  const from = getHeader(headers, "From");
+  const to = getHeader(headers, "To");
+  const date = getHeader(headers, "Date");
+  const receivedAt = date ? new Date(date).toISOString() : "";
+
+  const bodies = [];
+  collectBodies(detail?.payload, bodies);
+  let html = "";
+  let text = "";
+  for (const body of bodies) {
+    if (!html && String(body.mimeType).includes("text/html")) {
+      html = body.data || "";
+    }
+    if (!text && String(body.mimeType).includes("text/plain")) {
+      text = body.data || "";
+    }
+  }
+  if (!html && !text && detail?.payload?.body?.data) {
+    const mime = String(detail?.payload?.mimeType || "");
+    const data = decodeBase64Url(detail.payload.body.data);
+    if (mime.includes("text/html")) html = data;
+    else text = data;
+  }
+  if (!text && html) text = stripHtml(html);
+
+  return {
+    provider: "gmail",
+    id: detail?.id || safeId,
+    threadId: detail?.threadId || "",
+    subject,
+    from,
+    to,
+    receivedAt,
+    snippet: normalizeText(detail?.snippet || ""),
+    webLink: gmailWebLink(detail?.id || safeId),
+    labelIds: detail?.labelIds || [],
+    html,
+    text
+  };
 }
 
 export async function syncGmail({ userId = "local", limit } = {}) {

@@ -518,26 +518,21 @@ export async function appendSheetValues(spreadsheetId, range, values, userId = "
 }
 
 export async function listCalendarEvents(max = 10, userId = "") {
-  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events.readonly"], userId);
-  const params = new URLSearchParams({
-    maxResults: String(max),
-    timeMin: new Date().toISOString(),
-    singleEvents: "true",
-    orderBy: "startTime"
+  const now = new Date().toISOString();
+  return await listCalendarEventsRange({
+    timeMin: now,
+    max,
+    userId
   });
-  const r = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!r.ok) {
-    const text = await r.text();
-    throw new Error(text || "google_calendar_list_failed");
-  }
-  return await r.json();
 }
 
 export async function createCalendarEvent(payload, userId = "") {
   const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events"], userId);
-  const r = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+  const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+  if (payload?.conferenceData) {
+    url.searchParams.set("conferenceDataVersion", "1");
+  }
+  const r = await fetch(url.toString(), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -632,6 +627,63 @@ export async function sendGmailMessage({ to, subject, text, fromName = "", userI
     throw new Error(detail || "gmail_send_failed");
   }
   return await r.json();
+}
+
+export async function listCalendarEventsRange({ timeMin, timeMax = "", max = 10, userId = "" } = {}) {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events.readonly"], userId);
+  const params = new URLSearchParams({
+    maxResults: String(max),
+    timeMin: timeMin || new Date().toISOString(),
+    singleEvents: "true",
+    orderBy: "startTime",
+    conferenceDataVersion: "1",
+    fields: "items(id,summary,description,location,start,end,attendees,organizer,htmlLink,conferenceData,hangoutLink,status)"
+  });
+  if (timeMax) params.set("timeMax", timeMax);
+  const r = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "google_calendar_list_failed");
+  }
+  return await r.json();
+}
+
+export async function updateCalendarEvent(eventId, payload, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events"], userId);
+  const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`);
+  if (payload?.conferenceData) {
+    url.searchParams.set("conferenceDataVersion", "1");
+  }
+  const r = await fetch(url.toString(), {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "google_calendar_update_failed");
+  }
+  return await r.json();
+}
+
+export async function deleteCalendarEvent(eventId, userId = "") {
+  const token = await getGoogleAccessToken(["https://www.googleapis.com/auth/calendar.events"], userId);
+  const r = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "google_calendar_delete_failed");
+  }
+  return { ok: true };
 }
 
 async function modifyGmailLabels(messageId, payload, userId = "") {

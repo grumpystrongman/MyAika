@@ -46,6 +46,14 @@ async function listMessages(token, { folderId = "", limit = 50, lookbackDays } =
   return Array.isArray(data?.value) ? data.value : [];
 }
 
+async function getMessage(token, messageId) {
+  const safeId = String(messageId || "").trim();
+  if (!safeId) throw new Error("message_id_required");
+  const url = new URL(`${GRAPH_API}/me/messages/${encodeURIComponent(safeId)}`);
+  url.searchParams.set("$select", "id,subject,body,bodyPreview,receivedDateTime,webLink,from,toRecipients,ccRecipients,importance");
+  return fetchJson(url.toString(), { headers: buildHeaders(token) });
+}
+
 async function listEvents(token, { limit = 25, lookbackDays } = {}) {
   const url = new URL(`${GRAPH_API}/me/events`);
   url.searchParams.set("$top", String(limit));
@@ -169,4 +177,30 @@ export async function listOutlookPreview({ userId = "local", limit = 20, lookbac
   return items
     .sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0))
     .slice(0, Number(limit || 20));
+}
+
+export async function getOutlookMessage({ userId = "local", messageId = "" } = {}) {
+  const token = await getOutlookToken(userId);
+  if (!token) throw new Error("outlook_token_missing");
+  const detail = await getMessage(token, messageId);
+  const from = detail?.from?.emailAddress?.address || detail?.from?.emailAddress?.name || "";
+  const to = Array.isArray(detail?.toRecipients)
+    ? detail.toRecipients.map(r => r?.emailAddress?.address || r?.emailAddress?.name || "").filter(Boolean).join(", ")
+    : "";
+  const html = detail?.body?.contentType === "html" ? detail?.body?.content || "" : "";
+  const text = detail?.body?.contentType === "text"
+    ? detail?.body?.content || ""
+    : stripHtml(detail?.body?.content || "");
+  return {
+    provider: "outlook",
+    id: detail?.id || String(messageId || ""),
+    subject: detail?.subject || "(no subject)",
+    from,
+    to,
+    receivedAt: detail?.receivedDateTime || "",
+    snippet: normalizeText(stripHtml(detail?.bodyPreview || "")),
+    webLink: detail?.webLink || "",
+    html,
+    text
+  };
 }

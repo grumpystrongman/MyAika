@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getDb } from "../../storage/db.js";
 import { nowIso } from "../../storage/utils.js";
+import { notifyApprovalCreated } from "../notifications/approvalNotifications.js";
 
 function makeId() {
   return crypto.randomBytes(8).toString("hex");
@@ -41,7 +42,11 @@ export function createSafetyApproval({
     null,
     reason || ""
   );
-  return { id, status, createdAt };
+  const approval = { id, status, createdAt, toolName: actionType, humanSummary: summary || "" };
+  if (status === "pending") {
+    void notifyApprovalCreated(approval);
+  }
+  return approval;
 }
 
 export function listSafetyApprovals({ status } = {}) {

@@ -30,6 +30,15 @@ export const MICROSOFT_SCOPE_PRESETS = {
     "https://graph.microsoft.com/User.Read",
     "https://graph.microsoft.com/Mail.Read",
     "https://graph.microsoft.com/Calendars.Read"
+  ],
+  mail_calendar_readwrite: [
+    "openid",
+    "profile",
+    "email",
+    "offline_access",
+    "https://graph.microsoft.com/User.Read",
+    "https://graph.microsoft.com/Mail.Read",
+    "https://graph.microsoft.com/Calendars.ReadWrite"
   ]
 };
 
@@ -408,5 +417,73 @@ export function getMicrosoftStatus(userId = "") {
 export async function disconnectMicrosoft(userId = "") {
   setProvider("microsoft", null, userId);
   setProvider("outlook", null, userId);
+  return { ok: true };
+}
+
+export async function listMicrosoftCalendarEvents({ startISO, endISO, max = 25, userId = "", timezone = "" } = {}) {
+  const token = await getMicrosoftAccessToken(["https://graph.microsoft.com/Calendars.Read"], userId);
+  const params = new URLSearchParams({
+    startDateTime: startISO || new Date().toISOString(),
+    endDateTime: endISO || new Date(Date.now() + 7 * 86400000).toISOString(),
+    $top: String(max || 25),
+    $select: "id,subject,organizer,attendees,start,end,location,onlineMeeting,onlineMeetingUrl,webLink,importance,showAs,isCancelled"
+  });
+  const headers = { Authorization: `Bearer ${token}` };
+  if (timezone) {
+    headers.Prefer = `outlook.timezone=\"${timezone}\"`;
+  }
+  const r = await fetch(`${GRAPH_BASE}/me/calendarView?${params.toString()}`, { headers });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "microsoft_calendar_list_failed");
+  }
+  const data = await r.json();
+  return Array.isArray(data?.value) ? data.value : [];
+}
+
+export async function createMicrosoftCalendarEvent(payload = {}, userId = "") {
+  const token = await getMicrosoftAccessToken(["https://graph.microsoft.com/Calendars.ReadWrite"], userId);
+  const r = await fetch(`${GRAPH_BASE}/me/events`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "microsoft_calendar_create_failed");
+  }
+  return await r.json();
+}
+
+export async function updateMicrosoftCalendarEvent(eventId, payload = {}, userId = "") {
+  const token = await getMicrosoftAccessToken(["https://graph.microsoft.com/Calendars.ReadWrite"], userId);
+  const r = await fetch(`${GRAPH_BASE}/me/events/${encodeURIComponent(eventId)}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "microsoft_calendar_update_failed");
+  }
+  return await r.json();
+}
+
+export async function deleteMicrosoftCalendarEvent(eventId, userId = "") {
+  const token = await getMicrosoftAccessToken(["https://graph.microsoft.com/Calendars.ReadWrite"], userId);
+  const r = await fetch(`${GRAPH_BASE}/me/events/${encodeURIComponent(eventId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(text || "microsoft_calendar_delete_failed");
+  }
   return { ok: true };
 }

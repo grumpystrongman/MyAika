@@ -29,7 +29,10 @@ import {
   getSheetValues,
   appendSheetValues,
   listCalendarEvents,
+  listCalendarEventsRange,
   createCalendarEvent,
+  updateCalendarEvent,
+  deleteCalendarEvent,
   getSlidesPresentation,
   listMeetSpaces,
   createMeetSpace,
@@ -46,7 +49,11 @@ import {
   exchangeMicrosoftCode,
   resolveMicrosoftAccount,
   getMicrosoftStatus,
-  disconnectMicrosoft
+  disconnectMicrosoft,
+  listMicrosoftCalendarEvents,
+  createMicrosoftCalendarEvent,
+  updateMicrosoftCalendarEvent,
+  deleteMicrosoftCalendarEvent
 } from "./integrations/microsoft.js";
 import {
   fetchFirefliesTranscripts,
@@ -207,6 +214,8 @@ import {
   syncConfluenceConnector
 } from "./src/connectors/index.js";
 import { getEmailInbox } from "./src/connectors/emailInbox.js";
+import { getGmailMessage } from "./src/connectors/gmail.js";
+import { getOutlookMessage } from "./src/connectors/outlook.js";
 import {
   runEmailRules,
   startEmailRulesLoop,
@@ -266,6 +275,8 @@ import { listMacros, saveMacro, deleteMacro, getMacro, applyMacroParams, extract
 import { listCanvasCards, upsertCanvasCard } from "./src/canvas/store.js";
 import { listSkillVault, getSkillVaultEntry, scanSkillWithVirusTotal } from "./src/skillVault/registry.js";
 import { startAssistantTasksLoop } from "./src/assistant/taskRunner.js";
+import { startApprovalMaintenanceLoop } from "./src/safety/approvalMaintenance.js";
+import { ensureCalendarBriefingTask, buildCalendarBriefing } from "./src/calendar/briefing.js";
 import { startAssistantOpsLoop } from "./src/assistant/opsLoop.js";
 import { startAssistantProposalLoop } from "./src/assistant/proposalRunner.js";
 import { startMemoryRetentionLoop, runMemoryRetention } from "./src/assistant/memoryRetention.js";
@@ -335,9 +346,11 @@ startTradingRssLoop();
 startTradingYoutubeLoop();
 startSignalsScheduler();
 startAssistantTasksLoop();
+ensureCalendarBriefingTask({ userId: "local" });
 startAssistantOpsLoop();
 startAssistantProposalLoop();
 startMemoryRetentionLoop();
+startApprovalMaintenanceLoop();
 startWorkerLoop();
 startMetaRagLoop();
 const MONITOR_FLAG_KEY = "trading_recommendation_monitor";
@@ -377,6 +390,113 @@ function parseTagList(input) {
     return input.split(/[;,]/).map(item => item.trim()).filter(Boolean);
   }
   return [];
+}
+
+function parseBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.toLowerCase() === "true") return true;
+    if (value.toLowerCase() === "false") return false;
+  }
+  return undefined;
+}
+
+function parseCalendarProviders(input) {
+  const raw = String(input || "").trim().toLowerCase();
+  if (!raw || raw === "all") return ["google", "outlook"];
+  const list = raw.split(/[;,]/).map(item => item.trim()).filter(Boolean);
+  const normalized = list.map(item => item.toLowerCase());
+  return normalized.length ? normalized : ["google", "outlook"];
+}
+
+function normalizeAttendeeList(input) {
+  const list = Array.isArray(input) ? input : parseTagList(input);
+  return list.map(item => String(item || "").trim()).filter(Boolean);
+}
+
+function resolveAssistantEmail(userId) {
+  const profile = getAssistantProfile(userId);
+  const pref = profile?.preferences?.calendar?.assistantEmail || "";
+  return pref || process.env.CALENDAR_ASSISTANT_EMAIL || "";
+}
+
+function applyAssistantAttendee(attendees = [], includeAssistant, assistantEmail) {
+  if (!assistantEmail) return attendees;
+  const normalized = attendees.map(item => String(item || "").trim()).filter(Boolean);
+  const match = assistantEmail.toLowerCase();
+  const has = normalized.some(item => item.toLowerCase() === match);
+  if (includeAssistant === true && !has) {
+    return [...normalized, assistantEmail];
+  }
+  if (includeAssistant === false && has) {
+    return normalized.filter(item => item.toLowerCase() !== match);
+  }
+  return normalized;
+}
+
+function normalizeCalendarAttendees(attendees = []) {
+  if (!Array.isArray(attendees)) return [];
+  return attendees
+    .map(att => ({
+      name: String(att?.displayName || att?.name || "").trim(),
+      email: String(att?.email || att?.address || "").trim(),
+      responseStatus: String(att?.responseStatus?.response || att?.responseStatus || att?.status || "").trim()
+    }))
+    .filter(att => att.name || att.email);
+}
+
+function normalizeGoogleCalendarEvent(item = {}) {
+  const allDay = Boolean(item?.start?.date && !item?.start?.dateTime);
+  const start = item?.start?.dateTime || (item?.start?.date ? `${item.start.date}T00:00:00` : "");
+  const end = item?.end?.dateTime || (item?.end?.date ? `${item.end.date}T00:00:00` : "");
+  const meetingLink = item?.hangoutLink
+    || item?.conferenceData?.entryPoints?.find(entry => entry?.uri)?.uri
+    || "";
+  return {
+    provider: "google",
+    id: item?.id || "",
+    summary: item?.summary || "(no title)",
+    description: item?.description || "",
+    location: item?.location || "",
+    start,
+    end,
+    allDay,
+    attendees: normalizeCalendarAttendees(item?.attendees || []),
+    organizer: item?.organizer?.email || item?.organizer?.displayName || "",
+    meetingLink,
+    webLink: item?.htmlLink || "",
+    status: item?.status || ""
+  };
+}
+
+function normalizeOutlookCalendarEvent(item = {}) {
+  const start = item?.start?.dateTime || "";
+  const end = item?.end?.dateTime || "";
+  const allDay = Boolean(item?.isAllDay);
+  const attendees = Array.isArray(item?.attendees)
+    ? item.attendees.map(att => ({
+        name: att?.emailAddress?.name || "",
+        email: att?.emailAddress?.address || "",
+        responseStatus: att?.status?.response || ""
+      })).filter(att => att.name || att.email)
+    : [];
+  const meetingLink = item?.onlineMeeting?.joinUrl || item?.onlineMeetingUrl || "";
+  return {
+    provider: "outlook",
+    id: item?.id || "",
+    summary: item?.subject || "(no title)",
+    description: item?.bodyPreview || "",
+    location: item?.location?.displayName || "",
+    start,
+    end,
+    allDay,
+    attendees,
+    organizer: item?.organizer?.emailAddress?.address || item?.organizer?.emailAddress?.name || "",
+    meetingLink,
+    webLink: item?.webLink || "",
+    status: item?.isCancelled ? "cancelled" : "",
+    importance: item?.importance || ""
+  };
 }
 
 const serverRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -556,6 +676,7 @@ function buildIntegrationsState(userId = "") {
     robinhood: { connected: false }
   };
   const googleStored = getProvider("google", userId);
+  const metaStored = getProvider("meta", userId) || {};
   if (googleStored) {
     state.google_docs.connected = true;
     state.google_drive.connected = true;
@@ -602,12 +723,13 @@ function buildIntegrationsState(userId = "") {
     state.telegram.connectedAt = telegramStored.connectedAt || new Date().toISOString();
   }
   const whatsappConnected = Boolean(
+    metaStored?.whatsapp?.access_token ||
     (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) ||
     (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM && process.env.TWILIO_WHATSAPP_TO)
   );
   if (whatsappConnected) {
     state.whatsapp.connected = true;
-    state.whatsapp.connectedAt = new Date().toISOString();
+    state.whatsapp.connectedAt = metaStored?.connectedAt || new Date().toISOString();
   }
   const smsConnected = Boolean(
     process.env.TWILIO_ACCOUNT_SID &&
@@ -677,6 +799,8 @@ function buildConnections(userId = "") {
   });
 
   const notionStored = getProvider("notion", userId);
+  const notionOAuthConfigured = Boolean(process.env.NOTION_CLIENT_ID && process.env.NOTION_CLIENT_SECRET);
+  const notionTokenConfigured = Boolean(process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN);
   connections.push({
     id: "notion",
     label: "Notion",
@@ -685,10 +809,13 @@ function buildConnections(userId = "") {
     scopes: [],
     lastUsedAt: notionStored?.lastUsedAt || null,
     connectedAt: notionStored?.connectedAt || null,
-    configured: Boolean(process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN),
-    method: "api_key",
-    connectLabel: "Set API Token",
-    setupHint: "Set NOTION_TOKEN in apps/server/.env"
+    configured: notionOAuthConfigured || notionTokenConfigured,
+    method: notionOAuthConfigured ? "oauth" : "api_key",
+    connectUrl: notionOAuthConfigured ? "/api/integrations/notion/connect" : null,
+    connectLabel: notionOAuthConfigured ? "Connect Notion" : "Set API Token",
+    setupHint: notionOAuthConfigured
+      ? "Set NOTION_CLIENT_ID and NOTION_CLIENT_SECRET in apps/server/.env"
+      : "Set NOTION_TOKEN in apps/server/.env"
   });
 
   const outlookStored = getProvider("outlook", userId) || getProvider("microsoft", userId);
@@ -701,13 +828,11 @@ function buildConnections(userId = "") {
     scopes: outlookStored?.scope ? String(outlookStored.scope).split(" ") : [],
     lastUsedAt: outlookStored?.lastUsedAt || null,
     connectedAt: outlookStored?.connectedAt || null,
-    configured: microsoftConfigured || Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN),
-    method: microsoftConfigured ? "oauth" : "token",
+    configured: microsoftConfigured,
+    method: "oauth",
     connectUrl: "/api/integrations/microsoft/connect?preset=mail_read",
-    connectLabel: microsoftConfigured ? "Connect Microsoft" : "Set Access Token",
-    setupHint: microsoftConfigured
-      ? "Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_REDIRECT_URI(S) in apps/server/.env"
-      : "Set OUTLOOK_ACCESS_TOKEN in apps/server/.env"
+    connectLabel: "Connect Microsoft",
+    setupHint: "Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_REDIRECT_URI(S) in apps/server/.env"
   });
 
   connections.push({
@@ -817,7 +942,17 @@ function buildConnections(userId = "") {
     setupHint: "Set TELEGRAM_BOT_TOKEN in apps/server/.env"
   });
 
-  const whatsappConfigured = Boolean(
+  const metaStored = getProvider("meta", userId) || {};
+  const whatsappOAuthConfigured = Boolean(
+    (process.env.WHATSAPP_APP_ID && process.env.WHATSAPP_APP_SECRET) ||
+    (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET)
+  );
+  const whatsappTokenConfigured = Boolean(
+    (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID) ||
+    (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM)
+  );
+  const whatsappConnected = Boolean(
+    metaStored?.whatsapp?.access_token ||
     (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) ||
     (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM && process.env.TWILIO_WHATSAPP_TO)
   );
@@ -825,14 +960,17 @@ function buildConnections(userId = "") {
     id: "whatsapp",
     label: "WhatsApp",
     detail: "Outbound notifications",
-    status: whatsappConfigured ? "connected" : "disconnected",
+    status: whatsappConnected ? "connected" : "disconnected",
     scopes: [],
     lastUsedAt: null,
     connectedAt: null,
-    configured: whatsappConfigured,
-    method: "api_key",
-    connectLabel: "Set WhatsApp Keys",
-    setupHint: "Set WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID (Cloud API) or TWILIO_WHATSAPP_*"
+    configured: whatsappOAuthConfigured || whatsappTokenConfigured,
+    method: whatsappOAuthConfigured ? "oauth" : "api_key",
+    connectUrl: whatsappOAuthConfigured ? "/api/integrations/meta/connect?product=whatsapp" : null,
+    connectLabel: whatsappOAuthConfigured ? "Connect WhatsApp" : "Set WhatsApp Keys",
+    setupHint: whatsappOAuthConfigured
+      ? "Set WHATSAPP_APP_ID and WHATSAPP_APP_SECRET (or FACEBOOK_APP_ID/SECRET) plus WHATSAPP_PHONE_NUMBER_ID"
+      : "Set WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID (Cloud API) or TWILIO_WHATSAPP_*"
   });
 
   const smsConfigured = Boolean(
@@ -855,7 +993,6 @@ function buildConnections(userId = "") {
     setupHint: "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_SMS_FROM, TWILIO_SMS_TO"
   });
 
-  const metaStored = getProvider("meta", userId) || {};
   const metaConfigured = Boolean(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET);
   connections.push({
     id: "facebook",
@@ -3742,7 +3879,8 @@ app.get("/api/aika/config", (_req, res) => {
 app.get("/api/integrations", (req, res) => {
   const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const firefliesConfigured = Boolean(process.env.FIREFLIES_API_KEY);
-  const notionConfigured = Boolean(process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN);
+  const notionOAuthConfigured = Boolean(process.env.NOTION_CLIENT_ID && process.env.NOTION_CLIENT_SECRET);
+  const notionConfigured = Boolean(process.env.NOTION_TOKEN || process.env.NOTION_ACCESS_TOKEN || notionOAuthConfigured);
   const outlookConfigured = Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN || (process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET));
   const gmailConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const microsoftConfigured = Boolean(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
@@ -3758,6 +3896,7 @@ app.get("/api/integrations", (req, res) => {
   const instagramConfigured = Boolean(process.env.INSTAGRAM_APP_ID && process.env.INSTAGRAM_APP_SECRET);
   const whatsappConfigured = Boolean(
     (process.env.WHATSAPP_APP_ID && process.env.WHATSAPP_APP_SECRET) ||
+    (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) ||
     (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TO) ||
     (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM && process.env.TWILIO_WHATSAPP_TO)
   );
@@ -5956,7 +6095,7 @@ app.post("/api/connections/:id/revoke", rateLimit, async (req, res) => {
   try {
     if (id === "google") {
       await disconnectGoogle(getUserId(req));
-    } else if (id === "facebook" || id === "instagram") {
+    } else if (id === "facebook" || id === "instagram" || id === "whatsapp") {
       const meta = getProvider("meta", getUserId(req)) || {};
       const next = { ...meta };
       delete next[id];
@@ -6207,6 +6346,9 @@ app.put("/api/assistant/profile", (req, res) => {
   const userId = getUserId(req);
   try {
     const profile = updateAssistantProfile(userId, req.body || {});
+    if (req.body?.preferences?.calendarBriefing || req.body?.notifications) {
+      ensureCalendarBriefingTask({ userId });
+    }
     res.json({ profile });
   } catch (err) {
     res.status(400).json({ error: err?.message || "profile_update_failed" });
@@ -6593,7 +6735,8 @@ app.post("/api/approvals", rateLimit, async (req, res) => {
     const redactedParams = JSON.parse(redactPhi(JSON.stringify(params || {})) || "{}");
     const request = {
       toolName,
-      params: redactedParams,
+      params: params || {},
+      paramsRedacted: redactedParams,
       humanSummary: humanSummary || `Request to run ${toolName}`,
       riskLevel: riskLevel || "medium",
       createdBy: getUserId(req),
@@ -6987,6 +7130,64 @@ app.get("/api/integrations/discord/callback", async (req, res) => {
 app.post("/api/integrations/discord/disconnect", (_req, res) => {
   setProvider("discord", null, getUserId(_req));
   res.json({ ok: true });
+});
+
+app.get("/api/integrations/notion/connect", (_req, res) => {
+  if (!process.env.NOTION_CLIENT_ID || !process.env.NOTION_CLIENT_SECRET) {
+    return res.status(400).send("notion_oauth_not_configured");
+  }
+  const redirectUri = process.env.NOTION_REDIRECT_URI || `${getBaseUrl()}/api/integrations/notion/callback`;
+  const state = createOAuthState("notion");
+  const params = new URLSearchParams({
+    client_id: process.env.NOTION_CLIENT_ID,
+    response_type: "code",
+    owner: "user",
+    redirect_uri: redirectUri,
+    state
+  });
+  const url = `https://api.notion.com/v1/oauth/authorize?${params.toString()}`;
+  res.redirect(url);
+});
+
+app.get("/api/integrations/notion/callback", async (req, res) => {
+  try {
+    const { code, state } = req.query || {};
+    validateOAuthState("notion", String(state || ""));
+    const redirectUri = process.env.NOTION_REDIRECT_URI || `${getBaseUrl()}/api/integrations/notion/callback`;
+    const basic = Buffer.from(`${process.env.NOTION_CLIENT_ID}:${process.env.NOTION_CLIENT_SECRET}`).toString("base64");
+    const r = await fetch("https://api.notion.com/v1/oauth/token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        grant_type: "authorization_code",
+        code: String(code || ""),
+        redirect_uri: redirectUri
+      })
+    });
+    const data = await r.json();
+    if (!data?.access_token) throw new Error(data?.error || "notion_oauth_failed");
+    setProvider("notion", {
+      access_token: data.access_token,
+      token_type: data.token_type || null,
+      bot_id: data.bot_id || null,
+      workspace_id: data.workspace_id || null,
+      workspace_name: data.workspace_name || null,
+      owner: data.owner || null,
+      connectedAt: new Date().toISOString()
+    }, getUserId(req));
+    writeAudit({
+      type: "connection_token_stored",
+      at: new Date().toISOString(),
+      provider: "notion",
+      userId: getUserId(req)
+    });
+    res.redirect(`${getUiBaseUrl()}/?integration=notion&status=success`);
+  } catch (err) {
+    res.redirect(`${getUiBaseUrl()}/?integration=notion&status=error`);
+  }
 });
 
 app.get("/api/integrations/coinbase/connect", (_req, res) => {
@@ -7438,6 +7639,222 @@ app.post("/api/integrations/google/calendar/create", async (req, res) => {
   }
 });
 
+app.get("/api/calendar/events", rateLimit, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const providers = parseCalendarProviders(req.query.providers || req.query.provider || "all");
+    const startISO = String(req.query.start || req.query.startISO || new Date().toISOString());
+    const endISO = String(req.query.end || req.query.endISO || new Date(Date.now() + 7 * 86400000).toISOString());
+    const max = Math.min(200, Math.max(1, Number(req.query.max || 60)));
+    const timezone = String(req.query.timezone || "").trim();
+
+    const events = [];
+    if (providers.includes("google")) {
+      const data = await listCalendarEventsRange({
+        timeMin: startISO,
+        timeMax: endISO,
+        max,
+        userId
+      });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      items.forEach(item => {
+        const normalized = normalizeGoogleCalendarEvent(item);
+        if (normalized.status === "cancelled") return;
+        events.push(normalized);
+      });
+    }
+    if (providers.includes("outlook")) {
+      const items = await listMicrosoftCalendarEvents({
+        startISO,
+        endISO,
+        max,
+        userId,
+        timezone
+      });
+      items.forEach(item => {
+        const normalized = normalizeOutlookCalendarEvent(item);
+        if (normalized.status === "cancelled") return;
+        events.push(normalized);
+      });
+    }
+
+    events.sort((a, b) => new Date(a.start || 0).getTime() - new Date(b.start || 0).getTime());
+    res.json({ events });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "calendar_events_failed" });
+  }
+});
+
+app.post("/api/calendar/events", rateLimit, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const {
+      provider = "google",
+      summary,
+      startISO,
+      endISO,
+      timezone = "UTC",
+      attendees = [],
+      location = "",
+      description = "",
+      includeAssistant,
+      createMeetingLink
+    } = req.body || {};
+    if (!summary || !startISO || !endISO) {
+      return res.status(400).json({ error: "summary_start_end_required" });
+    }
+    const assistantEmail = resolveAssistantEmail(userId);
+    const includeFlag = parseBoolean(includeAssistant);
+    const attendeeList = applyAssistantAttendee(normalizeAttendeeList(attendees), includeFlag, assistantEmail);
+
+    if (String(provider).toLowerCase() === "google") {
+      const payload = {
+        summary,
+        start: { dateTime: startISO, timeZone: timezone },
+        end: { dateTime: endISO, timeZone: timezone }
+      };
+      if (description) payload.description = description;
+      if (location) payload.location = location;
+      if (attendeeList.length) payload.attendees = attendeeList.map(email => ({ email }));
+      if (createMeetingLink) {
+        payload.conferenceData = { createRequest: { requestId: `aika-${Date.now()}` } };
+      }
+      const data = await createCalendarEvent(payload, userId);
+      return res.json({ event: normalizeGoogleCalendarEvent(data) });
+    }
+
+    if (String(provider).toLowerCase() === "outlook") {
+      const payload = {
+        subject: summary,
+        start: { dateTime: startISO, timeZone: timezone },
+        end: { dateTime: endISO, timeZone: timezone }
+      };
+      if (description) {
+        payload.body = { contentType: "HTML", content: description };
+      }
+      if (location) {
+        payload.location = { displayName: location };
+      }
+      if (attendeeList.length) {
+        payload.attendees = attendeeList.map(email => ({
+          emailAddress: { address: email },
+          type: "required"
+        }));
+      }
+      if (createMeetingLink) {
+        payload.isOnlineMeeting = true;
+        payload.onlineMeetingProvider = "teamsForBusiness";
+      }
+      const data = await createMicrosoftCalendarEvent(payload, userId);
+      return res.json({ event: normalizeOutlookCalendarEvent(data) });
+    }
+
+    return res.status(400).json({ error: "unsupported_provider" });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "calendar_event_create_failed" });
+  }
+});
+
+app.patch("/api/calendar/events", rateLimit, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const {
+      provider = "google",
+      eventId,
+      summary,
+      startISO,
+      endISO,
+      timezone = "UTC",
+      attendees,
+      location,
+      description,
+      includeAssistant,
+      createMeetingLink
+    } = req.body || {};
+    if (!eventId) return res.status(400).json({ error: "event_id_required" });
+    const assistantEmail = resolveAssistantEmail(userId);
+    const includeFlag = parseBoolean(includeAssistant);
+    const hasAttendees = attendees !== undefined;
+    const attendeeList = hasAttendees
+      ? applyAssistantAttendee(normalizeAttendeeList(attendees), includeFlag, assistantEmail)
+      : [];
+
+    if (String(provider).toLowerCase() === "google") {
+      const payload = {};
+      if (summary) payload.summary = summary;
+      if (startISO) payload.start = { dateTime: startISO, timeZone: timezone };
+      if (endISO) payload.end = { dateTime: endISO, timeZone: timezone };
+      if (description !== undefined) payload.description = description || "";
+      if (location !== undefined) payload.location = location || "";
+      if (hasAttendees) {
+        payload.attendees = attendeeList.map(email => ({ email }));
+      }
+      if (createMeetingLink) {
+        payload.conferenceData = { createRequest: { requestId: `aika-${Date.now()}` } };
+      }
+      const data = await updateCalendarEvent(eventId, payload, userId);
+      return res.json({ event: normalizeGoogleCalendarEvent(data) });
+    }
+
+    if (String(provider).toLowerCase() === "outlook") {
+      const payload = {};
+      if (summary) payload.subject = summary;
+      if (startISO) payload.start = { dateTime: startISO, timeZone: timezone };
+      if (endISO) payload.end = { dateTime: endISO, timeZone: timezone };
+      if (description !== undefined) {
+        payload.body = { contentType: "HTML", content: description || "" };
+      }
+      if (location !== undefined) {
+        payload.location = { displayName: location || "" };
+      }
+      if (hasAttendees) {
+        payload.attendees = attendeeList.map(email => ({
+          emailAddress: { address: email },
+          type: "required"
+        }));
+      }
+      if (createMeetingLink) {
+        payload.isOnlineMeeting = true;
+        payload.onlineMeetingProvider = "teamsForBusiness";
+      }
+      const data = await updateMicrosoftCalendarEvent(eventId, payload, userId);
+      return res.json({ event: normalizeOutlookCalendarEvent(data) });
+    }
+
+    return res.status(400).json({ error: "unsupported_provider" });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "calendar_event_update_failed" });
+  }
+});
+
+app.delete("/api/calendar/events", rateLimit, async (req, res) => {
+  try {
+    const provider = String(req.body?.provider || req.query.provider || "google").toLowerCase();
+    const eventId = String(req.body?.eventId || req.query.eventId || "").trim();
+    if (!eventId) return res.status(400).json({ error: "event_id_required" });
+    if (provider === "google") {
+      await deleteCalendarEvent(eventId, getUserId(req));
+      return res.json({ ok: true });
+    }
+    if (provider === "outlook") {
+      await deleteMicrosoftCalendarEvent(eventId, getUserId(req));
+      return res.json({ ok: true });
+    }
+    return res.status(400).json({ error: "unsupported_provider" });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "calendar_event_delete_failed" });
+  }
+});
+
+app.get("/api/calendar/briefing/preview", async (req, res) => {
+  try {
+    const briefing = await buildCalendarBriefing({ userId: getUserId(req) });
+    res.json({ briefing });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "calendar_briefing_failed" });
+  }
+});
+
 app.get("/api/integrations/google/slides/get", async (req, res) => {
   try {
     const presentationId = req.query.presentationId;
@@ -7607,6 +8024,25 @@ app.get("/api/email/inbox", rateLimit, async (req, res) => {
     res.json({ ok: true, items });
   } catch (err) {
     res.status(500).json({ error: err?.message || "email_inbox_failed" });
+  }
+});
+
+app.get("/api/email/message", rateLimit, async (req, res) => {
+  try {
+    const provider = String(req.query.provider || "gmail").toLowerCase();
+    const messageId = String(req.query.messageId || req.query.id || "").trim();
+    if (!messageId) return res.status(400).json({ error: "message_id_required" });
+    let message = null;
+    if (provider === "gmail") {
+      message = await getGmailMessage({ userId: getUserId(req), messageId });
+    } else if (provider === "outlook") {
+      message = await getOutlookMessage({ userId: getUserId(req), messageId });
+    } else {
+      return res.status(400).json({ error: "unsupported_provider" });
+    }
+    res.json({ ok: true, message });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "email_message_failed" });
   }
 });
 

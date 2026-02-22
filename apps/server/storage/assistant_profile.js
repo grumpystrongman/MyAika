@@ -2,6 +2,7 @@ import { getDb } from "./db.js";
 import { nowIso, safeJsonParse } from "./utils.js";
 
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || "America/New_York";
+const DEFAULT_ASSISTANT_EMAIL = process.env.CALENDAR_ASSISTANT_EMAIL || "";
 const DEFAULT_MEMORY_MODE = "opt_in";
 const MAX_SUMMARY_CHARS = 2000;
 
@@ -50,6 +51,9 @@ function defaultPreferences() {
     rag: {
       defaultModel: "auto",
       tradingModel: "trading"
+    },
+    calendar: {
+      assistantEmail: DEFAULT_ASSISTANT_EMAIL
     }
   };
 }

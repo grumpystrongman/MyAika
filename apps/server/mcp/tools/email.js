@@ -1,5 +1,6 @@
 import { createEmailDraft, getEmailDraft, updateEmailDraftStatus } from "../../storage/email.js";
 import { writeOutbox } from "../../storage/outbox.js";
+import { getGoogleStatus, sendGmailMessage } from "../../integrations/google.js";
 import {
   buildDraftReply,
   createTodoFromEmail,
@@ -18,7 +19,18 @@ export function draftReply({ originalEmail, tone = "friendly", context = "", sig
   });
 }
 
-export function sendEmail({ draftId, sendTo = null, to = null, subject = "", body = "", cc = [], bcc = [] }, contextData = {}) {
+function hasGmailSendScope(status) {
+  const scopes = new Set(Array.isArray(status?.scopes) ? status.scopes : []);
+  return scopes.has("https://www.googleapis.com/auth/gmail.send");
+}
+
+function resolveTransportPreference() {
+  const raw = String(process.env.EMAIL_TOOL_TRANSPORT || "auto").trim().toLowerCase();
+  if (["gmail", "stub", "auto"].includes(raw)) return raw;
+  return "auto";
+}
+
+export async function sendEmail({ draftId, sendTo = null, to = null, subject = "", body = "", cc = [], bcc = [] }, contextData = {}) {
   const userId = contextData.userId || "local";
   const resolvedTo = sendTo || to || [];
   const normalizedTo = normalizeRecipients(resolvedTo);
@@ -74,6 +86,10 @@ export function sendEmail({ draftId, sendTo = null, to = null, subject = "", bod
   }
 
   updateEmailDraftStatus(resolvedDraftId, "sent");
+
+  const transportPref = resolveTransportPreference();
+  const gmailStatus = transportPref === "stub" ? null : getGoogleStatus(userId);
+  const canUseGmail = transportPref === "gmail" || (transportPref === "auto" && gmailStatus?.connected && hasGmailSendScope(gmailStatus));
   const payload = {
     type: "email",
     draftId: resolvedDraftId,
@@ -82,8 +98,29 @@ export function sendEmail({ draftId, sendTo = null, to = null, subject = "", bod
     bcc: normalizedBcc,
     subject: draftSubject,
     body: draftBody,
-    transport: "stub"
+    transport: canUseGmail ? "gmail" : "stub"
   };
+
+  if (canUseGmail) {
+    const fromName = String(process.env.EMAIL_FROM_NAME || "");
+    const sent = await sendGmailMessage({
+      to: payload.to,
+      subject: payload.subject,
+      text: payload.body,
+      fromName,
+      userId
+    });
+    const outbox = writeOutbox({ ...payload, messageId: sent?.id || null });
+    return {
+      status: "sent",
+      transport: "gmail",
+      messageId: sent?.id || null,
+      outboxId: outbox.id,
+      to: payload.to,
+      subject: payload.subject
+    };
+  }
+
   const outbox = writeOutbox(payload);
   return {
     status: "sent",

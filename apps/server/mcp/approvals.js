@@ -6,9 +6,18 @@ import {
   markApprovalExecuted,
   denyApprovalRecord
 } from "../storage/approvals.js";
+import { notifyApprovalCreated } from "../src/notifications/approvalNotifications.js";
+
+function safeParse(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 export function createApproval(request) {
-  const { toolName, params, humanSummary, riskLevel, createdBy, correlationId } = request;
+  const { toolName, params, paramsRedacted, humanSummary, riskLevel, createdBy, correlationId } = request;
   const preview = humanSummary || `Request to run ${toolName}`;
   const record = createApprovalRecord({
     tool: toolName,
@@ -16,20 +25,22 @@ export function createApproval(request) {
     preview,
     actionType: toolName,
     summary: preview,
-    payloadRedacted: params,
+    payloadRedacted: paramsRedacted ?? params,
     createdBy
   });
-  return {
+  const approval = {
     id: record.id,
     status: record.status,
     createdAt: record.createdAt,
     toolName,
-    params,
+    params: paramsRedacted ?? params,
     humanSummary: preview,
     riskLevel,
     createdBy,
     correlationId
   };
+  void notifyApprovalCreated(approval);
+  return approval;
 }
 
 export function approveApproval(id, approvedBy) {
@@ -49,12 +60,14 @@ export function approveApproval(id, approvedBy) {
 export function getApproval(id) {
   const record = getApprovalRecord(id);
   if (!record) return null;
-  const request = JSON.parse(record.request_json || "{}");
+  const request = safeParse(record.request_json, {});
+  const redacted = safeParse(record.payload_redacted_json, request?.params || {});
   return {
     id: record.id,
     status: record.status,
     toolName: record.tool,
     params: request.params || {},
+    paramsRedacted: redacted,
     humanSummary: record.preview,
     riskLevel: request.riskLevel,
     createdBy: request.createdBy,
@@ -65,12 +78,13 @@ export function getApproval(id) {
 
 export function listApprovals() {
   return listApprovalsRecord().map(record => {
-    const request = JSON.parse(record.request_json || "{}");
+    const request = safeParse(record.request_json, {});
+    const redacted = safeParse(record.payload_redacted_json, request?.params || {});
     return {
       id: record.id,
       status: record.status,
       toolName: record.tool,
-      params: request.params || {},
+      params: redacted,
       humanSummary: record.preview,
       riskLevel: request.riskLevel,
       createdBy: request.createdBy,

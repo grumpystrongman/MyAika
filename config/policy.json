@@ -8,6 +8,7 @@
     "notes.create",
     "notes.search",
     "todos.create",
+    "todos.listLists",
     "todos.list",
     "todo.reminder",
     "meeting.summarize",
@@ -85,6 +86,10 @@
     "finance.transfer",
     "finance.trade",
     "kill_switch.disable"
+  ],
+  "approval_exempt_actions": [
+    "messaging.telegramSend",
+    "messaging.telegramVoiceSend"
   ],
   "protected_paths": [
     "C:\\\\Windows\\\\*",

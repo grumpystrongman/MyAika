@@ -215,6 +215,7 @@ const AVATAR_BACKGROUNDS = [
 
 const VALID_TABS = new Set([
   "chat",
+  "calendar",
   "recordings",
   "tools",
   "actionRunner",
@@ -355,6 +356,41 @@ function formatActionStatus(status = "") {
   return value.replace(/_/g, " ");
 }
 
+function toLocalDateInput(value) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function fromDateInput(value, endOfDay = false) {
+  if (!value) return "";
+  const suffix = endOfDay ? "T23:59:59" : "T00:00:00";
+  const date = new Date(`${value}${suffix}`);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function addDays(dateInput, delta) {
+  if (!dateInput) return "";
+  const base = new Date(`${dateInput}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return dateInput;
+  base.setDate(base.getDate() + delta);
+  return toLocalDateInput(base);
+}
+
+function formatCalendarTime(value) {
+  if (!value) return "--";
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return value;
+  return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatCalendarRange(start, end) {
+  const startLabel = formatCalendarTime(start);
+  if (!end) return startLabel;
+  return `${startLabel} - ${formatCalendarTime(end)}`;
+}
+
 async function unlockAudio() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx) return false;
@@ -471,6 +507,11 @@ export default function Home() {
   const [tradingSettingsStatus, setTradingSettingsStatus] = useState("");
   const [tradingSettingsError, setTradingSettingsError] = useState("");
   const [tradingSettingsLoading, setTradingSettingsLoading] = useState(false);
+  const [calendarDate, setCalendarDate] = useState(() => toLocalDateInput(new Date()));
+  const [calendarProvider, setCalendarProvider] = useState("all");
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState("");
   const [userText, setUserText] = useState("");
   const [toolsList, setToolsList] = useState([]);
   const [toolsError, setToolsError] = useState("");
@@ -561,6 +602,7 @@ export default function Home() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState("connections");
+  const calendarTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -2110,6 +2152,11 @@ export default function Home() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (activeTab !== "calendar") return;
+    loadCalendarDayEvents();
+  }, [activeTab, calendarDate, calendarProvider]);
+
+  useEffect(() => {
     if (activeTab !== "features") return;
     let cancelled = false;
     async function loadFeatures(force = false) {
@@ -3123,12 +3170,16 @@ export default function Home() {
 
     const connectSpecs = {
       google: { method: "oauth", authorizeUrl: "/api/integrations/google/connect" },
+      outlook: { method: "oauth", authorizeUrl: "/api/integrations/microsoft/connect?preset=mail_read" },
+      microsoft: { method: "oauth", authorizeUrl: "/api/integrations/microsoft/connect?preset=mail_read" },
       amazon: { method: "oauth", authorizeUrl: "/api/integrations/amazon/auth/start" },
       walmart: { method: "oauth", authorizeUrl: "/api/integrations/walmart/auth/start" },
+      notion: { method: "oauth", authorizeUrl: "/api/integrations/notion/connect" },
+      whatsapp: { method: "oauth", authorizeUrl: "/api/integrations/meta/connect?product=whatsapp" },
       fireflies: { method: "api_key", fields: [{ key: "FIREFLIES_API_KEY", label: "Fireflies API Key", type: "password", required: true }] },
-      slack: { method: "api_key", fields: [{ key: "SLACK_BOT_TOKEN", label: "Slack Bot Token", type: "password", required: true }] },
+      slack: { method: "oauth", authorizeUrl: "/api/integrations/slack/connect" },
       telegram: { method: "api_key", fields: [{ key: "TELEGRAM_BOT_TOKEN", label: "Telegram Bot Token", type: "password", required: true }] },
-      discord: { method: "api_key", fields: [{ key: "DISCORD_BOT_TOKEN", label: "Discord Bot Token", type: "password", required: true }] },
+      discord: { method: "oauth", authorizeUrl: "/api/integrations/discord/connect" },
       plex: { method: "api_key", fields: [{ key: "PLEX_TOKEN", label: "Plex Token", type: "password", required: true }] }
     };
 
@@ -3185,6 +3236,29 @@ export default function Home() {
       }))
     };
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+  }
+
+  async function loadCalendarDayEvents(selectedDate = calendarDate) {
+    if (!selectedDate) return;
+    setCalendarLoading(true);
+    setCalendarError("");
+    try {
+      const params = new URLSearchParams({
+        providers: calendarProvider,
+        start: fromDateInput(selectedDate, false),
+        end: fromDateInput(selectedDate, true),
+        timezone: calendarTimezone
+      });
+      const resp = await fetch(`${SERVER_URL}/api/calendar/events?${params.toString()}`, { credentials: "include" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "calendar_events_failed");
+      setCalendarEvents(Array.isArray(data.events) ? data.events : []);
+    } catch (err) {
+      setCalendarEvents([]);
+      setCalendarError(err?.message || "calendar_events_failed");
+    } finally {
+      setCalendarLoading(false);
+    }
   }
 
   function handleBackgroundUpload(file) {
@@ -3398,6 +3472,17 @@ export default function Home() {
               Trading
             </button>
             <button
+              onClick={() => setActiveTab("calendar")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: activeTab === "calendar" ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                background: activeTab === "calendar" ? "var(--chip-bg)" : "var(--panel-bg)"
+              }}
+            >
+              Calendar
+            </button>
+            <button
               onClick={() => {
                 if (typeof window !== "undefined") {
                   window.location.href = "/email";
@@ -3411,6 +3496,21 @@ export default function Home() {
               }}
             >
               Email Full Screen
+            </button>
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.location.href = "/calendar";
+                }
+              }}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--panel-border)",
+                background: "var(--panel-bg)"
+              }}
+            >
+              Calendar Full Screen
             </button>
             <button
               onClick={() => setActiveTab("safety")}
@@ -4828,6 +4928,138 @@ export default function Home() {
 
         {activeTab === "trading" && (
           <TradingPanel serverUrl={SERVER_URL} />
+        )}
+
+        {activeTab === "calendar" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Calendar Day View
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => loadCalendarDayEvents()}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Refresh
+                </button>
+                <button
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      window.location.href = "/calendar";
+                    }
+                  }}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Open Full Screen
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                Day
+                <input
+                  type="date"
+                  value={calendarDate}
+                  onChange={(e) => setCalendarDate(e.target.value)}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                Provider
+                <select
+                  value={calendarProvider}
+                  onChange={(e) => setCalendarProvider(e.target.value)}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                >
+                  <option value="all">All</option>
+                  <option value="google">Google</option>
+                  <option value="outlook">Microsoft</option>
+                </select>
+              </label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => setCalendarDate(addDays(calendarDate, -1))}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Prev
+                </button>
+                <button
+                  onClick={() => setCalendarDate(addDays(calendarDate, 1))}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Next
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {calendarTimezone}
+              </div>
+            </div>
+
+            {calendarLoading && (
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading events...</div>
+            )}
+            {calendarError && (
+              <div style={{ fontSize: 12, color: "#b91c1c" }}>Calendar error: {calendarError}</div>
+            )}
+            {!calendarLoading && !calendarError && calendarEvents.length === 0 && (
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No events scheduled for this day.</div>
+            )}
+
+            <div style={{ display: "grid", gap: 10 }}>
+              {calendarEvents.map(event => (
+                <div
+                  key={`${event.provider}-${event.id}`}
+                  style={{
+                    border: "1px solid var(--panel-border)",
+                    borderRadius: 12,
+                    padding: 12,
+                    background: "var(--panel-bg)"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                    <div style={{ fontWeight: 600 }}>{event.summary || "Untitled event"}</div>
+                    <div style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)" }}>
+                      {event.provider}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    {formatCalendarRange(event.start, event.end)}
+                  </div>
+                  {event.location && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                      Location: {event.location}
+                    </div>
+                  )}
+                  {event.meetingLink && (
+                    <div style={{ marginTop: 6 }}>
+                      <a
+                        href={event.meetingLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: 12, color: "var(--accent)", textDecoration: "none" }}
+                      >
+                        Join meeting
+                      </a>
+                    </div>
+                  )}
+                  {event.webLink && (
+                    <div style={{ marginTop: 6 }}>
+                      <a
+                        href={event.webLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: 12, color: "var(--accent-3)", textDecoration: "none" }}
+                      >
+                        Open in provider
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {activeTab === "safety" && (

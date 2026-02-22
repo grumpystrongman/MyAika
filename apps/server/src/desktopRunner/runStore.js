@@ -122,6 +122,23 @@ export function listRuns(limit = 20) {
   }
 }
 
+export function findRunByApprovalId(approvalId) {
+  if (!approvalId) return null;
+  try {
+    if (!fs.existsSync(runsDir)) return null;
+    const entries = fs.readdirSync(runsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+    for (const id of entries) {
+      const run = getRunRecord(id);
+      if (run?.pendingApproval?.id === approvalId) return run;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function getRunDir(runId) {
   return runPath(runId);
 }

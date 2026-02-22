@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function resolveServerUrl() {
   if (process.env.NEXT_PUBLIC_SERVER_URL) return process.env.NEXT_PUBLIC_SERVER_URL;
@@ -52,6 +52,35 @@ function buildEmailMeta(email) {
   };
 }
 
+function buildEmailKey(email) {
+  return `${email?.provider || "gmail"}:${email?.id || ""}`;
+}
+
+function sanitizeEmailHtml(rawHtml) {
+  return String(rawHtml || "").replace(/<script[\s\S]*?<\/script>/gi, "");
+}
+
+function buildEmailHtmlDoc(rawHtml) {
+  const safe = sanitizeEmailHtml(rawHtml);
+  if (!safe) return "";
+  const baseTag = "<base target=\"_blank\" />";
+  const styleTag = `<style>
+    @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap");
+    :root { color-scheme: light; }
+    body { margin: 0; padding: 18px; font-family: "Manrope", "Segoe UI", sans-serif; color: #0f172a; background: #f8fafc; }
+    img { max-width: 100%; height: auto; }
+    table { max-width: 100%; }
+    a { color: #2563eb; }
+  </style>`;
+  if (/<html[\s>]/i.test(safe)) {
+    if (/<head[\s>]/i.test(safe)) {
+      return safe.replace(/<head[^>]*>/i, match => `${match}${baseTag}${styleTag}`);
+    }
+    return safe.replace(/<html[^>]*>/i, match => `${match}<head>${baseTag}${styleTag}</head>`);
+  }
+  return `<!doctype html><html><head>${baseTag}${styleTag}</head><body>${safe}</body></html>`;
+}
+
 export default function EmailPage() {
   const [provider, setProvider] = useState("gmail");
   const [lookbackDays, setLookbackDays] = useState(14);
@@ -84,6 +113,10 @@ export default function EmailPage() {
   const [applyLoading, setApplyLoading] = useState(false);
   const [undoToast, setUndoToast] = useState(null);
   const [undoLoading, setUndoLoading] = useState(false);
+  const [fullViewOpen, setFullViewOpen] = useState(false);
+  const [fullMessage, setFullMessage] = useState(null);
+  const [fullMessageLoading, setFullMessageLoading] = useState(false);
+  const [fullMessageError, setFullMessageError] = useState("");
 
   const [tone, setTone] = useState("friendly");
   const [signOffName, setSignOffName] = useState("");
@@ -104,6 +137,8 @@ export default function EmailPage() {
 
   const baseUrl = SERVER_URL || "";
   const gmailConnected = Boolean(status?.scopes?.some(scope => String(scope).includes("gmail")));
+  const fullDetail = fullMessage || selectedEmail || null;
+  const fullEmailDoc = useMemo(() => buildEmailHtmlDoc(fullMessage?.html || ""), [fullMessage?.html]);
 
   const filteredEmails = useMemo(() => {
     const query = String(searchQuery || "").trim().toLowerCase();
@@ -118,6 +153,96 @@ export default function EmailPage() {
       return haystack.includes(query);
     });
   }, [emails, searchQuery]);
+
+  const selectedIndex = useMemo(() => {
+    if (!selectedEmail) return -1;
+    const key = buildEmailKey(selectedEmail);
+    return filteredEmails.findIndex(item => buildEmailKey(item) === key);
+  }, [filteredEmails, selectedEmail]);
+
+  const canMovePrev = selectedIndex > 0;
+  const canMoveNext = selectedIndex >= 0 && selectedIndex < filteredEmails.length - 1;
+
+  const selectEmail = useCallback((item) => {
+    if (!item) {
+      setSelectedEmail(null);
+      setContextAnswer("");
+      setContextCitations([]);
+      setDraftResult(null);
+      setTodoResult(null);
+      setFollowResult(null);
+      setActionError("");
+      setFullMessage(null);
+      setFullMessageError("");
+      setFullViewOpen(false);
+      return;
+    }
+    setSelectedEmail(item);
+    setContextAnswer("");
+    setContextCitations([]);
+    setDraftResult(null);
+    setTodoResult(null);
+    setFollowResult(null);
+    setActionError("");
+    setFullMessage(null);
+    setFullMessageError("");
+  }, []);
+
+  useEffect(() => {
+    if (!fullViewOpen) return;
+    if (!filteredEmails.length) return;
+    if (!selectedEmail) {
+      selectEmail(filteredEmails[0]);
+      return;
+    }
+    const key = buildEmailKey(selectedEmail);
+    const match = filteredEmails.some(item => buildEmailKey(item) === key);
+    if (!match) {
+      selectEmail(filteredEmails[0]);
+    }
+  }, [fullViewOpen, filteredEmails, selectedEmail, selectEmail]);
+
+  const moveSelection = (direction) => {
+    if (!filteredEmails.length) return;
+    if (direction < 0 && canMovePrev) {
+      selectEmail(filteredEmails[selectedIndex - 1]);
+    }
+    if (direction > 0 && canMoveNext) {
+      selectEmail(filteredEmails[selectedIndex + 1]);
+    }
+  };
+
+  const loadFullMessage = async (email) => {
+    if (!email?.id) return;
+    setFullMessageLoading(true);
+    setFullMessageError("");
+    setFullMessage(null);
+    try {
+      const params = new URLSearchParams({
+        provider: email.provider || "gmail",
+        messageId: email.id
+      });
+      const resp = await fetchWithCreds(buildUrl(baseUrl, `/api/email/message?${params.toString()}`));
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "email_message_failed");
+      setFullMessage(data?.message || null);
+    } catch (err) {
+      setFullMessage(null);
+      setFullMessageError(err?.message || "email_message_failed");
+    } finally {
+      setFullMessageLoading(false);
+    }
+  };
+
+  const openFullView = (email) => {
+    if (!email) return;
+    selectEmail(email);
+    setFullViewOpen(true);
+  };
+
+  const closeFullView = () => {
+    setFullViewOpen(false);
+  };
 
   const loadStatus = async () => {
     try {
@@ -137,6 +262,7 @@ export default function EmailPage() {
     setTriageResults([]);
     setTriageSource("");
     setTriageError("");
+    const currentKey = selectedEmail ? buildEmailKey(selectedEmail) : "";
     try {
       const params = new URLSearchParams({
         provider,
@@ -148,10 +274,11 @@ export default function EmailPage() {
       if (!resp.ok) throw new Error(data?.error || "email_inbox_failed");
       const items = Array.isArray(data.items) ? data.items : [];
       setEmails(items);
-      setSelectedEmail(items[0] || null);
+      const next = items.find(item => buildEmailKey(item) === currentKey) || items[0] || null;
+      selectEmail(next);
     } catch (err) {
       setEmails([]);
-      setSelectedEmail(null);
+      selectEmail(null);
       setError(err?.message || "email_inbox_failed");
     } finally {
       setLoading(false);
@@ -488,6 +615,188 @@ export default function EmailPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!fullViewOpen || !selectedEmail) return;
+    loadFullMessage(selectedEmail);
+  }, [fullViewOpen, selectedEmail?.id, selectedEmail?.provider]);
+
+  useEffect(() => {
+    if (!fullViewOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handler = (event) => {
+      if (event.key === "Escape") {
+        closeFullView();
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        moveSelection(-1);
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        moveSelection(1);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", handler);
+    };
+  }, [fullViewOpen, moveSelection]);
+
+  const messageDetailBody = !selectedEmail ? (
+    <div className="muted">Select a message to inspect details and run actions.</div>
+  ) : (
+    <>
+      <div className="detail-card">
+        <div className="detail-subject">{selectedEmail.subject || "(no subject)"}</div>
+        <div className="detail-row">
+          <span>From</span>
+          <span>{selectedEmail.from || "Unknown"}</span>
+        </div>
+        <div className="detail-row">
+          <span>To</span>
+          <span>{selectedEmail.to || "--"}</span>
+        </div>
+        <div className="detail-row">
+          <span>Received</span>
+          <span>{formatTime(selectedEmail.receivedAt)}</span>
+        </div>
+        <div className="detail-snippet">{selectedEmail.snippet || "No snippet."}</div>
+        <div className="button-row">
+          {selectedEmail.webLink && (
+            <a className="link-button" href={selectedEmail.webLink} target="_blank" rel="noreferrer">
+              Open in Gmail
+            </a>
+          )}
+          <button type="button" onClick={loadContext} disabled={contextLoading}>
+            {contextLoading ? "Finding context..." : "Find Context"}
+          </button>
+        </div>
+        <div className="button-row">
+          <button type="button" onClick={() => handleMessageAction("archive")}>
+            Archive
+          </button>
+          <button type="button" className="warn" onClick={() => handleMessageAction("trash")}>
+            Trash
+          </button>
+          <button type="button" className="warn" onClick={() => handleMessageAction("spam")}>
+            Mark Spam
+          </button>
+          <button type="button" className="danger" onClick={() => handleMessageAction("delete")}>
+            Delete Forever
+          </button>
+        </div>
+        {contextAnswer && (
+          <div className="context-box">
+            <div className="context-title">Context Snapshot</div>
+            <div className="context-body">{contextAnswer}</div>
+            {contextCitations.length > 0 && (
+              <div className="context-citations">
+                {contextCitations.slice(0, 4).map((cite, idx) => (
+                  <div key={`${cite.chunk_id || idx}`} className="citation">
+                    {cite.meeting_title || "Memory"}: {cite.snippet || ""}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="detail-card">
+        <div className="panel-title">Draft Reply</div>
+        <label className="field">
+          Tone
+          <select value={tone} onChange={(e) => setTone(e.target.value)}>
+            {TONE_OPTIONS.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Sign-off name
+          <input value={signOffName} onChange={(e) => setSignOffName(e.target.value)} placeholder="Aika" />
+        </label>
+        <label className="field">
+          RAG top K
+          <input
+            type="number"
+            value={ragTopK}
+            onChange={(e) => setRagTopK(Number(e.target.value || 0))}
+          />
+        </label>
+        <div className="button-row">
+          <button type="button" onClick={draftReply} disabled={draftLoading}>
+            {draftLoading ? "Drafting..." : "Draft Reply with Context"}
+          </button>
+        </div>
+        {draftResult && (
+          <pre className="panel-code">{JSON.stringify(draftResult, null, 2)}</pre>
+        )}
+      </div>
+
+      <div className="detail-card">
+        <div className="panel-title">Action Studio</div>
+        <label className="field">
+          Todo title
+          <input value={todoTitle} onChange={(e) => setTodoTitle(e.target.value)} placeholder="Follow up on this email" />
+        </label>
+        <label className="field">
+          Due
+          <input type="datetime-local" value={todoDue} onChange={(e) => setTodoDue(e.target.value)} />
+        </label>
+        <label className="field">
+          Reminder
+          <input type="datetime-local" value={todoReminder} onChange={(e) => setTodoReminder(e.target.value)} />
+        </label>
+        <label className="field">
+          Priority
+          <select value={todoPriority} onChange={(e) => setTodoPriority(e.target.value)}>
+            {PRIORITY_OPTIONS.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Tags
+          <input value={todoTags} onChange={(e) => setTodoTags(e.target.value)} placeholder="client, billing, urgent" />
+        </label>
+        <label className="field">
+          List ID
+          <input value={todoListId} onChange={(e) => setTodoListId(e.target.value)} placeholder="Optional list id" />
+        </label>
+        <label className="field">
+          Notes
+          <textarea rows={3} value={todoNotes} onChange={(e) => setTodoNotes(e.target.value)} />
+        </label>
+        <label className="field">
+          Follow-up date
+          <input type="datetime-local" value={followUpAt} onChange={(e) => setFollowUpAt(e.target.value)} />
+        </label>
+        <label className="field">
+          Follow-up reminder
+          <input type="datetime-local" value={followReminderAt} onChange={(e) => setFollowReminderAt(e.target.value)} />
+        </label>
+        <div className="button-row">
+          <button type="button" onClick={createTodo} disabled={todoLoading}>
+            {todoLoading ? "Creating..." : "Create Todo"}
+          </button>
+          <button type="button" onClick={scheduleFollowUp} disabled={followLoading}>
+            {followLoading ? "Scheduling..." : "Schedule Follow-up"}
+          </button>
+        </div>
+        {actionError && <div className="muted error-text">{actionError}</div>}
+        {todoResult && (
+          <pre className="panel-code">{JSON.stringify(todoResult, null, 2)}</pre>
+        )}
+        {followResult && (
+          <pre className="panel-code">{JSON.stringify(followResult, null, 2)}</pre>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div className="email-shell">
       <Head>
@@ -601,6 +910,7 @@ export default function EmailPage() {
 
           <section className="panel" style={{ animationDelay: "0.12s" }}>
             <div className="panel-title">Inbox</div>
+            <div className="muted">Tip: Double-click an email to open the full view.</div>
             {loading && <div className="muted">Loading inbox...</div>}
             {!loading && filteredEmails.length === 0 && (
               <div className="muted">No emails found for this window.</div>
@@ -610,15 +920,9 @@ export default function EmailPage() {
                 <button
                   key={`${item.provider}-${item.id}`}
                   type="button"
-                  onClick={() => {
-                    setSelectedEmail(item);
-                    setContextAnswer("");
-                    setContextCitations([]);
-                    setDraftResult(null);
-                    setTodoResult(null);
-                    setFollowResult(null);
-                  }}
-                  className={`email-card ${selectedEmail?.id === item.id ? "active" : ""}`}
+                  onClick={() => selectEmail(item)}
+                  onDoubleClick={() => openFullView(item)}
+                  className={`email-card ${selectedEmail && buildEmailKey(selectedEmail) === buildEmailKey(item) ? "active" : ""}`}
                 >
                   <div className="email-card-header">
                     <div className="email-subject">{item.subject || "(no subject)"}</div>
@@ -633,161 +937,95 @@ export default function EmailPage() {
 
           <section className="panel" style={{ animationDelay: "0.2s" }}>
             <div className="panel-title">Message Intelligence</div>
-            {!selectedEmail ? (
-              <div className="muted">Select a message to inspect details and run actions.</div>
-            ) : (
-              <>
-                <div className="detail-card">
-                  <div className="detail-subject">{selectedEmail.subject || "(no subject)"}</div>
-                  <div className="detail-row">
-                    <span>From</span>
-                    <span>{selectedEmail.from || "Unknown"}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span>To</span>
-                    <span>{selectedEmail.to || "--"}</span>
-                  </div>
-                  <div className="detail-row">
-                    <span>Received</span>
-                    <span>{formatTime(selectedEmail.receivedAt)}</span>
-                  </div>
-                  <div className="detail-snippet">{selectedEmail.snippet || "No snippet."}</div>
-                  <div className="button-row">
-                    {selectedEmail.webLink && (
-                      <a className="link-button" href={selectedEmail.webLink} target="_blank" rel="noreferrer">
-                        Open in Gmail
-                      </a>
-                    )}
-                    <button type="button" onClick={loadContext} disabled={contextLoading}>
-                      {contextLoading ? "Finding context..." : "Find Context"}
-                    </button>
-                  </div>
-                  <div className="button-row">
-                    <button type="button" onClick={() => handleMessageAction("archive")}>
-                      Archive
-                    </button>
-                    <button type="button" className="warn" onClick={() => handleMessageAction("trash")}>
-                      Trash
-                    </button>
-                    <button type="button" className="warn" onClick={() => handleMessageAction("spam")}>
-                      Mark Spam
-                    </button>
-                    <button type="button" className="danger" onClick={() => handleMessageAction("delete")}>
-                      Delete Forever
-                    </button>
-                  </div>
-                  {contextAnswer && (
-                    <div className="context-box">
-                      <div className="context-title">Context Snapshot</div>
-                      <div className="context-body">{contextAnswer}</div>
-                      {contextCitations.length > 0 && (
-                        <div className="context-citations">
-                          {contextCitations.slice(0, 4).map((cite, idx) => (
-                            <div key={`${cite.chunk_id || idx}`} className="citation">
-                              {cite.meeting_title || "Memory"}: {cite.snippet || ""}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="detail-card">
-                  <div className="panel-title">Draft Reply</div>
-                  <label className="field">
-                    Tone
-                    <select value={tone} onChange={(e) => setTone(e.target.value)}>
-                      {TONE_OPTIONS.map(option => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    Sign-off name
-                    <input value={signOffName} onChange={(e) => setSignOffName(e.target.value)} placeholder="Aika" />
-                  </label>
-                  <label className="field">
-                    RAG top K
-                    <input
-                      type="number"
-                      value={ragTopK}
-                      onChange={(e) => setRagTopK(Number(e.target.value || 0))}
-                    />
-                  </label>
-                  <div className="button-row">
-                    <button type="button" onClick={draftReply} disabled={draftLoading}>
-                      {draftLoading ? "Drafting..." : "Draft Reply with Context"}
-                    </button>
-                  </div>
-                  {draftResult && (
-                    <pre className="panel-code">{JSON.stringify(draftResult, null, 2)}</pre>
-                  )}
-                </div>
-
-                <div className="detail-card">
-                  <div className="panel-title">Action Studio</div>
-                  <label className="field">
-                    Todo title
-                    <input value={todoTitle} onChange={(e) => setTodoTitle(e.target.value)} placeholder="Follow up on this email" />
-                  </label>
-                  <label className="field">
-                    Due
-                    <input type="datetime-local" value={todoDue} onChange={(e) => setTodoDue(e.target.value)} />
-                  </label>
-                  <label className="field">
-                    Reminder
-                    <input type="datetime-local" value={todoReminder} onChange={(e) => setTodoReminder(e.target.value)} />
-                  </label>
-                  <label className="field">
-                    Priority
-                    <select value={todoPriority} onChange={(e) => setTodoPriority(e.target.value)}>
-                      {PRIORITY_OPTIONS.map(option => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    Tags
-                    <input value={todoTags} onChange={(e) => setTodoTags(e.target.value)} placeholder="client, billing, urgent" />
-                  </label>
-                  <label className="field">
-                    List ID
-                    <input value={todoListId} onChange={(e) => setTodoListId(e.target.value)} placeholder="Optional list id" />
-                  </label>
-                  <label className="field">
-                    Notes
-                    <textarea rows={3} value={todoNotes} onChange={(e) => setTodoNotes(e.target.value)} />
-                  </label>
-                  <label className="field">
-                    Follow-up date
-                    <input type="datetime-local" value={followUpAt} onChange={(e) => setFollowUpAt(e.target.value)} />
-                  </label>
-                  <label className="field">
-                    Follow-up reminder
-                    <input type="datetime-local" value={followReminderAt} onChange={(e) => setFollowReminderAt(e.target.value)} />
-                  </label>
-                  <div className="button-row">
-                    <button type="button" onClick={createTodo} disabled={todoLoading}>
-                      {todoLoading ? "Creating..." : "Create Todo"}
-                    </button>
-                    <button type="button" onClick={scheduleFollowUp} disabled={followLoading}>
-                      {followLoading ? "Scheduling..." : "Schedule Follow-up"}
-                    </button>
-                  </div>
-                  {actionError && <div className="muted error-text">{actionError}</div>}
-                  {todoResult && (
-                    <pre className="panel-code">{JSON.stringify(todoResult, null, 2)}</pre>
-                  )}
-                  {followResult && (
-                    <pre className="panel-code">{JSON.stringify(followResult, null, 2)}</pre>
-                  )}
-                </div>
-              </>
-            )}
+            {messageDetailBody}
           </section>
         </div>
       </div>
+
+      {fullViewOpen && selectedEmail && (
+        <div className="email-modal-backdrop" role="dialog" aria-modal="true" onClick={closeFullView}>
+          <div className="email-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="email-modal-header">
+              <div>
+                <div className="modal-kicker">Full Message</div>
+                <div className="modal-subject">{fullDetail?.subject || "(no subject)"}</div>
+                <div className="modal-meta">
+                  <span>{fullDetail?.from || "Unknown sender"}</span>
+                  <span aria-hidden="true">&bull;</span>
+                  <span>{formatTime(fullDetail?.receivedAt)}</span>
+                  {selectedIndex >= 0 && (
+                    <>
+                      <span aria-hidden="true">&bull;</span>
+                      <span>{selectedIndex + 1} of {filteredEmails.length}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="nav-arrow"
+                  onClick={() => moveSelection(-1)}
+                  disabled={!canMovePrev}
+                  title="Previous email"
+                >
+                  &uarr;
+                </button>
+                <button
+                  type="button"
+                  className="nav-arrow"
+                  onClick={() => moveSelection(1)}
+                  disabled={!canMoveNext}
+                  title="Next email"
+                >
+                  &darr;
+                </button>
+                <button type="button" onClick={closeFullView}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="email-modal-body">
+              <div className="email-modal-view">
+                <div className="email-modal-view-header">
+                  <div>
+                    <div className="modal-from">{fullDetail?.from || "Unknown sender"}</div>
+                    <div className="modal-to">To: {fullDetail?.to || "--"}</div>
+                  </div>
+                  {fullDetail?.webLink && (
+                    <a className="link-button" href={fullDetail.webLink} target="_blank" rel="noreferrer">
+                      Open in Gmail
+                    </a>
+                  )}
+                </div>
+                <div className="email-modal-view-body">
+                  {fullMessageLoading && <div className="muted">Loading full message...</div>}
+                  {!fullMessageLoading && fullMessageError && (
+                    <div className="muted error-text">{fullMessageError}</div>
+                  )}
+                  {!fullMessageLoading && !fullMessageError && fullEmailDoc && (
+                    <iframe
+                      title="Full email content"
+                      className="email-html-frame"
+                      sandbox="allow-popups allow-popups-to-escape-sandbox"
+                      srcDoc={fullEmailDoc}
+                    />
+                  )}
+                  {!fullMessageLoading && !fullMessageError && !fullEmailDoc && (
+                    <div className="email-text-fallback">
+                      {fullMessage?.text || fullDetail?.snippet || "No content available."}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="email-modal-controls">
+                <div className="panel-title">Training & Actions</div>
+                {messageDetailBody}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {undoToast && (
         <div className="undo-toast" role="status" aria-live="polite">
@@ -1010,6 +1248,143 @@ export default function EmailPage() {
           display: grid;
           grid-template-columns: minmax(260px, 0.7fr) minmax(320px, 1fr) minmax(320px, 1.1fr);
           gap: 16px;
+        }
+
+        .email-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(2, 6, 23, 0.75);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 24px;
+          z-index: 40;
+        }
+
+        .email-modal {
+          width: min(1400px, 96vw);
+          height: min(90vh, 920px);
+          background: rgba(15, 23, 42, 0.95);
+          border: 1px solid var(--panel-border-strong);
+          border-radius: 20px;
+          box-shadow: var(--shadow-soft);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .email-modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 16px;
+          padding: 16px 20px;
+          border-bottom: 1px solid var(--panel-border);
+          background: rgba(15, 23, 42, 0.85);
+        }
+
+        .modal-kicker {
+          text-transform: uppercase;
+          letter-spacing: 0.16em;
+          font-size: 10px;
+          color: var(--accent-2);
+        }
+
+        .modal-subject {
+          font-family: var(--font-display);
+          font-size: 18px;
+          margin-top: 4px;
+        }
+
+        .modal-meta {
+          margin-top: 6px;
+          display: flex;
+          gap: 8px;
+          font-size: 12px;
+          color: var(--text-muted);
+          align-items: center;
+          flex-wrap: wrap;
+        }
+
+        .modal-actions {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+
+        .nav-arrow {
+          width: 36px;
+          height: 36px;
+          padding: 0;
+          border-radius: 12px;
+          font-size: 16px;
+        }
+
+        .email-modal-body {
+          display: grid;
+          grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+          gap: 16px;
+          padding: 16px;
+          height: 100%;
+          overflow: hidden;
+        }
+
+        .email-modal-view {
+          display: flex;
+          flex-direction: column;
+          border: 1px solid var(--panel-border);
+          border-radius: 16px;
+          background: rgba(15, 23, 42, 0.6);
+          overflow: hidden;
+        }
+
+        .email-modal-view-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 14px;
+          border-bottom: 1px solid var(--panel-border);
+        }
+
+        .modal-from {
+          font-size: 13px;
+          font-weight: 600;
+        }
+
+        .modal-to {
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-top: 2px;
+        }
+
+        .email-modal-view-body {
+          flex: 1;
+          background: #f8fafc;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .email-html-frame {
+          width: 100%;
+          height: 100%;
+          border: none;
+          background: #f8fafc;
+        }
+
+        .email-text-fallback {
+          padding: 16px;
+          font-size: 13px;
+          color: #0f172a;
+          white-space: pre-wrap;
+        }
+
+        .email-modal-controls {
+          background: rgba(15, 23, 42, 0.6);
+          border: 1px solid var(--panel-border);
+          border-radius: 16px;
+          padding: 12px;
+          overflow-y: auto;
         }
 
         .panel {
@@ -1363,9 +1738,32 @@ export default function EmailPage() {
           .email-grid {
             grid-template-columns: 1fr;
           }
+
+          .email-modal-body {
+            grid-template-columns: 1fr;
+            height: auto;
+          }
+
+          .email-modal-controls {
+            max-height: 45vh;
+          }
         }
 
         @media (max-width: 720px) {
+          .email-modal {
+            height: 94vh;
+          }
+
+          .email-modal-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .modal-actions {
+            width: 100%;
+            justify-content: space-between;
+          }
+
           .undo-toast {
             left: 16px;
             right: 16px;

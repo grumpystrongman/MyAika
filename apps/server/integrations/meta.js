@@ -3,6 +3,25 @@ import { getProvider, setProvider } from "./store.js";
 const FB_AUTH_URL = "https://www.facebook.com/v19.0/dialog/oauth";
 const FB_TOKEN_URL = "https://graph.facebook.com/v19.0/oauth/access_token";
 
+function resolveMetaApp(product) {
+  if (product === "whatsapp") {
+    return {
+      appId: process.env.WHATSAPP_APP_ID || process.env.FACEBOOK_APP_ID || "",
+      secret: process.env.WHATSAPP_APP_SECRET || process.env.FACEBOOK_APP_SECRET || ""
+    };
+  }
+  if (product === "instagram") {
+    return {
+      appId: process.env.INSTAGRAM_APP_ID || process.env.FACEBOOK_APP_ID || "",
+      secret: process.env.INSTAGRAM_APP_SECRET || process.env.FACEBOOK_APP_SECRET || ""
+    };
+  }
+  return {
+    appId: process.env.FACEBOOK_APP_ID || "",
+    secret: process.env.FACEBOOK_APP_SECRET || ""
+  };
+}
+
 function buildRedirectUri(product) {
   const base = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 8790}`;
   return `${base}/api/integrations/meta/callback?product=${encodeURIComponent(product)}`;
@@ -19,8 +38,8 @@ function buildScopes(product) {
 }
 
 export function buildMetaAuthUrl(product, state) {
-  const appId = process.env.FACEBOOK_APP_ID;
-  if (!appId) throw new Error("facebook_oauth_not_configured");
+  const { appId } = resolveMetaApp(product);
+  if (!appId) throw new Error("meta_oauth_not_configured");
   const redirectUri = buildRedirectUri(product);
   const scopes = buildScopes(product);
   const params = new URLSearchParams({
@@ -34,9 +53,8 @@ export function buildMetaAuthUrl(product, state) {
 }
 
 export async function exchangeMetaCode({ code, product }) {
-  const appId = process.env.FACEBOOK_APP_ID;
-  const secret = process.env.FACEBOOK_APP_SECRET;
-  if (!appId || !secret) throw new Error("facebook_oauth_not_configured");
+  const { appId, secret } = resolveMetaApp(product);
+  if (!appId || !secret) throw new Error("meta_oauth_not_configured");
   const redirectUri = buildRedirectUri(product);
   const params = new URLSearchParams({
     client_id: appId,

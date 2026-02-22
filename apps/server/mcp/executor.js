@@ -87,7 +87,8 @@ export class ToolExecutor {
     if (!autonomyAllowed && (policy.requiresApproval || toolRequiresApproval || safetyDecision.decision === "require_approval")) {
       const approval = createApproval({
         toolName: def.name,
-        params: policy.redactedParams,
+        params,
+        paramsRedacted: policy.redactedParams,
         humanSummary: def.humanSummary?.(params) || `Request to run ${def.name}`,
         riskLevel: def.riskLevel || "medium",
         createdBy: context?.userId || "user",

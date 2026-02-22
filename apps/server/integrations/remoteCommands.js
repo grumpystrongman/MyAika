@@ -1,6 +1,8 @@
 import { executor, registry } from "../mcp/index.js";
-import { listApprovals, getApproval } from "../mcp/approvals.js";
+import { listApprovals, getApproval, denyApproval } from "../mcp/approvals.js";
 import { getActionRun } from "../src/agent/actionRunStore.js";
+import { findRunByApprovalId } from "../src/desktopRunner/runStore.js";
+import { continueDesktopRun } from "../src/desktopRunner/runner.js";
 import {
   crawlTradingRssSources,
   listTradingRssSourcesUi,
@@ -18,6 +20,8 @@ import { listMacros, getMacro, applyMacroParams } from "../src/actionRunner/macr
 import { listRagModels } from "../src/rag/collections.js";
 import { getActiveThread, createThread, closeThread, ensureActiveThread, setThreadRagModel } from "../storage/threads.js";
 import { getSkillsState } from "../skills/index.js";
+import { getRuntimeFlags } from "../storage/runtime_flags.js";
+import { approveSafetyApproval, rejectSafetyApproval } from "../src/safety/approvals.js";
 
 const DEFAULT_PORT = 8790;
 
@@ -44,6 +48,16 @@ function parseCommand(raw) {
   const trimmed = String(raw || "").trim();
   if (!trimmed) return null;
   const lower = trimmed.toLowerCase();
+  if (lower === "approve" || lower === "deny" || lower === "approvals") {
+    return { line: trimmed, cmd: lower, args: [] };
+  }
+  if (lower.startsWith("approve ") || lower.startsWith("deny ")) {
+    const parts = trimmed.split(/\s+/);
+    const candidate = parts[1] || "";
+    if (/^[0-9a-f]{8,}$/i.test(candidate)) {
+      return { line: trimmed, cmd: parts[0].toLowerCase(), args: parts.slice(1) };
+    }
+  }
   let line = "";
   if (trimmed.startsWith("/") || trimmed.startsWith("!")) {
     line = trimmed.slice(1).trim();
@@ -329,9 +343,22 @@ function getApprovalToken(args) {
   return args[1] || "";
 }
 
-async function handleApprove(args, context) {
-  const id = args[0];
-  if (!id) return "Usage: /approve <approvalId> [token]";
+function resolveLatestApprovalId(meta) {
+  const flags = getRuntimeFlags();
+  const map = flags.approval_last_by_chat || {};
+  if (meta?.channel === "telegram" && meta?.chatId && map[`telegram:${meta.chatId}`]) {
+    return map[`telegram:${meta.chatId}`];
+  }
+  const pending = listApprovals().filter(item => item.status === "pending");
+  return pending[0]?.id || "";
+}
+
+async function handleApprove(args, context, meta) {
+  let id = args[0] || "";
+  if (!id) {
+    id = resolveLatestApprovalId(meta);
+  }
+  if (!id) return "No pending approvals. Use /approvals to list.";
   const requiredToken = process.env.REMOTE_APPROVAL_TOKEN || process.env.ADMIN_APPROVAL_TOKEN || "";
   const providedToken = getApprovalToken(args);
   if (requiredToken && providedToken !== requiredToken) {
@@ -342,14 +369,52 @@ async function handleApprove(args, context) {
   if (!existing) return "Approval not found.";
   if (existing.status === "executed") return "Approval already executed.";
 
+  if (existing.toolName === "desktop.step") {
+    approveSafetyApproval(id, context?.userId || "remote");
+    try {
+      executor.approve(id, context?.userId || "remote");
+    } catch (err) {
+      if (err?.message !== "approval_not_found") throw err;
+    }
+    const run = findRunByApprovalId(id);
+    if (!run) return `Approved ${id}. No matching desktop run found.`;
+    const resumed = await continueDesktopRun(run.id, {
+      userId: context?.userId || "remote",
+      workspaceId: context?.workspaceId || "default"
+    });
+    return resumed?.status ? `Desktop run resumed (${resumed.status}).` : "Desktop run resumed.";
+  }
+
   let token = existing.token;
   if (existing.status !== "approved") {
     const approved = executor.approve(id, context?.userId || "remote");
     token = approved?.token;
   }
-  if (!token) return "Approval token missing. Try approving again.";
-  const result = await executor.execute(id, token, context);
-  return result?.status === "ok" ? "Approval executed." : "Approval execution failed.";
+  if (!token) return `Approved ${id}. Execute it in the app if needed.`;
+  try {
+    const result = await executor.execute(id, token, context);
+    return result?.status === "ok" ? "Approval executed." : "Approval execution failed.";
+  } catch (err) {
+    return `Approved ${id}. Execute failed: ${err?.message || "execution_failed"}`;
+  }
+}
+
+async function handleDeny(args, context, meta) {
+  let id = args[0] || "";
+  if (!id) {
+    id = resolveLatestApprovalId(meta);
+  }
+  if (!id) return "No pending approvals. Use /approvals to list.";
+  const requiredToken = process.env.REMOTE_APPROVAL_TOKEN || process.env.ADMIN_APPROVAL_TOKEN || "";
+  const providedToken = getApprovalToken(args);
+  if (requiredToken && providedToken !== requiredToken) {
+    return "Approval token required or invalid.";
+  }
+  const existing = getApproval(id);
+  if (!existing) return "Approval not found.";
+  denyApproval(id, context?.userId || "remote");
+  rejectSafetyApproval(id, context?.userId || "remote");
+  return `Denied approval ${id}.`;
 }
 
 async function handleApprovals() {
@@ -439,6 +504,7 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
           "/macro list | /macro run <id>",
           "/approvals",
           "/approve <approvalId> [token]",
+          "/deny <approvalId> [token]",
           "/action <id>"
         ].join("\n")
       };
@@ -498,7 +564,11 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
     }
 
     if (["approve"].includes(cmd)) {
-      return { handled: true, response: await handleApprove(args, context) };
+      return { handled: true, response: await handleApprove(args, context, meta) };
+    }
+
+    if (["deny", "reject"].includes(cmd)) {
+      return { handled: true, response: await handleDeny(args, context, meta) };
     }
 
     if (["thread", "threads"].includes(cmd)) {

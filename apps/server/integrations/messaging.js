@@ -1,4 +1,5 @@
 import { getProvider, setProvider } from "./store.js";
+import { getMetaToken } from "./meta.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -249,7 +250,7 @@ export async function sendSmsMessage(to, body, fromOverride = "") {
 }
 
 export async function sendWhatsAppMessage(to, body, fromOverride = "") {
-  const token = process.env.WHATSAPP_TOKEN || "";
+  const token = process.env.WHATSAPP_TOKEN || getMetaToken("whatsapp") || "";
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
   if (token && phoneId) {
     const url = `https://graph.facebook.com/v19.0/${phoneId}/messages`;

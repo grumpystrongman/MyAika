@@ -394,6 +394,37 @@ export default function AikaToolsWorkbench({ serverUrl, onOpenConnections, onOpe
     }
   }
 
+  async function approveAndExecute(id) {
+    if (!id) return;
+    setPendingApprovalStatus("");
+    try {
+      const approveResp = await fetchWithCreds(`${serverUrl}/api/approvals/${id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const approved = await approveResp.json();
+      if (!approveResp.ok) throw new Error(approved?.error || "approval_failed");
+      const token = approved?.approval?.token;
+      if (!token) {
+        setPendingApproval(approved.approval || null);
+        setPendingApprovalStatus("Approved.");
+        return;
+      }
+      const execResp = await fetchWithCreds(`${serverUrl}/api/approvals/${id}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      const execData = await execResp.json();
+      if (!execResp.ok) throw new Error(execData?.error || "approval_execute_failed");
+      setPendingApprovalStatus("Approved action executed.");
+      setPendingApproval(null);
+    } catch (err) {
+      setPendingApprovalStatus(err?.message || "approval_execute_failed");
+    }
+  }
+
   async function loadTodoLists() {
     const resp = await runTool("todos.listLists", {});
     const lists = resp?.data || [];
@@ -986,6 +1017,9 @@ export default function AikaToolsWorkbench({ serverUrl, onOpenConnections, onOpe
                 <button onClick={() => updateApproval(pendingApproval.id, "approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
                   Approve
                 </button>
+                <button onClick={() => approveAndExecute(pendingApproval.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                  Approve + Execute
+                </button>
                 <button onClick={() => updateApproval(pendingApproval.id, "deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
                   Deny
                 </button>
@@ -1577,7 +1611,7 @@ export default function AikaToolsWorkbench({ serverUrl, onOpenConnections, onOpe
                   Connect Gmail (Inbox + Send)
                 </button>
                 <button
-                  onClick={() => window.open(`${serverUrl}/api/integrations/microsoft/connect?preset=mail_read&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
+                  onClick={() => window.open(`${serverUrl}/api/integrations/microsoft/connect?preset=mail_calendar_readwrite&ui_base=${encodeURIComponent(window.location.origin)}`, "_blank")}
                   style={{ padding: "6px 10px", borderRadius: 8 }}
                 >
                   Connect Microsoft

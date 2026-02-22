@@ -78,3 +78,17 @@ export function denyApprovalRecord(id, deniedBy = "user") {
   ).run("denied", deniedBy, resolvedAt, id);
   return getApprovalRecord(id);
 }
+
+export function cleanupStaleApprovals({ olderThanDays = 7, decidedBy = "system", reason = "stale" } = {}) {
+  const days = Number(olderThanDays);
+  if (!Number.isFinite(days) || days <= 0) return { updated: 0, cutoff: null };
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const decidedAt = nowIso();
+  const db = getDb();
+  const result = db.prepare(
+    `UPDATE approvals
+       SET status = ?, resolved_at = ?, decided_at = ?, decided_by = ?, reason = ?
+     WHERE status = ? AND created_at < ?`
+  ).run("denied", decidedAt, decidedAt, decidedBy, reason, "pending", cutoff);
+  return { updated: result.changes || 0, cutoff };
+}

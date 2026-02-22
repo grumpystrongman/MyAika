@@ -5,6 +5,7 @@ export const policySchema = z.object({
   risk_threshold: z.number().min(0).max(100).default(60),
   allow_actions: z.array(z.string()).default([]),
   requires_approval: z.array(z.string()).default([]),
+  approval_exempt_actions: z.array(z.string()).default([]),
   protected_paths: z.array(z.string()).default([]),
   network_rules: z.object({
     allowlist_domains: z.array(z.string()).default([]),
@@ -146,6 +147,7 @@ export const defaultPolicy = policySchema.parse({
     "finance.trade",
     "kill_switch.disable"
   ],
+  approval_exempt_actions: [],
   protected_paths: [
     "C:\\\\Windows\\\\*",
     "C:\\\\Program Files\\\\*",
