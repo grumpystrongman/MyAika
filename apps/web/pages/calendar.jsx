@@ -23,19 +23,73 @@ async function readJsonResponse(response) {
   }
 }
 
-function formatDateTime(value, timeZone) {
-  if (!value) return "--";
-  const ts = Date.parse(value);
-  if (!Number.isFinite(ts)) return value;
-  return new Date(ts).toLocaleString(undefined, { timeZone: timeZone || undefined });
-}
-
 function toDateInput(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
+}
+
+function parseDateInput(value) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+}
+
+function startOfDay(date) {
+  if (!date) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function addDays(date, delta) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + delta);
+  return next;
+}
+
+function startOfWeek(date, weekStartsOn = 0) {
+  const start = startOfDay(date);
+  const diff = (start.getDay() - weekStartsOn + 7) % 7;
+  return addDays(start, -diff);
+}
+
+function endOfWeek(date, weekStartsOn = 0) {
+  return addDays(startOfWeek(date, weekStartsOn), 6);
+}
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+}
+
+function endOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 0, 0, 0, 0);
+}
+
+function formatDateLabel(date) {
+  if (!date) return "";
+  return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+}
+
+function formatRangeLabel(start, end) {
+  if (!start || !end) return "";
+  if (start.toDateString() === end.toDateString()) return formatDateLabel(start);
+  const startLabel = start.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const yearLabel = end.toLocaleDateString(undefined, { year: "numeric" });
+  return `${startLabel} - ${endLabel}, ${yearLabel}`;
+}
+
+function formatTime(value, timeZone) {
+  if (!value) return "--";
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return value;
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: timeZone || undefined
+  });
 }
 
 function toDateTimeInput(value) {
@@ -66,21 +120,56 @@ function parseAttendees(raw) {
     .filter(Boolean);
 }
 
-function buildInitialRange() {
-  const now = new Date();
-  const end = new Date(now.getTime() + 7 * 86400000);
-  return {
-    start: toDateInput(now.toISOString()),
-    end: toDateInput(end.toISOString())
-  };
+function getViewRange(viewMode, focusDate, weekStartsOn = 0) {
+  const base = parseDateInput(focusDate) || new Date();
+  if (viewMode === "week") {
+    const start = startOfWeek(base, weekStartsOn);
+    const end = endOfWeek(base, weekStartsOn);
+    return { start, end };
+  }
+  if (viewMode === "month") {
+    const startMonth = startOfMonth(base);
+    const endMonth = endOfMonth(base);
+    return { start: startOfWeek(startMonth, weekStartsOn), end: endOfWeek(endMonth, weekStartsOn) };
+  }
+  return { start: startOfDay(base), end: startOfDay(base) };
+}
+
+function buildMonthGrid(focusDate, weekStartsOn = 0) {
+  const base = parseDateInput(focusDate) || new Date();
+  const monthStart = startOfMonth(base);
+  const monthEnd = endOfMonth(base);
+  const gridStart = startOfWeek(monthStart, weekStartsOn);
+  const gridEnd = endOfWeek(monthEnd, weekStartsOn);
+  const days = [];
+  for (let d = new Date(gridStart); d <= gridEnd; d = addDays(d, 1)) {
+    days.push({
+      date: new Date(d),
+      inMonth: d.getMonth() === base.getMonth()
+    });
+  }
+  return days;
+}
+
+function buildWeekDays(focusDate, weekStartsOn = 0) {
+  const base = parseDateInput(focusDate) || new Date();
+  const start = startOfWeek(base, weekStartsOn);
+  return Array.from({ length: 7 }, (_, idx) => addDays(start, idx));
+}
+
+function formatDayHeader(date) {
+  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
 export default function CalendarPage() {
   const baseUrl = SERVER_URL || "";
-  const initialRange = useMemo(() => buildInitialRange(), []);
+  const weekStartsOn = 0;
+  const todayInput = useMemo(() => toDateInput(new Date().toISOString()), []);
   const [providerFilter, setProviderFilter] = useState("all");
-  const [rangeStart, setRangeStart] = useState(initialRange.start);
-  const [rangeEnd, setRangeEnd] = useState(initialRange.end);
+  const [viewMode, setViewMode] = useState("day");
+  const [focusDate, setFocusDate] = useState(todayInput);
+  const [rangeStart, setRangeStart] = useState(todayInput);
+  const [rangeEnd, setRangeEnd] = useState(todayInput);
   const [timezone, setTimezone] = useState("");
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -92,6 +181,64 @@ export default function CalendarPage() {
   const [assistantEmailInput, setAssistantEmailInput] = useState("");
   const [editingEvent, setEditingEvent] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const viewRange = useMemo(() => getViewRange(viewMode, focusDate, weekStartsOn), [viewMode, focusDate, weekStartsOn]);
+  const viewRangeLabel = useMemo(() => formatRangeLabel(viewRange.start, viewRange.end), [viewRange.start, viewRange.end]);
+  const focusDateLabel = useMemo(() => {
+    if (viewMode === "month") {
+      const date = parseDateInput(focusDate) || new Date();
+      return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    }
+    return viewRangeLabel;
+  }, [viewMode, focusDate, viewRangeLabel]);
+  const daysInView = useMemo(() => {
+    if (viewMode === "week") return buildWeekDays(focusDate, weekStartsOn);
+    if (viewMode === "day") return [parseDateInput(focusDate) || new Date()];
+    return [];
+  }, [viewMode, focusDate, weekStartsOn]);
+  const monthGrid = useMemo(() => {
+    if (viewMode !== "month") return [];
+    return buildMonthGrid(focusDate, weekStartsOn);
+  }, [viewMode, focusDate, weekStartsOn]);
+  const weekDayLabels = useMemo(() => {
+    const base = startOfWeek(new Date(), weekStartsOn);
+    return Array.from({ length: 7 }, (_, idx) =>
+      addDays(base, idx).toLocaleDateString(undefined, { weekday: "short" })
+    );
+  }, [weekStartsOn]);
+  const hourHeight = 48;
+  const hours = useMemo(() => Array.from({ length: 24 }, (_, idx) => idx), []);
+  const normalizedEvents = useMemo(() => {
+    return (events || [])
+      .map(event => {
+        const start = new Date(event.start);
+        if (Number.isNaN(start.getTime())) return null;
+        const end = event.end ? new Date(event.end) : start;
+        return { ...event, _start: start, _end: end };
+      })
+      .filter(Boolean);
+  }, [events]);
+  const eventsByDay = useMemo(() => {
+    const map = new Map();
+    const addToDay = (dayKey, event) => {
+      if (!map.has(dayKey)) map.set(dayKey, []);
+      map.get(dayKey).push(event);
+    };
+    for (const event of normalizedEvents) {
+      const startDay = startOfDay(event._start);
+      if (!startDay) continue;
+      const endDay = startOfDay(event._end || event._start) || startDay;
+      let lastDay = endDay;
+      if (event.allDay && event._end && event._end.getHours() === 0 && event._end.getMinutes() === 0) {
+        lastDay = addDays(endDay, -1);
+      }
+      for (let d = new Date(startDay); d <= lastDay; d = addDays(d, 1)) {
+        const key = toDateInput(d.toISOString());
+        addToDay(key, event);
+      }
+    }
+    return map;
+  }, [normalizedEvents]);
 
   const [form, setForm] = useState({
     provider: "google",
@@ -129,6 +276,30 @@ export default function CalendarPage() {
     } catch (err) {
       setError(err?.message || "status_failed");
     }
+  };
+
+  const dayKey = (date) => toDateInput(date.toISOString());
+
+  const getEventsForDay = (date, { allDayOnly = false, timedOnly = false } = {}) => {
+    if (!date) return [];
+    const key = dayKey(date);
+    const eventsForDay = eventsByDay.get(key) || [];
+    if (allDayOnly) return eventsForDay.filter(event => event.allDay);
+    if (timedOnly) return eventsForDay.filter(event => !event.allDay);
+    return eventsForDay;
+  };
+
+  const getEventLayout = (event, dayDate, hourHeight) => {
+    const dayStart = startOfDay(dayDate);
+    if (!dayStart) return null;
+    const dayEnd = addDays(dayStart, 1);
+    const start = event._start < dayStart ? dayStart : event._start;
+    const end = event._end > dayEnd ? dayEnd : event._end;
+    const startMinutes = Math.max(0, (start - dayStart) / 60000);
+    const endMinutes = Math.max(startMinutes + 15, (end - dayStart) / 60000);
+    const top = (startMinutes / 60) * hourHeight;
+    const height = Math.max(22, ((endMinutes - startMinutes) / 60) * hourHeight);
+    return { top, height };
   };
 
   const toggleFullscreen = async () => {
@@ -172,6 +343,14 @@ export default function CalendarPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!viewRange?.start || !viewRange?.end) return;
+    const nextStart = toDateInput(viewRange.start.toISOString());
+    const nextEnd = toDateInput(viewRange.end.toISOString());
+    setRangeStart(prev => (prev === nextStart ? prev : nextStart));
+    setRangeEnd(prev => (prev === nextEnd ? prev : nextEnd));
+  }, [viewRange.start, viewRange.end]);
 
   const resetForm = () => {
     setEditingEvent(null);
@@ -408,9 +587,57 @@ export default function CalendarPage() {
         {error && <div className="banner error">{error}</div>}
 
         <section className="calendar-grid">
-          <div className="panel calendar-panel">
-            <div className="panel-title">Events</div>
+          <div className="panel calendar-panel calendar-view">
+            <div className="panel-title">Calendar</div>
+            <div className="calendar-toolbar">
+              <div className="view-toggle">
+                {["day", "week", "month"].map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={viewMode === mode ? "active" : ""}
+                    onClick={() => setViewMode(mode)}
+                  >
+                    {mode.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="calendar-nav">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const base = parseDateInput(focusDate) || new Date();
+                    const next = viewMode === "month" ? new Date(base.getFullYear(), base.getMonth() - 1, 1) : addDays(base, viewMode === "week" ? -7 : -1);
+                    setFocusDate(toDateInput(next.toISOString()));
+                  }}
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFocusDate(todayInput)}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const base = parseDateInput(focusDate) || new Date();
+                    const next = viewMode === "month" ? new Date(base.getFullYear(), base.getMonth() + 1, 1) : addDays(base, viewMode === "week" ? 7 : 1);
+                    setFocusDate(toDateInput(next.toISOString()));
+                  }}
+                >
+                  Next
+                </button>
+                <div className="calendar-range">{focusDateLabel}</div>
+              </div>
+            </div>
+
             <div className="filters">
+              <label>
+                Focus Date
+                <input type="date" value={focusDate} onChange={(e) => setFocusDate(e.target.value || todayInput)} />
+              </label>
               <label>
                 Provider
                 <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
@@ -418,14 +645,6 @@ export default function CalendarPage() {
                   <option value="google">Google</option>
                   <option value="outlook">Microsoft</option>
                 </select>
-              </label>
-              <label>
-                Start
-                <input type="date" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} />
-              </label>
-              <label>
-                End
-                <input type="date" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} />
               </label>
               <label>
                 Timezone
@@ -436,32 +655,130 @@ export default function CalendarPage() {
                 </select>
               </label>
             </div>
+            <div className="calendar-range small">Showing {rangeStart} → {rangeEnd}</div>
+
             {loading && <div className="muted">Loading events...</div>}
             {!loading && events.length === 0 && (
               <div className="muted">No events found in this window.</div>
             )}
-            <div className="event-list">
-              {events.map(event => (
-                <button
-                  key={`${event.provider}-${event.id}`}
-                  type="button"
-                  className={`event-card ${editingEvent?.id === event.id && editingEvent?.provider === event.provider ? "active" : ""}`}
-                  onClick={() => beginEdit(event)}
-                >
-                  <div className="event-top">
-                    <div className="event-title">{event.summary}</div>
-                    <div className="event-provider">{event.provider}</div>
+
+            {!loading && viewMode === "month" && (
+              <>
+                <div className="month-header">
+                  {weekDayLabels.map(label => (
+                    <div key={label} className="month-header-cell">{label}</div>
+                  ))}
+                </div>
+                <div className="month-grid">
+                  {monthGrid.map(cell => {
+                    const dayEvents = getEventsForDay(cell.date);
+                    const visible = dayEvents.slice(0, 3);
+                    const overflow = dayEvents.length - visible.length;
+                    return (
+                      <div
+                        key={cell.date.toISOString()}
+                        className={`month-cell ${cell.inMonth ? "" : "outside"}`}
+                        onClick={() => {
+                          setFocusDate(toDateInput(cell.date.toISOString()));
+                          setViewMode("day");
+                        }}
+                      >
+                        <div className="month-day">{cell.date.getDate()}</div>
+                        <div className="month-events">
+                          {visible.map(event => (
+                            <button
+                              key={`${event.provider}-${event.id}-${cell.date.toISOString()}`}
+                              type="button"
+                              className={`event-chip ${event.allDay ? "all-day" : ""}`}
+                              data-provider={event.provider}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                beginEdit(event);
+                              }}
+                              title={event.allDay ? `${event.summary} (All day)` : `${event.summary} ${formatTime(event.start, timezone)}`}
+                            >
+                              {event.summary}
+                            </button>
+                          ))}
+                          {overflow > 0 && <div className="more-events">+{overflow} more</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {!loading && viewMode !== "month" && (
+              <div className="time-grid" style={{ "--hour-height": `${hourHeight}px` }}>
+                <div className="all-day-row" style={{ gridTemplateColumns: `60px repeat(${daysInView.length}, 1fr)` }}>
+                  <div className="all-day-label">All day</div>
+                  {daysInView.map(day => (
+                    <div key={day.toISOString()} className="all-day-cell">
+                      {getEventsForDay(day, { allDayOnly: true }).map(event => (
+                        <button
+                          key={`${event.provider}-${event.id}-${day.toISOString()}`}
+                          type="button"
+                          className="event-chip all-day"
+                          data-provider={event.provider}
+                          onClick={() => beginEdit(event)}
+                        >
+                          {event.summary}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="time-grid-header" style={{ gridTemplateColumns: `60px repeat(${daysInView.length}, 1fr)` }}>
+                  <div className="time-grid-corner" />
+                  {daysInView.map(day => (
+                    <div key={day.toISOString()} className="time-grid-day">
+                      {formatDayHeader(day)}
+                    </div>
+                  ))}
+                </div>
+                <div className="time-grid-body" style={{ gridTemplateColumns: `60px repeat(${daysInView.length}, 1fr)` }}>
+                  <div className="time-grid-times">
+                    {hours.map(hour => (
+                      <div key={hour} className="time-grid-time">
+                        {hour === 0 ? "12 AM" : hour < 12 ? `${hour} AM` : hour === 12 ? "12 PM" : `${hour - 12} PM`}
+                      </div>
+                    ))}
                   </div>
-                  <div className="event-time">{formatDateTime(event.start, timezone)}</div>
-                  <div className="event-meta">
-                    {event.location || "No location"}
-                  </div>
-                </button>
-              ))}
-            </div>
+                  {daysInView.map(day => (
+                    <div key={day.toISOString()} className="time-grid-daycol" style={{ height: hourHeight * 24 }}>
+                      {hours.map(hour => (
+                        <div key={`${day.toISOString()}-${hour}`} className="time-grid-line" />
+                      ))}
+                      {getEventsForDay(day, { timedOnly: true }).map(event => {
+                        const layout = getEventLayout(event, day, hourHeight);
+                        if (!layout) return null;
+                        const timeLabel = event.end
+                          ? `${formatTime(event.start, timezone)} - ${formatTime(event.end, timezone)}`
+                          : formatTime(event.start, timezone);
+                        return (
+                          <button
+                            key={`${event.provider}-${event.id}-${day.toISOString()}`}
+                            type="button"
+                            className="event-block"
+                            data-provider={event.provider}
+                            style={{ top: layout.top, height: layout.height }}
+                            onClick={() => beginEdit(event)}
+                          >
+                            <div className="event-title">{event.summary}</div>
+                            <div className="event-time">{timeLabel}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="panel calendar-panel">
+          <div className="panel-stack">
+            <div className="panel calendar-panel">
             <div className="panel-title">{editingEvent ? "Edit Event" : "Create Event"}</div>
             <label className="field">
               Provider
@@ -560,6 +877,7 @@ export default function CalendarPage() {
               </a>
             )}
           </div>
+          </div>
         </section>
       </div>
 
@@ -578,6 +896,7 @@ export default function CalendarPage() {
           --panel-bg-soft: rgba(148, 163, 184, 0.08);
           --panel-border: rgba(148, 163, 184, 0.2);
           --panel-border-strong: rgba(148, 163, 184, 0.35);
+          --panel-border-subtle: rgba(148, 163, 184, 0.12);
           --text-primary: #f8fafc;
           --text-muted: #9aa3b2;
           --accent: #3b82f6;
@@ -735,7 +1054,13 @@ export default function CalendarPage() {
 
         .calendar-grid {
           display: grid;
-          grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr) minmax(260px, 0.8fr);
+          grid-template-columns: minmax(320px, 2.3fr) minmax(280px, 1fr);
+          gap: 16px;
+        }
+
+        .panel-stack {
+          display: flex;
+          flex-direction: column;
           gap: 16px;
         }
 
@@ -759,9 +1084,55 @@ export default function CalendarPage() {
           gap: 12px;
         }
 
+        .calendar-view {
+          min-height: 720px;
+        }
+
+        .calendar-toolbar {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .view-toggle {
+          display: inline-flex;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+
+        .view-toggle button {
+          padding: 6px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          letter-spacing: 0.08em;
+        }
+
+        .view-toggle button.active {
+          border-color: var(--accent);
+          background: rgba(59, 130, 246, 0.2);
+        }
+
+        .calendar-nav {
+          display: inline-flex;
+          gap: 8px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+
+        .calendar-range {
+          font-size: 12px;
+          color: var(--text-muted);
+        }
+
+        .calendar-range.small {
+          font-size: 11px;
+        }
+
         .filters {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
           gap: 10px;
           font-size: 12px;
         }
@@ -772,55 +1143,197 @@ export default function CalendarPage() {
           gap: 6px;
         }
 
-        .event-list {
+        .month-grid {
           display: grid;
+          grid-template-columns: repeat(7, minmax(0, 1fr));
           gap: 10px;
-          max-height: 560px;
-          overflow-y: auto;
-          padding-right: 4px;
         }
 
-        .event-card {
-          text-align: left;
+        .month-header {
+          display: grid;
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 10px;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: var(--text-muted);
+        }
+
+        .month-header-cell {
+          text-align: center;
+        }
+
+        .month-cell {
           background: var(--panel-bg-soft);
-          border: 1px solid transparent;
+          border: 1px solid var(--panel-border);
           border-radius: 14px;
-          padding: 12px;
-        }
-
-        .event-card.active {
-          border-color: var(--accent);
-          box-shadow: 0 0 16px rgba(59, 130, 246, 0.25);
-        }
-
-        .event-top {
+          padding: 10px;
+          min-height: 120px;
           display: flex;
-          justify-content: space-between;
-          gap: 8px;
-          align-items: center;
+          flex-direction: column;
+          gap: 6px;
+          cursor: pointer;
+        }
+
+        .month-cell:hover {
+          border-color: var(--accent);
+        }
+
+        .month-cell.outside {
+          opacity: 0.55;
+        }
+
+        .month-day {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .month-events {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+
+        .more-events {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+
+        .event-chip {
+          text-align: left;
+          font-size: 11px;
+          padding: 4px 6px;
+          border-radius: 8px;
+          border: 1px solid rgba(59, 130, 246, 0.45);
+          background: rgba(59, 130, 246, 0.18);
+          color: var(--text-primary);
+        }
+
+        .event-chip:hover {
+          transform: none;
+          box-shadow: none;
+        }
+
+        .event-chip[data-provider="outlook"] {
+          border-color: rgba(16, 185, 129, 0.45);
+          background: rgba(16, 185, 129, 0.18);
+        }
+
+        .event-chip.all-day {
+          font-weight: 600;
+        }
+
+        .time-grid {
+          border: 1px solid var(--panel-border);
+          border-radius: 14px;
+          overflow: hidden;
+          background: rgba(15, 23, 42, 0.35);
+        }
+
+        .all-day-row {
+          display: grid;
+          background: var(--panel-bg-soft);
+          border-bottom: 1px solid var(--panel-border);
+        }
+
+        .all-day-label {
+          padding: 8px 10px;
+          font-size: 11px;
+          color: var(--text-muted);
+          border-right: 1px solid var(--panel-border);
+        }
+
+        .all-day-cell {
+          padding: 6px;
+          min-height: 48px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          border-left: 1px solid var(--panel-border-subtle);
+        }
+
+        .time-grid-header {
+          display: grid;
+          background: var(--panel-bg-soft);
+          border-bottom: 1px solid var(--panel-border);
+        }
+
+        .time-grid-corner {
+          border-right: 1px solid var(--panel-border);
+        }
+
+        .time-grid-day {
+          padding: 8px 10px;
+          font-size: 12px;
+          font-weight: 600;
+          text-align: center;
+          border-left: 1px solid var(--panel-border);
+        }
+
+        .time-grid-body {
+          display: grid;
+        }
+
+        .time-grid-times {
+          display: flex;
+          flex-direction: column;
+          border-right: 1px solid var(--panel-border);
+          background: rgba(15, 23, 42, 0.5);
+        }
+
+        .time-grid-time {
+          height: var(--hour-height);
+          padding: 2px 6px;
+          font-size: 10px;
+          color: var(--text-muted);
+          border-bottom: 1px solid var(--panel-border-subtle);
+        }
+
+        .time-grid-daycol {
+          position: relative;
+          border-left: 1px solid var(--panel-border-subtle);
+          overflow: hidden;
+        }
+
+        .time-grid-line {
+          height: var(--hour-height);
+          border-bottom: 1px solid var(--panel-border-subtle);
+        }
+
+        .event-block {
+          position: absolute;
+          left: 6px;
+          right: 6px;
+          padding: 6px;
+          border-radius: 10px;
+          border: 1px solid rgba(59, 130, 246, 0.45);
+          background: rgba(59, 130, 246, 0.18);
+          color: var(--text-primary);
+          font-size: 11px;
+          overflow: hidden;
+          text-align: left;
+          z-index: 2;
+        }
+
+        .event-block:hover {
+          transform: none;
+          box-shadow: none;
+        }
+
+        .event-block[data-provider="outlook"] {
+          border-color: rgba(16, 185, 129, 0.45);
+          background: rgba(16, 185, 129, 0.18);
         }
 
         .event-title {
           font-weight: 600;
-          font-size: 13px;
-        }
-
-        .event-provider {
-          font-size: 10px;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: var(--accent-3);
+          font-size: 11px;
         }
 
         .event-time {
-          margin-top: 6px;
-          font-size: 12px;
-          color: var(--text-muted);
-        }
-
-        .event-meta {
-          margin-top: 6px;
-          font-size: 11px;
+          font-size: 10px;
           color: var(--text-muted);
         }
 
@@ -872,8 +1385,18 @@ export default function CalendarPage() {
             grid-template-columns: 1fr;
           }
 
-          .event-list {
-            max-height: none;
+          .calendar-view {
+            min-height: 640px;
+          }
+
+          .time-grid {
+            overflow-x: auto;
+          }
+
+          .time-grid-header,
+          .all-day-row,
+          .time-grid-body {
+            min-width: 620px;
           }
         }
       `}</style>
