@@ -46,8 +46,17 @@ export function updateRecording(id, fields = {}) {
 
 export function addRecordingChunk({ recordingId, seq, storagePath }) {
   const db = getDb();
-  const id = crypto.randomBytes(8).toString("hex");
   const createdAt = nowIso();
+  const existing = db.prepare(
+    `SELECT id FROM audio_chunks WHERE recording_id = ? AND seq = ?`
+  ).get(recordingId, seq);
+  if (existing?.id) {
+    db.prepare(
+      `UPDATE audio_chunks SET storage_path = ?, created_at = ? WHERE id = ?`
+    ).run(storagePath, createdAt, existing.id);
+    return { id: existing.id, recordingId, seq, storagePath, createdAt };
+  }
+  const id = crypto.randomBytes(8).toString("hex");
   db.prepare(
     `INSERT INTO audio_chunks (id, recording_id, seq, storage_path, created_at)
      VALUES (?, ?, ?, ?, ?)`

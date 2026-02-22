@@ -2031,6 +2031,22 @@ function isLocalRequest(req) {
   return false;
 }
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function waitForRecordingChunks(recordingId, expectedChunks, { timeoutMs = 90000, intervalMs = 1000 } = {}) {
+  const target = Number(expectedChunks || 0);
+  if (!Number.isFinite(target) || target <= 0) {
+    return { received: listRecordingChunks(recordingId).length, expected: target, timedOut: false };
+  }
+  const start = Date.now();
+  let received = listRecordingChunks(recordingId).length;
+  while (received < target && Date.now() - start < timeoutMs) {
+    await sleep(intervalMs);
+    received = listRecordingChunks(recordingId).length;
+  }
+  return { received, expected: target, timedOut: received < target };
+}
+
 function isAdminRequest(req) {
   if (isAdmin(req)) return true;
   const token = process.env.ADMIN_APPROVAL_TOKEN;
@@ -2179,6 +2195,18 @@ async function processRecordingPipeline(recordingId, opts = {}) {
   if (!recording) return;
   updateProcessingState(recordingId, { stage: "transcribing" });
   updateRecording(recordingId, { status: "processing" });
+  const expectedChunks = Number(recording?.processing_json?.expectedChunks || 0);
+  if (expectedChunks > 0) {
+    const timeoutMs = Number(process.env.RECORDING_CHUNK_WAIT_MS || 90000);
+    const intervalMs = Number(process.env.RECORDING_CHUNK_POLL_MS || 1000);
+    const waitResult = await waitForRecordingChunks(recordingId, expectedChunks, { timeoutMs, intervalMs });
+    updateProcessingState(recordingId, {
+      expectedChunks: waitResult.expected,
+      receivedChunks: waitResult.received,
+      missingChunks: Math.max(0, waitResult.expected - waitResult.received),
+      chunkWaitTimedOut: waitResult.timedOut
+    });
+  }
   const audioPath = recording.storage_path || combineChunks(recordingId, recordingsDir);
   if (audioPath && audioPath !== recording.storage_path) {
     updateRecording(recordingId, { storage_path: audioPath, storage_url: `/api/recordings/${recordingId}/audio` });

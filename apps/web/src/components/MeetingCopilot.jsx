@@ -11,6 +11,10 @@ const STATUS_COLORS = {
 const RECORDING_CHUNK_MS = 5000;
 const UPLOAD_RETRY_ATTEMPTS = 3;
 const UPLOAD_RETRY_BASE_MS = 600;
+const RECORDING_SESSION_KEY = "aika_active_recording";
+const RECORDING_DB_NAME = "aika_recording_chunks";
+const RECORDING_DB_VERSION = 1;
+const RECORDING_STORE = "chunks";
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -111,6 +115,8 @@ export default function MeetingCopilot({
   const commandRecRef = useRef(null);
   const uploadWarningRef = useRef(false);
   const failedChunkCountRef = useRef(0);
+  const chunkDbPromiseRef = useRef(null);
+  const activeSessionRef = useRef(null);
 
   async function refreshRecordings() {
     try {
@@ -232,6 +238,194 @@ export default function MeetingCopilot({
     render();
   }
 
+  function readRecordingSession() {
+    if (typeof window === "undefined") return null;
+    if (activeSessionRef.current) return activeSessionRef.current;
+    try {
+      const raw = window.localStorage.getItem(RECORDING_SESSION_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      activeSessionRef.current = parsed;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeRecordingSession(session) {
+    if (typeof window === "undefined") return;
+    activeSessionRef.current = session;
+    try {
+      window.localStorage.setItem(RECORDING_SESSION_KEY, JSON.stringify(session));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function updateRecordingSession(patch = {}) {
+    const current = readRecordingSession();
+    if (!current) return;
+    const next = { ...current, ...patch };
+    writeRecordingSession(next);
+  }
+
+  function clearRecordingSession() {
+    if (typeof window === "undefined") return;
+    activeSessionRef.current = null;
+    try {
+      window.localStorage.removeItem(RECORDING_SESSION_KEY);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function requestToPromise(request) {
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function transactionDone(tx) {
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function openChunkDb() {
+    if (typeof indexedDB === "undefined") return null;
+    if (!chunkDbPromiseRef.current) {
+      chunkDbPromiseRef.current = new Promise((resolve, reject) => {
+        const req = indexedDB.open(RECORDING_DB_NAME, RECORDING_DB_VERSION);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(RECORDING_STORE)) {
+            const store = db.createObjectStore(RECORDING_STORE, { keyPath: "key" });
+            store.createIndex("recordingId", "recordingId", { unique: false });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    return chunkDbPromiseRef.current;
+  }
+
+  async function withChunkStore(mode, handler) {
+    const db = await openChunkDb();
+    if (!db) return null;
+    const tx = db.transaction(RECORDING_STORE, mode);
+    const store = tx.objectStore(RECORDING_STORE);
+    const result = await handler(store);
+    await transactionDone(tx);
+    return result;
+  }
+
+  const buildChunkKey = (recordingId, seq) => `${recordingId}:${String(seq).padStart(8, "0")}`;
+
+  async function storePendingChunk({ recordingId, seq, blob, mimeType }) {
+    try {
+      const key = buildChunkKey(recordingId, seq);
+      await withChunkStore("readwrite", store => requestToPromise(store.put({
+        key,
+        recordingId,
+        seq,
+        mimeType,
+        createdAt: Date.now(),
+        blob
+      })));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function deletePendingChunk({ recordingId, seq }) {
+    try {
+      const key = buildChunkKey(recordingId, seq);
+      await withChunkStore("readwrite", store => requestToPromise(store.delete(key)));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function listPendingChunks(recordingId) {
+    try {
+      const items = await withChunkStore("readonly", store => {
+        const index = store.index("recordingId");
+        return requestToPromise(index.getAll(recordingId));
+      });
+      return Array.isArray(items) ? items.sort((a, b) => (a.seq || 0) - (b.seq || 0)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async function clearPendingChunks(recordingId) {
+    const pending = await listPendingChunks(recordingId);
+    for (const item of pending) {
+      await deletePendingChunk({ recordingId, seq: item.seq });
+    }
+  }
+
+  async function recoverPendingRecording() {
+    const session = readRecordingSession();
+    if (!session?.id) return;
+    const pending = await listPendingChunks(session.id);
+    if (!pending.length) {
+      clearRecordingSession();
+      return;
+    }
+    setRecordingNotice("Recovering previous recording...");
+    try {
+      const resp = await fetch(`${serverUrl}/api/recordings/${session.id}`);
+      const data = await resp.json().catch(() => ({}));
+      const status = data?.recording?.status || "";
+      if (status === "ready" || status === "failed" || status === "expired") {
+        await clearPendingChunks(session.id);
+        clearRecordingSession();
+        setRecordingNotice("");
+        return;
+      }
+    } catch {
+      // ignore status check errors
+    }
+    for (const item of pending) {
+      const ext = String(item.mimeType || "").includes("ogg") ? "ogg" : "webm";
+      const ok = await uploadChunkWithRetry({ recordingId: session.id, seq: item.seq, blob: item.blob, ext });
+      if (ok) {
+        await deletePendingChunk({ recordingId: session.id, seq: item.seq });
+      }
+    }
+    try {
+      const durationSec = Number(session.elapsedSec || 0);
+      const expectedChunks = Number(session.expectedChunks || pending.length);
+      await fetch(`${serverUrl}/api/recordings/${session.id}/stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          durationSec,
+          expectedChunks,
+          chunkMs: session.chunkMs || RECORDING_CHUNK_MS,
+          failedChunks: session.failedChunks || 0,
+          recovered: true
+        })
+      });
+      setRecordingNotice("Recovered recording uploaded. Processing...");
+      refreshRecordings();
+    } catch {
+      setRecordingNotice("Recovery failed. Please retry.");
+    } finally {
+      clearRecordingSession();
+    }
+  }
+
+  useEffect(() => {
+    recoverPendingRecording();
+  }, [serverUrl]);
+
   async function uploadChunkWithRetry({ recordingId, seq, blob, ext }) {
     const url = `${serverUrl}/api/recordings/${recordingId}/chunk?seq=${seq}`;
     for (let attempt = 0; attempt < UPLOAD_RETRY_ATTEMPTS; attempt += 1) {
@@ -246,6 +440,7 @@ export default function MeetingCopilot({
       await sleep(UPLOAD_RETRY_BASE_MS * (attempt + 1));
     }
     failedChunkCountRef.current += 1;
+    updateRecordingSession({ failedChunks: failedChunkCountRef.current });
     if (!uploadWarningRef.current) {
       uploadWarningRef.current = true;
       setRecordingNotice("Recording... (network issues detected, retrying uploads)");
@@ -284,6 +479,15 @@ export default function MeetingCopilot({
       pendingUploadsRef.current = [];
       uploadWarningRef.current = false;
       failedChunkCountRef.current = 0;
+      writeRecordingSession({
+        id,
+        title: effectiveTitle,
+        startedAt: Date.now(),
+        chunkMs: RECORDING_CHUNK_MS,
+        expectedChunks: 0,
+        elapsedSec: 0,
+        failedChunks: 0
+      });
       const unavailableReason = getRecorderUnavailableReason();
       if (unavailableReason) throw new Error(unavailableReason);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -303,6 +507,7 @@ export default function MeetingCopilot({
           ? "audio/ogg"
           : "";
       finalMimeTypeRef.current = mimeType || "audio/webm";
+      updateRecordingSession({ mimeType: finalMimeTypeRef.current });
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
       recorder.onerror = () => {
@@ -327,7 +532,13 @@ export default function MeetingCopilot({
         }
         const seq = chunkSeqRef.current++;
         const ext = finalMimeTypeRef.current.includes("ogg") ? "ogg" : "webm";
-        const upload = uploadChunkWithRetry({ recordingId: id, seq, blob: evt.data, ext });
+        await storePendingChunk({ recordingId: id, seq, blob: evt.data, mimeType: finalMimeTypeRef.current });
+        updateRecordingSession({ expectedChunks: seq + 1 });
+        const upload = uploadChunkWithRetry({ recordingId: id, seq, blob: evt.data, ext })
+          .then(ok => {
+            if (ok) return deletePendingChunk({ recordingId: id, seq });
+            return false;
+          });
         pendingUploadsRef.current.push(upload);
         upload.finally(() => {
           pendingUploadsRef.current = pendingUploadsRef.current.filter(p => p !== upload);
@@ -371,6 +582,17 @@ export default function MeetingCopilot({
         setRecordingPaused(false);
         setRecordingNotice("Processing transcript and summaries...");
         finalChunksRef.current = [];
+        if (failedChunkCountRef.current === 0) {
+          clearRecordingSession();
+          await clearPendingChunks(id);
+        } else {
+          updateRecordingSession({
+            expectedChunks: chunkSeqRef.current,
+            failedChunks: failedChunkCountRef.current,
+            elapsedSec: elapsed
+          });
+          setRecordingNotice("Uploads incomplete. Recovery will retry on reload.");
+        }
         refreshRecordings();
       };
       recorder.start(RECORDING_CHUNK_MS);
@@ -380,7 +602,13 @@ export default function MeetingCopilot({
       if (onRecordingStateChange) onRecordingStateChange(true);
       setRecordingPaused(false);
       setElapsed(0);
-      elapsedRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+      elapsedRef.current = setInterval(() => {
+        setElapsed(e => {
+          const next = e + 1;
+          updateRecordingSession({ elapsedSec: next });
+          return next;
+        });
+      }, 1000);
       setRecordingNotice("Recording...");
     } catch (err) {
       setRecordingError(err?.message || "recording_start_failed");
@@ -390,6 +618,7 @@ export default function MeetingCopilot({
       setRecordingActive(false);
       setRecordingStarting(false);
       if (onRecordingStateChange) onRecordingStateChange(false);
+      clearRecordingSession();
     }
   }
 
