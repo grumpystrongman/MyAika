@@ -26,7 +26,7 @@ class OAuthClient:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
-        return httpx.URL(self.auth_url, params=params).to_string()
+        return str(httpx.URL(self.auth_url, params=params))
 
     def exchange_code(
         self,
