@@ -11,6 +11,7 @@ function resolveRepoRoot() {
 
 const repoRoot = resolveRepoRoot();
 const macrosDir = path.join(repoRoot, "data", "desktop_macros");
+const seedMacrosDir = path.join(repoRoot, "config", "macros", "desktop");
 const DEFAULT_SAFETY = {
   requireApprovalFor: ["launch", "input", "key", "mouse", "clipboard", "screenshot", "new_app", "vision", "uia"],
   maxActions: 60,
@@ -39,16 +40,40 @@ function macroPath(id) {
   return path.join(macrosDir, `${id}.json`);
 }
 
+function listSeedMacros() {
+  try {
+    if (!fs.existsSync(seedMacrosDir)) return [];
+    return fs.readdirSync(seedMacrosDir)
+      .filter(name => name.endsWith(".json"))
+      .map(name => {
+        try {
+          const raw = fs.readFileSync(path.join(seedMacrosDir, name), "utf8");
+          return raw ? { ...JSON.parse(raw), seeded: true } : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export function listDesktopMacros() {
   try {
-    if (!fs.existsSync(macrosDir)) return [];
-    const items = fs.readdirSync(macrosDir)
-      .filter(name => name.endsWith(".json"))
-      .map(name => name.replace(/\.json$/, ""))
-      .map(id => getDesktopMacro(id))
-      .filter(Boolean)
+    const seeded = listSeedMacros();
+    const user = fs.existsSync(macrosDir)
+      ? fs.readdirSync(macrosDir)
+        .filter(name => name.endsWith(".json"))
+        .map(name => name.replace(/\.json$/, ""))
+        .map(id => getDesktopMacro(id))
+        .filter(Boolean)
+      : [];
+    const merged = new Map();
+    for (const macro of seeded) merged.set(macro.id, macro);
+    for (const macro of user) merged.set(macro.id, macro);
+    return Array.from(merged.values())
       .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
-    return items;
   } catch {
     return [];
   }
@@ -59,7 +84,8 @@ export function getDesktopMacro(id) {
     const raw = fs.readFileSync(macroPath(id), "utf8");
     return raw ? JSON.parse(raw) : null;
   } catch {
-    return null;
+    const seeded = listSeedMacros().find(item => item.id === id);
+    return seeded || null;
   }
 }
 

@@ -1,0 +1,34 @@
+{
+  "id": "aika_weekly_review_prep",
+  "name": "Aika Weekly Review Prep",
+  "description": "Open the Aika UI and capture weekly review template placeholders.",
+  "tags": [
+    "weekly",
+    "review",
+    "aika"
+  ],
+  "mode": "browser",
+  "startUrl": "http://localhost:3000?tab=guide",
+  "actions": [
+    {
+      "type": "wait",
+      "ms": 800
+    },
+    {
+      "type": "click",
+      "selector": "text=Guide"
+    },
+    {
+      "type": "wait",
+      "ms": 600
+    },
+    {
+      "type": "scroll",
+      "y": 1200
+    },
+    {
+      "type": "screenshot",
+      "name": "weekly_review"
+    }
+  ]
+}

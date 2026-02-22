@@ -33,6 +33,14 @@ async function main() {
       usage: [
         "aika run <toolName> --json '{...}'",
         "aika run <toolName> --file payload.json",
+        "aika modules list",
+        "aika modules run <moduleId> --json '{...}'",
+        "aika runbook list",
+        "aika runbook run <name> --json '{...}'",
+        "aika digest <daily|pulse|weekly>",
+        "aika watch list",
+        "aika watch create <templateId>",
+        "aika watch observe <watchId> --json '{...}'",
         "aika approvals list",
         "aika approvals approve <approvalId>",
         "aika approvals deny <approvalId>",
@@ -56,6 +64,95 @@ async function main() {
     });
     console.log(JSON.stringify(data, null, 2));
     return;
+  }
+
+  if (cmd === "modules") {
+    const sub = args[1] || "list";
+    if (sub === "list") {
+      const data = await api("/api/aika/modules");
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+    if (sub === "run") {
+      const moduleId = args[2];
+      if (!moduleId) {
+        console.log(JSON.stringify({ status: "error", error: "moduleId_required" }));
+        return;
+      }
+      const payload = readJsonArg(args.slice(3));
+      const data = await api("/api/aika/modules/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moduleId, inputPayload: payload })
+      });
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+  }
+
+  if (cmd === "runbook") {
+    const sub = args[1] || "list";
+    if (sub === "list") {
+      const data = await api("/api/aika/runbooks");
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+    if (sub === "run") {
+      const name = args[2];
+      if (!name) {
+        console.log(JSON.stringify({ status: "error", error: "runbook_name_required" }));
+        return;
+      }
+      const payload = readJsonArg(args.slice(3));
+      const data = await api("/api/aika/runbooks/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, inputPayload: payload })
+      });
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+  }
+
+  if (cmd === "digest") {
+    const type = args[1] || "daily";
+    const data = await api("/api/aika/digests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type })
+    });
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+
+  if (cmd === "watch") {
+    const sub = args[1] || "list";
+    if (sub === "list") {
+      const data = await api("/api/aika/watch");
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+    if (sub === "create") {
+      const templateId = args[2];
+      const data = await api("/api/aika/watch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId })
+      });
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+    if (sub === "observe") {
+      const watchId = args[2];
+      const payload = readJsonArg(args.slice(3));
+      const data = await api(`/api/aika/watch/${watchId}/observe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawInput: payload })
+      });
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
   }
 
   if (cmd === "approvals") {

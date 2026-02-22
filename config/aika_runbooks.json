@@ -1,0 +1,190 @@
+[
+  {
+    "name": "Weekly KPI Report",
+    "description": "Pull KPIs, analyze, summarize, prepare slides.",
+    "triggers": [
+      "run weekly kpi report",
+      "weekly kpi report"
+    ],
+    "inputs_required": [
+      "kpi_snapshot"
+    ],
+    "phases": [
+      {
+        "phase_name": "Analyze",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Detect anomalies and KPI drift."
+          },
+          {
+            "step_type": "analysis",
+            "description": "Identify root causes and contributing factors."
+          }
+        ]
+      },
+      {
+        "phase_name": "Synthesize",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Summarize KPIs and insights."
+          },
+          {
+            "step_type": "analysis",
+            "description": "Draft executive summary and slide outline."
+          }
+        ]
+      }
+    ],
+    "deliverables": [
+      "Executive Summary",
+      "Slide Outline"
+    ],
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": true
+    }
+  },
+  {
+    "name": "QBR Prep",
+    "description": "Prepare Quarterly Business Review artifacts and narrative.",
+    "triggers": [
+      "prepare qbr",
+      "qbr prep",
+      "quarterly business review"
+    ],
+    "inputs_required": [
+      "kpi_snapshot",
+      "project_status"
+    ],
+    "phases": [
+      {
+        "phase_name": "Gather",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Collect KPI snapshots and project updates."
+          }
+        ]
+      },
+      {
+        "phase_name": "Draft",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Draft narrative, wins, misses, and risks."
+          }
+        ]
+      },
+      {
+        "phase_name": "Finalize",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Prepare final slides and talking points."
+          }
+        ]
+      }
+    ],
+    "deliverables": [
+      "QBR Narrative",
+      "Slide Deck Outline",
+      "Risk Register"
+    ],
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": true
+    }
+  },
+  {
+    "name": "Incident Response",
+    "description": "Coordinate incident response, comms, and postmortem.",
+    "triggers": [
+      "incident response",
+      "start incident",
+      "outage"
+    ],
+    "inputs_required": [
+      "incident_summary"
+    ],
+    "phases": [
+      {
+        "phase_name": "Stabilize",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Identify impact, owners, and immediate mitigations."
+          }
+        ]
+      },
+      {
+        "phase_name": "Communicate",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Draft stakeholder updates and timelines."
+          }
+        ]
+      },
+      {
+        "phase_name": "Postmortem",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Capture root causes, actions, and follow-ups."
+          }
+        ]
+      }
+    ],
+    "deliverables": [
+      "Incident Timeline",
+      "Stakeholder Update",
+      "Postmortem Draft"
+    ],
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": true
+    }
+  },
+  {
+    "name": "Vendor Evaluation",
+    "description": "Score vendors and recommend next steps.",
+    "triggers": [
+      "vendor evaluation",
+      "evaluate vendor",
+      "score vendor"
+    ],
+    "inputs_required": [
+      "vendor_data"
+    ],
+    "phases": [
+      {
+        "phase_name": "Assess",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Score vendors on cost, security, integration effort."
+          }
+        ]
+      },
+      {
+        "phase_name": "Recommend",
+        "steps": [
+          {
+            "step_type": "analysis",
+            "description": "Summarize findings and recommend a vendor."
+          }
+        ]
+      }
+    ],
+    "deliverables": [
+      "Vendor Scorecard",
+      "Recommendation Summary"
+    ],
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false
+    }
+  }
+]

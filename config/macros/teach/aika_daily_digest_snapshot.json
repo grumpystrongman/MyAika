@@ -1,0 +1,34 @@
+{
+  "id": "aika_daily_digest_snapshot",
+  "name": "Aika Daily Digest Snapshot",
+  "description": "Open the Aika UI and capture the Daily Digest template view.",
+  "tags": [
+    "digest",
+    "aika",
+    "report"
+  ],
+  "mode": "browser",
+  "startUrl": "http://localhost:3000?tab=guide",
+  "actions": [
+    {
+      "type": "wait",
+      "ms": 800
+    },
+    {
+      "type": "screenshot",
+      "name": "guide_home"
+    },
+    {
+      "type": "click",
+      "selector": "text=Guide"
+    },
+    {
+      "type": "wait",
+      "ms": 600
+    },
+    {
+      "type": "screenshot",
+      "name": "guide_digest"
+    }
+  ]
+}

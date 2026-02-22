@@ -1,0 +1,33 @@
+{
+  "id": "aika_module_registry_export",
+  "name": "Aika Module Registry Export",
+  "description": "Capture the module registry from the Guide panel.",
+  "tags": [
+    "modules",
+    "registry"
+  ],
+  "mode": "browser",
+  "startUrl": "http://localhost:3000?tab=capabilities",
+  "actions": [
+    {
+      "type": "wait",
+      "ms": 800
+    },
+    {
+      "type": "screenshot",
+      "name": "capabilities"
+    },
+    {
+      "type": "scroll",
+      "y": 900
+    },
+    {
+      "type": "wait",
+      "ms": 600
+    },
+    {
+      "type": "screenshot",
+      "name": "capabilities_modules"
+    }
+  ]
+}

@@ -1,0 +1,3179 @@
+[
+  {
+    "id": "inbox_triage",
+    "name": "Inbox Triage",
+    "level": "1",
+    "description": "Categorize inbox items, summarize, and propose next actions.",
+    "trigger_phrases": [
+      "AIKA, triage inbox",
+      "triage inbox",
+      "inbox triage"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Categorize inbox items, summarize, and propose next actions.",
+      "manual_checklist": [
+        "Collect inputs for Inbox Triage.",
+        "Draft the Inbox Triage output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 1
+  },
+  {
+    "id": "calendar_hygiene",
+    "name": "Calendar Hygiene",
+    "level": "1",
+    "description": "Find conflicts, overbooking, missing agendas; propose cleanups.",
+    "trigger_phrases": [
+      "AIKA, calendar hygiene",
+      "clean my calendar",
+      "calendar conflicts"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "calendar.proposeHold",
+          "input_mapping": {
+            "title": "{{context_text}}",
+            "start": "{{structured_input.start}}",
+            "end": "{{structured_input.end}}",
+            "timezone": "{{structured_input.timezone}}"
+          },
+          "requires_confirmation": true,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": true,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Find conflicts, overbooking, missing agendas; propose cleanups.",
+      "manual_checklist": [
+        "Collect inputs for Calendar Hygiene.",
+        "Draft the Calendar Hygiene output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 2
+  },
+  {
+    "id": "reminder_task_capture",
+    "name": "Reminder & Task Capture",
+    "level": "1",
+    "description": "Capture tasks, due dates, recurring reminders from voice or chat.",
+    "trigger_phrases": [
+      "AIKA, capture task",
+      "add reminder",
+      "create todo"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "todos.create",
+          "input_mapping": {
+            "title": "{{context_text}}",
+            "details": "{{structured_input.details}}",
+            "due": "{{structured_input.due}}"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Capture tasks, due dates, recurring reminders from voice or chat.",
+      "manual_checklist": [
+        "Collect inputs for Reminder & Task Capture.",
+        "Draft the Reminder & Task Capture output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 3
+  },
+  {
+    "id": "quick_summaries",
+    "name": "Quick Summaries",
+    "level": "1",
+    "description": "Summarize docs, emails, or transcripts into bullets and action items.",
+    "trigger_phrases": [
+      "AIKA, summarize",
+      "summarize this",
+      "quick summary"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "meeting.summarize",
+          "input_mapping": {
+            "transcript": "{{context_text}}"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Summarize docs, emails, or transcripts into bullets and action items.",
+      "manual_checklist": [
+        "Collect inputs for Quick Summaries.",
+        "Draft the Quick Summaries output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 4
+  },
+  {
+    "id": "drafting_factory",
+    "name": "Drafting Factory",
+    "level": "1",
+    "description": "Draft emails/messages in Jeff?s voice with tone variants.",
+    "trigger_phrases": [
+      "AIKA, draft",
+      "draft email",
+      "draft message"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "email.draftReply",
+          "input_mapping": {
+            "originalEmail": "{{context_text}}",
+            "tone": "{{structured_input.tone}}"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Draft emails/messages in Jeff?s voice with tone variants.",
+      "manual_checklist": [
+        "Collect inputs for Drafting Factory.",
+        "Draft the Drafting Factory output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 5
+  },
+  {
+    "id": "file_sorting_naming",
+    "name": "File Sorting & Naming",
+    "level": "1",
+    "description": "Standardize filenames, tag to projects, extract metadata.",
+    "trigger_phrases": [
+      "AIKA, organize files",
+      "file naming",
+      "sort files"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "notes.create",
+          "input_mapping": {
+            "title": "File Sorting Plan",
+            "content": "{{context_text}}"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Standardize filenames, tag to projects, extract metadata.",
+      "manual_checklist": [
+        "Collect inputs for File Sorting & Naming.",
+        "Draft the File Sorting & Naming output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 6
+  },
+  {
+    "id": "meeting_packets",
+    "name": "Meeting Packets",
+    "level": "1",
+    "description": "Prepare agenda draft, last notes, stakeholders, and open decisions.",
+    "trigger_phrases": [
+      "AIKA, meeting packet",
+      "prep meeting",
+      "meeting packet"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "notes.create",
+          "input_mapping": {
+            "title": "Meeting Packet",
+            "content": "{{context_text}}"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Prepare agenda draft, last notes, stakeholders, and open decisions.",
+      "manual_checklist": [
+        "Collect inputs for Meeting Packets.",
+        "Draft the Meeting Packets output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 7
+  },
+  {
+    "id": "multi_step_runbooks",
+    "name": "Multi-Step Runbooks",
+    "level": "2",
+    "description": "Run declarative runbooks for repeatable workflows.",
+    "trigger_phrases": [
+      "AIKA, run runbook",
+      "runbook",
+      "weekly kpi report"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Run declarative runbooks for repeatable workflows.",
+      "manual_checklist": [
+        "Collect inputs for Multi-Step Runbooks.",
+        "Draft the Multi-Step Runbooks output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 8
+  },
+  {
+    "id": "cross_channel_router",
+    "name": "Cross-Channel Comms Router",
+    "level": "2",
+    "description": "Convert notes into tasks, calendar blocks, and summaries.",
+    "trigger_phrases": [
+      "AIKA, route",
+      "route this",
+      "cross channel"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "messaging.telegramSend",
+          "input_mapping": {
+            "text": "{{context_text}}",
+            "chatId": "{{structured_input.chatId}}"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Convert notes into tasks, calendar blocks, and summaries.",
+      "manual_checklist": [
+        "Collect inputs for Cross-Channel Comms Router.",
+        "Draft the Cross-Channel Comms Router output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 9
+  },
+  {
+    "id": "form_to_followup",
+    "name": "Form-to-Followup Autopilot",
+    "level": "2",
+    "description": "Turn intake forms into response emails, tickets, and SLAs.",
+    "trigger_phrases": [
+      "AIKA, intake",
+      "form to followup",
+      "process intake"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "email.sendWithContext",
+          "input_mapping": {
+            "email": "{{structured_input.email}}",
+            "tone": "{{structured_input.tone}}"
+          },
+          "requires_confirmation": true,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": true,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Turn intake forms into response emails, tickets, and SLAs.",
+      "manual_checklist": [
+        "Collect inputs for Form-to-Followup Autopilot.",
+        "Draft the Form-to-Followup Autopilot output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 10
+  },
+  {
+    "id": "content_pipeline",
+    "name": "Content Pipeline",
+    "level": "2",
+    "description": "Transform notes into exec summaries, slide outlines, and posts.",
+    "trigger_phrases": [
+      "AIKA, content pipeline",
+      "turn notes into",
+      "content transform"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Transform notes into exec summaries, slide outlines, and posts.",
+      "manual_checklist": [
+        "Collect inputs for Content Pipeline.",
+        "Draft the Content Pipeline output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 11
+  },
+  {
+    "id": "template_engine",
+    "name": "Template Engine",
+    "level": "2",
+    "description": "Generate SOPs, agendas, charters, RAID logs, status reports.",
+    "trigger_phrases": [
+      "AIKA, create template",
+      "template engine",
+      "SOP template"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Generate SOPs, agendas, charters, RAID logs, status reports.",
+      "manual_checklist": [
+        "Collect inputs for Template Engine.",
+        "Draft the Template Engine output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 12
+  },
+  {
+    "id": "decision_brief_generator",
+    "name": "Decision Brief Generator",
+    "level": "3",
+    "description": "Generate decision briefs with options, criteria, and risks.",
+    "trigger_phrases": [
+      "AIKA, decide",
+      "decision brief",
+      "recommend"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Generate decision briefs with options, criteria, and risks.",
+      "manual_checklist": [
+        "Collect inputs for Decision Brief Generator.",
+        "Draft the Decision Brief Generator output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 13
+  },
+  {
+    "id": "risk_radar",
+    "name": "Risk Radar",
+    "level": "3",
+    "description": "Detect schedule, budget, scope, stakeholder, and dependency risks.",
+    "trigger_phrases": [
+      "AIKA, scan risks",
+      "risk radar",
+      "risk check"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Detect schedule, budget, scope, stakeholder, and dependency risks.",
+      "manual_checklist": [
+        "Collect inputs for Risk Radar.",
+        "Draft the Risk Radar output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 14
+  },
+  {
+    "id": "kpi_drift_anomaly_watch",
+    "name": "KPI Drift & Anomaly Watch",
+    "level": "3",
+    "description": "Monitor KPI changes and anomaly signals.",
+    "trigger_phrases": [
+      "AIKA, watch kpi",
+      "kpi drift",
+      "anomaly watch"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Monitor KPI changes and anomaly signals.",
+      "manual_checklist": [
+        "Collect inputs for KPI Drift & Anomaly Watch.",
+        "Draft the KPI Drift & Anomaly Watch output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 15
+  },
+  {
+    "id": "stakeholder_intelligence_notes",
+    "name": "Stakeholder Intelligence Notes",
+    "level": "3",
+    "description": "Track stakeholder preferences, friction points, and history.",
+    "trigger_phrases": [
+      "AIKA, note stakeholder",
+      "stakeholder notes",
+      "stakeholder intel"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "memory.write",
+          "input_mapping": {
+            "title": "Stakeholder Note",
+            "content": "{{context_text}}",
+            "tier": "2"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Track stakeholder preferences, friction points, and history.",
+      "manual_checklist": [
+        "Collect inputs for Stakeholder Intelligence Notes.",
+        "Draft the Stakeholder Intelligence Notes output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 16
+  },
+  {
+    "id": "quality_consistency_checker",
+    "name": "Quality & Consistency Checker",
+    "level": "3",
+    "description": "Catch contradictions and unclear claims across documents.",
+    "trigger_phrases": [
+      "AIKA, check consistency",
+      "quality check",
+      "consistency"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Catch contradictions and unclear claims across documents.",
+      "manual_checklist": [
+        "Collect inputs for Quality & Consistency Checker.",
+        "Draft the Quality & Consistency Checker output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 17
+  },
+  {
+    "id": "vendor_evaluation_assistant",
+    "name": "Vendor Evaluation Assistant",
+    "level": "3",
+    "description": "Score vendors on cost, value, security, and integration effort.",
+    "trigger_phrases": [
+      "AIKA, evaluate vendor",
+      "vendor score",
+      "vendor evaluation"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Score vendors on cost, value, security, and integration effort.",
+      "manual_checklist": [
+        "Collect inputs for Vendor Evaluation Assistant.",
+        "Draft the Vendor Evaluation Assistant output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 18
+  },
+  {
+    "id": "portfolio_orchestrator",
+    "name": "Portfolio Orchestrator",
+    "level": "4",
+    "description": "Prioritize initiatives by value, effort, risk, alignment.",
+    "trigger_phrases": [
+      "AIKA, prioritize initiatives",
+      "portfolio orchestrator",
+      "prioritize portfolio"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Prioritize initiatives by value, effort, risk, alignment.",
+      "manual_checklist": [
+        "Collect inputs for Portfolio Orchestrator.",
+        "Draft the Portfolio Orchestrator output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 19
+  },
+  {
+    "id": "meeting_architecture",
+    "name": "Meeting Architecture",
+    "level": "4",
+    "description": "Optimize meeting cadence and decision forums.",
+    "trigger_phrases": [
+      "AIKA, redesign meetings",
+      "meeting architecture",
+      "meeting cadence"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Optimize meeting cadence and decision forums.",
+      "manual_checklist": [
+        "Collect inputs for Meeting Architecture.",
+        "Draft the Meeting Architecture output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 20
+  },
+  {
+    "id": "org_load_balancer",
+    "name": "Org Load Balancer",
+    "level": "4",
+    "description": "Identify overload hotspots and rebalance work.",
+    "trigger_phrases": [
+      "AIKA, balance workload",
+      "org load",
+      "load balancer"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Identify overload hotspots and rebalance work.",
+      "manual_checklist": [
+        "Collect inputs for Org Load Balancer.",
+        "Draft the Org Load Balancer output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 21
+  },
+  {
+    "id": "narrative_influence_builder",
+    "name": "Narrative & Influence Builder",
+    "level": "4",
+    "description": "Create executive-ready narratives and messaging.",
+    "trigger_phrases": [
+      "AIKA, craft narrative",
+      "influence builder",
+      "exec narrative"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Create executive-ready narratives and messaging.",
+      "manual_checklist": [
+        "Collect inputs for Narrative & Influence Builder.",
+        "Draft the Narrative & Influence Builder output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 22
+  },
+  {
+    "id": "policy_governance_builder",
+    "name": "Policy & Governance Builder",
+    "level": "4",
+    "description": "Create governance frameworks, RACI, and intake workflows.",
+    "trigger_phrases": [
+      "AIKA, build governance",
+      "policy builder",
+      "RACI"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Create governance frameworks, RACI, and intake workflows.",
+      "manual_checklist": [
+        "Collect inputs for Policy & Governance Builder.",
+        "Draft the Policy & Governance Builder output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 23
+  },
+  {
+    "id": "personal_performance_engine",
+    "name": "Personal Performance Engine",
+    "level": "4",
+    "description": "Track energy patterns and recommend behavior experiments.",
+    "trigger_phrases": [
+      "AIKA, optimize my time",
+      "performance engine",
+      "focus blocks"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Track energy patterns and recommend behavior experiments.",
+      "manual_checklist": [
+        "Collect inputs for Personal Performance Engine.",
+        "Draft the Personal Performance Engine output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 24
+  },
+  {
+    "id": "mission_mode",
+    "name": "Mission Mode (End-to-End)",
+    "level": "5",
+    "description": "Plan and execute complex missions with minimal prompts.",
+    "trigger_phrases": [
+      "AIKA, run mission",
+      "mission mode",
+      "start mission"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Plan and execute complex missions with minimal prompts.",
+      "manual_checklist": [
+        "Collect inputs for Mission Mode (End-to-End).",
+        "Draft the Mission Mode (End-to-End) output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 25
+  },
+  {
+    "id": "watchtower_mode",
+    "name": "Watchtower Mode",
+    "level": "5",
+    "description": "Continuous monitoring with alerts and drift detection.",
+    "trigger_phrases": [
+      "AIKA, watch",
+      "watchtower mode",
+      "monitor"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Continuous monitoring with alerts and drift detection.",
+      "manual_checklist": [
+        "Collect inputs for Watchtower Mode.",
+        "Draft the Watchtower Mode output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 26
+  },
+  {
+    "id": "delegation_simulator",
+    "name": "Delegation Simulator",
+    "level": "5",
+    "description": "Recommend delegations and draft follow-ups.",
+    "trigger_phrases": [
+      "AIKA, delegate",
+      "delegation simulator",
+      "delegate this"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Recommend delegations and draft follow-ups.",
+      "manual_checklist": [
+        "Collect inputs for Delegation Simulator.",
+        "Draft the Delegation Simulator output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 27
+  },
+  {
+    "id": "relationship_ops",
+    "name": "Relationship Ops",
+    "level": "5",
+    "description": "Automated follow-ups, gratitude notes, and check-ins.",
+    "trigger_phrases": [
+      "AIKA, follow up",
+      "relationship ops",
+      "keep warm"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "email.send",
+          "input_mapping": {
+            "to": "{{structured_input.to}}",
+            "subject": "{{structured_input.subject}}",
+            "body": "{{context_text}}"
+          },
+          "requires_confirmation": true,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": true,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Automated follow-ups, gratitude notes, and check-ins.",
+      "manual_checklist": [
+        "Collect inputs for Relationship Ops.",
+        "Draft the Relationship Ops output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 28
+  },
+  {
+    "id": "knowledge_base_builder",
+    "name": "Knowledge Base Builder",
+    "level": "5",
+    "description": "Convert scattered notes into searchable knowledge.",
+    "trigger_phrases": [
+      "AIKA, build knowledge base",
+      "knowledge base",
+      "organize knowledge"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Propose automated action",
+          "step_type": "tool_call",
+          "tool_name": "memory.write",
+          "input_mapping": {
+            "title": "Knowledge Entry",
+            "content": "{{context_text}}",
+            "tier": "2"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Convert scattered notes into searchable knowledge.",
+      "manual_checklist": [
+        "Collect inputs for Knowledge Base Builder.",
+        "Draft the Knowledge Base Builder output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 29
+  },
+  {
+    "id": "incident_commander",
+    "name": "Incident Commander",
+    "level": "5",
+    "description": "Coordinate outages, comms, timeline, and postmortems.",
+    "trigger_phrases": [
+      "AIKA, incident",
+      "incident commander",
+      "start incident"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Coordinate outages, comms, timeline, and postmortems.",
+      "manual_checklist": [
+        "Collect inputs for Incident Commander.",
+        "Draft the Incident Commander output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 30
+  },
+  {
+    "id": "executive_digital_twin",
+    "name": "Executive Digital Twin (Advisory Only)",
+    "level": "5+++",
+    "description": "Advisory-only mirror of Jeff?s style and decision patterns.",
+    "trigger_phrases": [
+      "AIKA, digital twin",
+      "advisory twin",
+      "decision mirror"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Advisory-only mirror of Jeff?s style and decision patterns.",
+      "manual_checklist": [
+        "Collect inputs for Executive Digital Twin (Advisory Only).",
+        "Draft the Executive Digital Twin (Advisory Only) output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 31
+  },
+  {
+    "id": "counterfactual_engine",
+    "name": "Counterfactual Engine",
+    "level": "5+++",
+    "description": "Model 30/60/90 day outcomes for options.",
+    "trigger_phrases": [
+      "AIKA, counterfactual",
+      "if we choose",
+      "30/60/90"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Model 30/60/90 day outcomes for options.",
+      "manual_checklist": [
+        "Collect inputs for Counterfactual Engine.",
+        "Draft the Counterfactual Engine output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 32
+  },
+  {
+    "id": "second_order_effects_mapper",
+    "name": "Second-Order Effects Mapper",
+    "level": "5+++",
+    "description": "Map unintended consequences across stakeholders.",
+    "trigger_phrases": [
+      "AIKA, second order",
+      "unintended consequences",
+      "ripple effects"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Map unintended consequences across stakeholders.",
+      "manual_checklist": [
+        "Collect inputs for Second-Order Effects Mapper.",
+        "Draft the Second-Order Effects Mapper output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 33
+  },
+  {
+    "id": "strategy_lab",
+    "name": "Strategy Lab",
+    "level": "5+++",
+    "description": "Generate bold, conservative, and hybrid strategies.",
+    "trigger_phrases": [
+      "AIKA, strategy lab",
+      "generate strategies",
+      "strategic options"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Generate bold, conservative, and hybrid strategies.",
+      "manual_checklist": [
+        "Collect inputs for Strategy Lab.",
+        "Draft the Strategy Lab output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 34
+  },
+  {
+    "id": "negotiation_architect",
+    "name": "Negotiation Architect",
+    "level": "5+++",
+    "description": "Build negotiation plans, concessions, and BATNA framing.",
+    "trigger_phrases": [
+      "AIKA, negotiation plan",
+      "negotiation architect",
+      "BATNA"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Build negotiation plans, concessions, and BATNA framing.",
+      "manual_checklist": [
+        "Collect inputs for Negotiation Architect.",
+        "Draft the Negotiation Architect output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 35
+  },
+  {
+    "id": "org_politics_map",
+    "name": "Org Politics Map (Ethical)",
+    "level": "5+++",
+    "description": "Track incentives, blockers, and influence pathways ethically.",
+    "trigger_phrases": [
+      "AIKA, org politics",
+      "stakeholder map",
+      "influence map"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Track incentives, blockers, and influence pathways ethically.",
+      "manual_checklist": [
+        "Collect inputs for Org Politics Map (Ethical).",
+        "Draft the Org Politics Map (Ethical) output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 36
+  },
+  {
+    "id": "continuous_improvement_flywheel",
+    "name": "Continuous Improvement Flywheel",
+    "level": "5+++",
+    "description": "Weekly automation upgrade proposals based on friction.",
+    "trigger_phrases": [
+      "AIKA, automation upgrades",
+      "improvement flywheel",
+      "upgrade backlog"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Weekly automation upgrade proposals based on friction.",
+      "manual_checklist": [
+        "Collect inputs for Continuous Improvement Flywheel.",
+        "Draft the Continuous Improvement Flywheel output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 37
+  },
+  {
+    "id": "personal_legacy_planner",
+    "name": "Personal Legacy Planner",
+    "level": "5+++",
+    "description": "Align career moves, VP readiness, and skill compounding.",
+    "trigger_phrases": [
+      "AIKA, legacy plan",
+      "career roadmap",
+      "vp readiness"
+    ],
+    "required_inputs": {
+      "type": "object",
+      "properties": {
+        "context_text": {
+          "type": "string"
+        },
+        "structured_input": {
+          "type": "object"
+        },
+        "attachments": {
+          "type": "array"
+        },
+        "options": {
+          "type": "object"
+        }
+      },
+      "required": []
+    },
+    "action_definition": {
+      "steps": [
+        {
+          "name": "Interpret request",
+          "step_type": "analysis",
+          "output_key": "analysis"
+        },
+        {
+          "name": "Manual execution checklist",
+          "step_type": "manual",
+          "on_no_integration": "manual_checklist",
+          "output_key": "manual_checklist"
+        }
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "action_items": {
+          "type": "array"
+        },
+        "manual_checklist": {
+          "type": "array"
+        },
+        "artifacts": {
+          "type": "object"
+        }
+      }
+    },
+    "update_policy": {
+      "include_in_digest": true,
+      "notify_on_completion": false,
+      "noise_budget_cost": 1
+    },
+    "requires_confirmation": false,
+    "enabled": true,
+    "templates": {
+      "summary_hint": "Align career moves, VP readiness, and skill compounding.",
+      "manual_checklist": [
+        "Collect inputs for Personal Legacy Planner.",
+        "Draft the Personal Legacy Planner output and review for clarity.",
+        "Send to Jeff for confirmation or next steps."
+      ]
+    },
+    "order": 38
+  }
+]

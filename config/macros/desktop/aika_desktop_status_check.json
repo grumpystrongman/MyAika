@@ -1,0 +1,31 @@
+{
+  "id": "aika_desktop_status_check",
+  "name": "Aika Desktop Status Check",
+  "description": "Launch the Aika app and capture a status screenshot.",
+  "tags": [
+    "desktop",
+    "status"
+  ],
+  "actions": [
+    {
+      "type": "launch",
+      "app": "Aika"
+    },
+    {
+      "type": "wait",
+      "ms": 1200
+    },
+    {
+      "type": "screenshot",
+      "name": "aika_status"
+    }
+  ],
+  "safety": {
+    "requireApprovalFor": [
+      "launch",
+      "screenshot"
+    ],
+    "maxActions": 20,
+    "approvalMode": "per_run"
+  }
+}

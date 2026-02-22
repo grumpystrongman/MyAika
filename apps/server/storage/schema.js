@@ -623,6 +623,170 @@ const migrations = [
     CREATE INDEX IF NOT EXISTS idx_openai_usage_ts
       ON openai_usage (ts);
     `
+  },
+  {
+    id: 16,
+    sql: `
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      timezone TEXT,
+      email TEXT,
+      telegram_user_id TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      user_id TEXT PRIMARY KEY,
+      digest_time TEXT,
+      pulse_time TEXT,
+      weekly_time TEXT,
+      noise_budget_per_day INTEGER,
+      confirmation_policy TEXT,
+      mode_flags_json TEXT,
+      created_at TEXT,
+      updated_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS modules (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      level TEXT,
+      description TEXT,
+      trigger_phrases_json TEXT,
+      required_inputs_json TEXT,
+      action_definition_json TEXT,
+      output_schema_json TEXT,
+      update_policy_json TEXT,
+      requires_confirmation INTEGER,
+      enabled INTEGER,
+      order_index INTEGER,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS module_runs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      module_id TEXT,
+      channel TEXT,
+      status TEXT,
+      input_payload_json TEXT,
+      output_payload_json TEXT,
+      created_at TEXT,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_module_runs_user
+      ON module_runs (user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS run_steps (
+      id TEXT PRIMARY KEY,
+      module_run_id TEXT,
+      step_index INTEGER,
+      step_type TEXT,
+      status TEXT,
+      request_json TEXT,
+      response_json TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      FOREIGN KEY(module_run_id) REFERENCES module_runs(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_run_steps_run
+      ON run_steps (module_run_id, step_index);
+
+    CREATE TABLE IF NOT EXISTS manual_action_queue (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      source_run_id TEXT,
+      priority TEXT,
+      title TEXT,
+      instructions TEXT,
+      copy_ready_payload_json TEXT,
+      status TEXT,
+      due_at TEXT,
+      created_at TEXT,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_manual_action_queue_user
+      ON manual_action_queue (user_id, status, created_at);
+
+    CREATE TABLE IF NOT EXISTS confirmations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      run_id TEXT,
+      action_type TEXT,
+      summary TEXT,
+      details_json TEXT,
+      status TEXT,
+      approval_id TEXT,
+      requested_at TEXT,
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_confirmations_user
+      ON confirmations (user_id, status, requested_at);
+
+    CREATE TABLE IF NOT EXISTS watch_items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      type TEXT,
+      config_json TEXT,
+      cadence TEXT,
+      thresholds_json TEXT,
+      enabled INTEGER,
+      created_at TEXT,
+      updated_at TEXT,
+      last_observed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_watch_items_user
+      ON watch_items (user_id, enabled, created_at);
+
+    CREATE TABLE IF NOT EXISTS watch_events (
+      id TEXT PRIMARY KEY,
+      watch_item_id TEXT,
+      observed_at TEXT,
+      raw_input_json TEXT,
+      derived_signal_json TEXT,
+      severity TEXT,
+      summary TEXT,
+      diff_json TEXT,
+      FOREIGN KEY(watch_item_id) REFERENCES watch_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_watch_events_item
+      ON watch_events (watch_item_id, observed_at);
+
+    CREATE TABLE IF NOT EXISTS memory_items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      scope TEXT,
+      key TEXT,
+      value_json TEXT,
+      sensitivity TEXT,
+      source TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_items_user
+      ON memory_items (user_id, scope, key);
+
+    CREATE TABLE IF NOT EXISTS digests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      type TEXT,
+      period_start TEXT,
+      period_end TEXT,
+      content TEXT,
+      sent_email INTEGER,
+      sent_telegram INTEGER,
+      created_at TEXT,
+      sent_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_digests_user
+      ON digests (user_id, type, created_at);
+
+    INSERT OR IGNORE INTO users (id, name, timezone, email, telegram_user_id, created_at)
+    VALUES ('local', 'Jeff', '', '', '', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+    `
   }
 ];
 

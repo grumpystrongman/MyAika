@@ -22,6 +22,16 @@ import { getActiveThread, createThread, closeThread, ensureActiveThread, setThre
 import { getSkillsState } from "../skills/index.js";
 import { getRuntimeFlags } from "../storage/runtime_flags.js";
 import { approveSafetyApproval, rejectSafetyApproval } from "../src/safety/approvals.js";
+import { routeAikaCommand } from "../src/aika/commandRouter.js";
+import { listModuleRuns } from "../storage/module_runs.js";
+import {
+  startCodexRun,
+  getCodexRun,
+  listCodexRuns,
+  readCodexLastMessage,
+  tailCodexLog
+} from "../src/codex/runner.js";
+import { sendTelegramMessage } from "./messaging.js";
 
 const DEFAULT_PORT = 8790;
 
@@ -73,6 +83,13 @@ function parseCommand(raw) {
 
 function parseBoolFlag(args, name) {
   return args.some(arg => arg.toLowerCase() === name || arg.toLowerCase() === `--${name}`);
+}
+
+function parseList(value) {
+  return String(value || "")
+    .split(",")
+    .map(item => item.trim())
+    .filter(Boolean);
 }
 
 function formatList(items, formatter, max = 8) {
@@ -343,6 +360,208 @@ function getApprovalToken(args) {
   return args[1] || "";
 }
 
+async function handleAikaRoute(text, context) {
+  const result = await routeAikaCommand({ text, context });
+  if (!result?.handled) return "Command not understood.";
+  return result.reply || "Done.";
+}
+
+function formatMissionStatus(ownerId = "local") {
+  const runs = listModuleRuns({ userId: ownerId, limit: 5 });
+  if (!runs.length) return "No recent missions or module runs.";
+  return runs.map(run => `- ${run.moduleId} (${run.status}) ${run.createdAt || ""}`).join("\n");
+}
+
+function truncateTelegram(text, maxChars = 3900) {
+  const cleaned = String(text || "");
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, maxChars - 20).trim()}… (truncated)`;
+}
+
+function resolveCodexAllowedChatIds() {
+  const explicit = parseList(process.env.CODEX_REMOTE_CHAT_IDS || process.env.CODEX_REMOTE_ALLOWED_CHAT_IDS || "");
+  if (explicit.length) return explicit;
+  const fallback = parseList(process.env.ASSISTANT_TASK_TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHAT_ID || "");
+  return fallback;
+}
+
+function isCodexEnabled() {
+  return String(process.env.CODEX_REMOTE_ENABLED || "") === "1";
+}
+
+function isCodexAuthorized(meta = {}) {
+  if (meta.channel !== "telegram") return false;
+  const allowed = resolveCodexAllowedChatIds();
+  if (!allowed.length) return true;
+  const chatId = String(meta.chatId || "");
+  return allowed.includes(chatId);
+}
+
+function parseCodexArgs(args = []) {
+  const divider = args.indexOf("--");
+  const flagArgs = divider === -1 ? args : args.slice(0, divider);
+  const promptParts = divider === -1 ? [] : args.slice(divider + 1);
+  let mode = "";
+  let model = "";
+  let profile = "";
+
+  for (let i = 0; i < flagArgs.length; i += 1) {
+    const raw = flagArgs[i];
+    const lower = String(raw || "").toLowerCase();
+    if (!lower) continue;
+    if (lower === "--full") {
+      mode = "full";
+      continue;
+    }
+    if (lower === "--safe") {
+      mode = "safe";
+      continue;
+    }
+    if (lower === "--read-only" || lower === "--readonly") {
+      mode = "read-only";
+      continue;
+    }
+    if (lower.startsWith("--mode=")) {
+      mode = lower.split("=").slice(1).join("=").trim();
+      continue;
+    }
+    if (lower === "--model") {
+      model = flagArgs[i + 1] || "";
+      i += 1;
+      continue;
+    }
+    if (lower.startsWith("--model=")) {
+      model = raw.split("=").slice(1).join("=").trim();
+      continue;
+    }
+    if (lower === "--profile") {
+      profile = flagArgs[i + 1] || "";
+      i += 1;
+      continue;
+    }
+    if (lower.startsWith("--profile=")) {
+      profile = raw.split("=").slice(1).join("=").trim();
+      continue;
+    }
+    promptParts.push(raw);
+  }
+
+  return {
+    mode,
+    model,
+    profile,
+    prompt: promptParts.join(" ").trim()
+  };
+}
+
+function formatCodexRunStatus(run, includePrompt = false) {
+  if (!run) return "Codex run not found.";
+  const lines = [
+    `Run: ${run.id}`,
+    `Status: ${run.status || "unknown"}`,
+    `Mode: ${run.mode || "safe"}`,
+    `Started: ${run.startedAt || "n/a"}`,
+    `Finished: ${run.finishedAt || "n/a"}`
+  ];
+  if (Number.isFinite(run.exitCode)) {
+    lines.push(`Exit: ${run.exitCode}`);
+  }
+  if (run.error) {
+    lines.push(`Error: ${run.error}`);
+  }
+  if (includePrompt && run.prompt) {
+    lines.push(`Prompt: ${run.prompt.slice(0, 160)}${run.prompt.length > 160 ? "…" : ""}`);
+  }
+  return lines.join("\n");
+}
+
+function looksLikeRunId(value) {
+  return /^[0-9a-f-]{8,}$/i.test(String(value || ""));
+}
+
+async function handleCodexCommand(args, meta) {
+  const sub = (args[0] || "").toLowerCase();
+  if (!isCodexEnabled()) {
+    return "Codex remote is disabled. Set CODEX_REMOTE_ENABLED=1 to enable.";
+  }
+  if (!isCodexAuthorized(meta)) {
+    return "Codex remote access is not authorized for this chat.";
+  }
+
+  if (!sub || ["help", "?", "commands"].includes(sub)) {
+    return [
+      "Codex commands:",
+      "/codex <instructions>",
+      "/codex --full|--safe|--read-only <instructions>",
+      "/codex status <runId>",
+      "/codex last",
+      "/codex tail <runId> [stdout|stderr]",
+      "Tip: use /codex --safe if you want sandboxed edits."
+    ].join("\n");
+  }
+
+  if (["status", "info"].includes(sub) && looksLikeRunId(args[1])) {
+    const id = args[1] || "";
+    return formatCodexRunStatus(getCodexRun(id), true);
+  }
+
+  if (["last", "latest"].includes(sub) && args.length === 1) {
+    const last = listCodexRuns(1)[0];
+    if (!last) return "No Codex runs found.";
+    const summary = readCodexLastMessage(last.id, 1200);
+    const status = formatCodexRunStatus(last, false);
+    return summary ? `${status}\n\nSummary:\n${summary}` : status;
+  }
+
+  if (["tail", "log", "logs"].includes(sub) && looksLikeRunId(args[1])) {
+    const id = args[1] || "";
+    const stream = ["stderr"].includes((args[2] || "").toLowerCase()) ? "stderr" : "stdout";
+    const output = tailCodexLog(id, stream, 40, 3500);
+    if (!output) return "No log output found yet.";
+    return `Last ${stream} lines:\n${output}`;
+  }
+
+  const allowConcurrent = String(process.env.CODEX_REMOTE_ALLOW_CONCURRENT || "") === "1";
+  if (!allowConcurrent) {
+    const running = listCodexRuns(6).find(run => ["pending", "running"].includes(run.status));
+    if (running) {
+      return `Codex is already running (${running.id}). Use /codex status ${running.id} or /codex tail ${running.id}.`;
+    }
+  }
+
+  const parsed = parseCodexArgs(args);
+  const prompt = parsed.prompt || args.join(" ");
+  if (!prompt.trim()) return "Usage: /codex <instructions>";
+
+  const timeoutMinutes = Number(process.env.CODEX_REMOTE_TIMEOUT_MINUTES || 0);
+  const timeoutMs = Number.isFinite(timeoutMinutes) && timeoutMinutes > 0 ? timeoutMinutes * 60 * 1000 : 0;
+
+  const run = startCodexRun({
+    prompt,
+    mode: parsed.mode,
+    model: parsed.model,
+    profile: parsed.profile,
+    channel: meta.channel,
+    chatId: meta.chatId,
+    senderId: meta.senderId,
+    senderName: meta.senderName,
+    timeoutMs,
+    onComplete: ({ runId, status, exitCode, error }) => {
+      if (meta.channel !== "telegram" || !meta.chatId) return;
+      const summary = readCodexLastMessage(runId, 2500);
+      const statusLine = status === "completed"
+        ? `Codex run ${runId} completed (exit ${exitCode ?? "0"}).`
+        : `Codex run ${runId} failed${exitCode != null ? ` (exit ${exitCode})` : ""}.`;
+      const detail = summary ? `\n\nSummary:\n${summary}` : error ? `\n\nError: ${error}` : "";
+      const hint = `\n\nLogs: data/codex_runs/${runId}/stdout.log`;
+      const message = truncateTelegram(`${statusLine}${detail}${hint}`);
+      sendTelegramMessage(meta.chatId, message).catch(() => {});
+    }
+  });
+
+  return `Codex run started: ${run.id}\nMode: ${run.mode}\nUse /codex status ${run.id} or /codex tail ${run.id}.`;
+}
+
 function resolveLatestApprovalId(meta) {
   const flags = getRuntimeFlags();
   const map = flags.approval_last_by_chat || {};
@@ -499,9 +718,17 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
           "/resources",
           "/thread new | /thread stop | /thread status",
           "/rag list | /rag use <id|all|auto> | /rag status",
+          "/codex <instructions> | /codex status <runId> | /codex last | /codex tail <runId>",
           "/rss list | /rss crawl [--force] | /rss seed <url> | /rss add <url> | /rss remove <id>",
           "/knowledge list | /knowledge crawl [--force] | /knowledge add <url> | /knowledge remove <id>",
           "/macro list | /macro run <id>",
+          "/modules",
+          "/digest | /pulse | /weekly",
+          "/watch <thing> | /unwatch <thing> | /watchlist",
+          "/mission <name> | /mission_status | /incident",
+          "/summarize <text>",
+          "/templates | /sop | /status_report",
+          "/focus_on | /focus_off | /alert_on | /alert_off | /writing_on | /writing_off",
           "/approvals",
           "/approve <approvalId> [token]",
           "/deny <approvalId> [token]",
@@ -555,6 +782,82 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
       return { handled: true, response: await handleMacroCommand(args, context) };
     }
 
+    if (["modules", "module", "registry"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, show my modules", context) };
+    }
+
+    if (["digest", "daily"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, run daily digest", context) };
+    }
+
+    if (["pulse", "midday"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, run midday pulse", context) };
+    }
+
+    if (["weekly", "review"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, run weekly review", context) };
+    }
+
+    if (["watchlist", "watching"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, watchlist", context) };
+    }
+
+    if (["watch"].includes(cmd)) {
+      const target = args.join(" ");
+      return { handled: true, response: await handleAikaRoute(`AIKA, watch ${target}`, context) };
+    }
+
+    if (["unwatch", "stopwatch", "stop"].includes(cmd)) {
+      const target = args.join(" ");
+      return { handled: true, response: await handleAikaRoute(`AIKA, stop watching ${target}`, context) };
+    }
+
+    if (["mission"].includes(cmd)) {
+      const target = args.join(" ");
+      return { handled: true, response: await handleAikaRoute(`AIKA, run mission ${target}`, context) };
+    }
+
+    if (["mission_status", "missionstatus"].includes(cmd)) {
+      return { handled: true, response: formatMissionStatus(context.userId || "local") };
+    }
+
+    if (["incident"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, incident", context) };
+    }
+
+    if (["summarize", "summary"].includes(cmd)) {
+      const target = args.join(" ");
+      return { handled: true, response: await handleAikaRoute(`AIKA, summarize ${target}`, context) };
+    }
+
+    if (["templates", "sop", "status_report"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, run Template Engine", context) };
+    }
+
+    if (["focus_on", "focus"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, focus mode", context) };
+    }
+
+    if (["focus_off"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, focus off", context) };
+    }
+
+    if (["alert_on"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, alert on", context) };
+    }
+
+    if (["alert_off"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, alert off", context) };
+    }
+
+    if (["writing_on"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, writing mode", context) };
+    }
+
+    if (["writing_off"].includes(cmd)) {
+      return { handled: true, response: await handleAikaRoute("AIKA, writing off", context) };
+    }
+
     if (["approvals"].includes(cmd)) {
       return { handled: true, response: await handleApprovals() };
     }
@@ -577,6 +880,10 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
 
     if (["rag", "knowledgebase", "kb"].includes(cmd)) {
       return { handled: true, response: handleRagCommand(args, meta) };
+    }
+
+    if (["codex", "cx"].includes(cmd)) {
+      return { handled: true, response: await handleCodexCommand(args, meta) };
     }
 
     return { handled: true, response: "Unknown command. Try /help." };

@@ -11,6 +11,7 @@ function resolveRepoRoot() {
 
 const repoRoot = resolveRepoRoot();
 const macrosDir = path.join(repoRoot, "data", "skills", "macros");
+const seedMacrosDir = path.join(repoRoot, "config", "macros", "teach");
 
 function ensureDir() {
   if (!fs.existsSync(macrosDir)) fs.mkdirSync(macrosDir, { recursive: true });
@@ -24,20 +25,45 @@ function macroPath(id) {
   return path.join(macrosDir, `${id}.json`);
 }
 
-export function listMacros() {
+function listSeedMacros() {
   try {
-    if (!fs.existsSync(macrosDir)) return [];
-    return fs.readdirSync(macrosDir)
+    if (!fs.existsSync(seedMacrosDir)) return [];
+    return fs.readdirSync(seedMacrosDir)
       .filter(name => name.endsWith(".json"))
       .map(name => {
         try {
-          const raw = fs.readFileSync(path.join(macrosDir, name), "utf8");
-          return raw ? JSON.parse(raw) : null;
+          const raw = fs.readFileSync(path.join(seedMacrosDir, name), "utf8");
+          return raw ? { ...JSON.parse(raw), seeded: true } : null;
         } catch {
           return null;
         }
       })
-      .filter(Boolean)
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function listMacros() {
+  try {
+    const seeded = listSeedMacros();
+    const user = fs.existsSync(macrosDir)
+      ? fs.readdirSync(macrosDir)
+        .filter(name => name.endsWith(".json"))
+        .map(name => {
+          try {
+            const raw = fs.readFileSync(path.join(macrosDir, name), "utf8");
+            return raw ? JSON.parse(raw) : null;
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+      : [];
+    const merged = new Map();
+    for (const macro of seeded) merged.set(macro.id, macro);
+    for (const macro of user) merged.set(macro.id, macro);
+    return Array.from(merged.values())
       .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
   } catch {
     return [];
@@ -49,7 +75,8 @@ export function getMacro(id) {
     const raw = fs.readFileSync(macroPath(id), "utf8");
     return raw ? JSON.parse(raw) : null;
   } catch {
-    return null;
+    const seeded = listSeedMacros().find(item => item.id === id);
+    return seeded || null;
   }
 }
 
@@ -77,7 +104,9 @@ export function saveMacro(payload) {
 
 export function deleteMacro(id) {
   try {
-    fs.unlinkSync(macroPath(id));
+    const target = macroPath(id);
+    if (!fs.existsSync(target)) return false;
+    fs.unlinkSync(target);
     return true;
   } catch {
     return false;

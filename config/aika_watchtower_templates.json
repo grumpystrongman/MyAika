@@ -1,0 +1,47 @@
+[
+  {
+    "id": "kpi_drift",
+    "name": "KPI Drift",
+    "type": "kpi",
+    "description": "Detect KPI changes over thresholds.",
+    "cadence": "daily",
+    "thresholds": {
+      "pct_warn": 0.05,
+      "pct_critical": 0.1
+    },
+    "severity_map": {
+      "warn": "medium",
+      "critical": "high"
+    }
+  },
+  {
+    "id": "vendor_risk",
+    "name": "Vendor Risk",
+    "type": "vendor",
+    "description": "Monitor vendor signals and SLA breaches.",
+    "cadence": "weekly",
+    "thresholds": {
+      "score_warn": 60,
+      "score_critical": 40
+    },
+    "severity_map": {
+      "warn": "medium",
+      "critical": "high"
+    }
+  },
+  {
+    "id": "compliance_change",
+    "name": "Compliance Change",
+    "type": "compliance",
+    "description": "Track policy or compliance changes.",
+    "cadence": "weekly",
+    "thresholds": {
+      "change_count_warn": 1,
+      "change_count_critical": 3
+    },
+    "severity_map": {
+      "warn": "medium",
+      "critical": "high"
+    }
+  }
+]

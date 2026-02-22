@@ -10,6 +10,11 @@ Use these links as a sidebar jump list inside the guide.
 - [Quickstart](#quickstart)
 - [Navigation Map (Top Tabs)](#navigation-map-top-tabs)
 - [Global Concepts](#global-concepts)
+- [AIKA Executive Layer](#aika-executive-layer)
+- [Command Grammar](#command-grammar)
+- [No-Integrations Mode](#no-integrations-mode)
+- [Digests + Watchtower](#digests--watchtower)
+- [Runbooks + Mission Mode](#runbooks--mission-mode)
 - [Chat Tab](#chat-tab)
 - [Recordings Tab (Meeting Copilot)](#recordings-tab-meeting-copilot)
 - [Legacy Tools (Settings -> Legacy)](#legacy-tools-settings--legacy)
@@ -84,6 +89,50 @@ If you are on iPad/Safari, microphone access requires HTTPS. Use `npm run dev:ip
 - RAG: Retrieval-augmented generation is used for Fireflies and Trading knowledge.
 - Hybrid RAG: Semantic embeddings + lexical FTS to improve recall.
 - Approvals: High-risk actions route through approvals before execution.
+
+## AIKA Executive Layer
+AIKA adds a 38-module executive assistant system on top of the existing Aika stack. Modules are declarative (Trigger → Inputs → Actions → Outputs → Update policy) and span five levels from Clerk to God Tier advisory.
+
+Key outcomes:
+- Save time through automation and structured summaries.
+- Increase decision clarity via decision briefs and risk surfacing.
+- Reduce risk with confirmations and guardrails.
+- Compound leverage with weekly automation upgrades.
+
+## Command Grammar
+Use the same grammar across voice, chat, and Telegram:
+- `AIKA, run <ModuleName> ...`
+- `AIKA, start <ModeName> ...`
+- `AIKA, watch <Thing> ...`
+- `AIKA, brief me on <Topic> ...`
+- `AIKA, draft <Artifact> ...`
+- `AIKA, summarize <Input> ...`
+- `AIKA, decide between <OptionA> and <OptionB> using <criteria> ...`
+- `AIKA, configure <Setting> to <Value> ...`
+- `AIKA, stop watching <Thing> ...`
+- `AIKA, show my modules ...`
+- `AIKA, run my daily digest.`
+
+## No-Integrations Mode
+If integrations are not connected, use structured prefixes to provide inputs and receive manual checklists:
+- `EMAIL:`
+- `CALENDAR EXPORT:`
+- `KPI SNAPSHOT:`
+- `PROJECT STATUS:`
+- `NOTE:`
+
+AIKA responds with structured output, a manual execution checklist, and queues the action in the Manual Action Queue.
+
+## Digests + Watchtower
+AIKA produces three proactive updates:
+- Daily Digest: top priorities, calendar prep, inbox summary, risks, leverage suggestion.
+- Midday Pulse: only when notable changes are detected.
+- Weekly Review: wins, misses, risks, next-week focus, automation upgrades backlog.
+
+Watchtower supports KPI drift detection, threshold alerts, and change diffs. Each watch item stores events with severity and summary.
+
+## Runbooks + Mission Mode
+Runbooks are declarative, phased workflows (Analyze → Synthesize → Deliverables). Mission Mode runs these end-to-end with manual checklists or tool calls depending on integration availability.
 
 ## Chat Tab
 ![Chat tab](user-guide/screenshots/chat.png)

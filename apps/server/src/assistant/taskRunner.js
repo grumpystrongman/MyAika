@@ -11,6 +11,7 @@ import { executeAction } from "../safety/executeAction.js";
 import { executor } from "../../mcp/index.js";
 import { sendTelegramMessage } from "../../integrations/messaging.js";
 import { getTradingKnowledgeHealthSnapshot } from "../trading/knowledgeRag.js";
+import { buildDigestByType } from "../aika/digestEngine.js";
 import { listAuditEvents } from "../safety/auditLog.js";
 import { injectCalendarBriefing } from "../calendar/briefing.js";
 
@@ -80,6 +81,18 @@ function injectTradingKnowledgeSnapshot(prompt) {
   return output;
 }
 
+function injectAikaDigest(prompt, task) {
+  let output = String(prompt || "");
+  if (!output.includes("{{aika_digest")) return { output, used: false };
+  const ownerId = task?.ownerId || "local";
+  const regex = /\{\{aika_digest:([^}]+)\}\}/gi;
+  output = output.replace(regex, (_match, type) => {
+    const digest = buildDigestByType(String(type || "daily").trim(), { userId: ownerId });
+    return digest?.text || "";
+  });
+  return { output, used: true };
+}
+
 function injectOpsSnapshots(prompt, task) {
   let output = String(prompt || "");
   const ownerId = task?.ownerId || "local";
@@ -102,6 +115,8 @@ async function runTaskPrompt(task) {
   let prompt = String(task.prompt || "").trim();
   prompt = injectTradingKnowledgeSnapshot(prompt);
   prompt = injectOpsSnapshots(prompt, task);
+  const digestInjected = injectAikaDigest(prompt, task);
+  prompt = digestInjected.output;
   let fallbackOutput = "";
   if (prompt.includes("{{calendar_briefing_context}}")) {
     const injected = await injectCalendarBriefing(prompt, task);
@@ -109,9 +124,13 @@ async function runTaskPrompt(task) {
     fallbackOutput = injected.fallbackOutput || "";
   }
   if (!prompt) throw new Error("task_prompt_missing");
+  const forceTemplate = String(process.env.AIKA_DIGEST_FORCE_TEMPLATE || "1") !== "0";
+  if (digestInjected.used && forceTemplate) {
+    return prompt || "Digest generated.";
+  }
   if (!process.env.OPENAI_API_KEY) {
     if (fallbackOutput) return fallbackOutput;
-    return "Task executed. Configure OPENAI_API_KEY for AI-generated output.";
+    return prompt || "Task executed. Configure OPENAI_API_KEY for AI-generated output.";
   }
   const system = "You are Aika, a personal assistant. Provide a concise, actionable response for the scheduled task.";
   const response = await responsesCreate({

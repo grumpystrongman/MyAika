@@ -1,0 +1,31 @@
+{
+  "id": "aika_desktop_focus_block",
+  "name": "Aika Desktop Focus Block",
+  "description": "Open calendar focus block template and capture for review.",
+  "tags": [
+    "desktop",
+    "focus"
+  ],
+  "actions": [
+    {
+      "type": "launch",
+      "app": "Calendar"
+    },
+    {
+      "type": "wait",
+      "ms": 1200
+    },
+    {
+      "type": "screenshot",
+      "name": "calendar_focus"
+    }
+  ],
+  "safety": {
+    "requireApprovalFor": [
+      "launch",
+      "screenshot"
+    ],
+    "maxActions": 20,
+    "approvalMode": "per_run"
+  }
+}

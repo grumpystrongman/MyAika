@@ -49,7 +49,13 @@ function normalizeTargets(input) {
 function normalizeSchedule(input, fallback = null) {
   if (!input || typeof input !== "object") return fallback;
   const rawType = String(input.type || "").trim().toLowerCase();
-  const type = rawType || (input.runAt || input.run_at ? "once" : (input.intervalMinutes || input.interval_minutes ? "interval" : (input.timeOfDay || input.time_of_day ? "daily" : "")));
+  const type = rawType || (input.runAt || input.run_at
+    ? "once"
+    : (input.intervalMinutes || input.interval_minutes
+      ? "interval"
+      : (input.timeOfDay || input.time_of_day
+        ? (input.dayOfWeek || input.day_of_week || input.weekday ? "weekly" : "daily")
+        : "")));
   if (!type) return fallback;
   if (type === "once") {
     const runAt = String(input.runAt || input.run_at || "").trim();
@@ -66,6 +72,18 @@ function normalizeSchedule(input, fallback = null) {
     if (!timeOfDay) return fallback;
     return {
       type: "daily",
+      timeOfDay,
+      timezone: String(input.timezone || input.time_zone || "").trim() || ""
+    };
+  }
+  if (type === "weekly") {
+    const timeOfDay = String(input.timeOfDay || input.time_of_day || "").trim();
+    if (!timeOfDay) return fallback;
+    const dayOfWeek = String(input.dayOfWeek || input.day_of_week || input.weekday || "").trim();
+    if (!dayOfWeek) return fallback;
+    return {
+      type: "weekly",
+      dayOfWeek,
       timeOfDay,
       timezone: String(input.timezone || input.time_zone || "").trim() || ""
     };
@@ -110,6 +128,31 @@ export function computeNextRunAt(schedule, fromDate = new Date()) {
     if (candidate <= now) {
       candidate.setDate(candidate.getDate() + 1);
     }
+    return candidate.toISOString();
+  }
+  if (schedule.type === "weekly") {
+    const time = parseTimeOfDay(schedule.timeOfDay);
+    if (!time) return "";
+    const dayValue = String(schedule.dayOfWeek || "").trim().toLowerCase();
+    const dayMap = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6
+    };
+    const targetDay = Number.isFinite(Number(dayValue))
+      ? Math.min(6, Math.max(0, Number(dayValue)))
+      : (dayMap[dayValue] ?? null);
+    if (targetDay === null || targetDay === undefined) return "";
+    const candidate = new Date();
+    candidate.setHours(time.hour, time.minute, 0, 0);
+    const currentDay = candidate.getDay();
+    let offset = targetDay - currentDay;
+    if (offset < 0 || (offset === 0 && candidate <= now)) offset += 7;
+    candidate.setDate(candidate.getDate() + offset);
     return candidate.toISOString();
   }
   return "";

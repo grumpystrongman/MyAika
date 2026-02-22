@@ -84,6 +84,7 @@ import { registry, executor } from "./mcp/index.js";
 import { handleActionIntent } from "./src/agent/actionPipeline.js";
 import { getActionRun as getAgentActionRun } from "./src/agent/actionRunStore.js";
 import { redactPhi } from "./mcp/policy.js";
+import { detectPhi } from "./src/safety/redact.js";
 import { listApprovals, denyApproval } from "./mcp/approvals.js";
 import { writeAudit } from "./mcp/audit.js";
 import { listToolHistory } from "./storage/history.js";
@@ -117,6 +118,21 @@ import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { getAssistantProfile, updateAssistantProfile } from "./storage/assistant_profile.js";
 import { listAssistantTasks, createAssistantTask, updateAssistantTask } from "./storage/assistant_tasks.js";
 import { listAssistantProposals, createAssistantProposal, updateAssistantProposal, getAssistantProposal } from "./storage/assistant_change_proposals.js";
+import { listManualActions, updateManualAction } from "./storage/manual_actions.js";
+import { listConfirmations, updateConfirmation } from "./storage/confirmations.js";
+import { listWatchEvents } from "./storage/watch_events.js";
+import { createWatchItem } from "./storage/watch_items.js";
+import { listDigests } from "./storage/digests.js";
+import { upsertMemoryItem, listMemoryItems } from "./storage/memory_items.js";
+import { getSettings, upsertSettings } from "./storage/settings.js";
+import { syncModuleRegistry, listModuleRegistry } from "./src/aika/moduleRegistry.js";
+import { executeModule } from "./src/aika/moduleEngine.js";
+import { listRunbooks, executeRunbook } from "./src/aika/runbookEngine.js";
+import { createWatchItemFromTemplate, observeWatchItem, listWatchtowerItems } from "./src/aika/watchtower.js";
+import { buildDigestByType, recordDigest } from "./src/aika/digestEngine.js";
+import { getBootSequence, completeBootSequence } from "./src/aika/boot.js";
+import { ensureDigestTasks } from "./src/aika/scheduler.js";
+import { routeAikaCommand } from "./src/aika/commandRouter.js";
 import { combineChunks, transcribeAudio, splitAudioForTranscription } from "./recordings/processor.js";
 import { redactText } from "./recordings/redaction.js";
 import { buildMeetingNotesMarkdown, buildTranscriptText, getRecordingAudioUrl } from "./recordings/meetingUtils.js";
@@ -325,6 +341,8 @@ startDiscordBot();
 
 initDb();
 runMigrations();
+syncModuleRegistry();
+ensureDigestTasks({ ownerId: "local" });
 try {
   initRagStore();
 } catch (err) {
@@ -2464,6 +2482,161 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+// AIKA core endpoints
+app.get("/api/aika/boot", rateLimit, (req, res) => {
+  const payload = getBootSequence(getUserId(req));
+  res.json(payload);
+});
+
+app.post("/api/aika/boot/complete", rateLimit, (req, res) => {
+  const payload = completeBootSequence(getUserId(req));
+  res.json(payload);
+});
+
+app.get("/api/aika/modules", rateLimit, (_req, res) => {
+  res.json({ modules: listModuleRegistry({ includeDisabled: false }) });
+});
+
+app.post("/api/aika/modules/run", rateLimit, async (req, res) => {
+  try {
+    const { moduleId, moduleName, inputPayload } = req.body || {};
+    const result = await executeModule({
+      moduleId,
+      moduleName,
+      inputPayload: inputPayload || {},
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId }
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "module_run_failed" });
+  }
+});
+
+app.get("/api/aika/runbooks", rateLimit, (_req, res) => {
+  res.json({ runbooks: listRunbooks() });
+});
+
+app.post("/api/aika/runbooks/run", rateLimit, async (req, res) => {
+  try {
+    const { name, inputPayload } = req.body || {};
+    const result = await executeRunbook({
+      name,
+      inputPayload: inputPayload || {},
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId }
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "runbook_run_failed" });
+  }
+});
+
+app.get("/api/aika/watch", rateLimit, (req, res) => {
+  const items = listWatchtowerItems({ userId: getUserId(req), enabledOnly: false });
+  res.json({ items });
+});
+
+app.post("/api/aika/watch", rateLimit, (req, res) => {
+  const { templateId, type, config, cadence, thresholds } = req.body || {};
+  const userId = getUserId(req);
+  if (templateId) {
+    const item = createWatchItemFromTemplate({ templateId, userId, config: config || {} });
+    if (!item) return res.status(404).json({ error: "watch_template_not_found" });
+    return res.json({ item });
+  }
+  const item = createWatchItem({
+    userId,
+    type: type || "custom",
+    config: config || {},
+    cadence: cadence || "daily",
+    thresholds: thresholds || {},
+    enabled: true
+  });
+  res.json({ item });
+});
+
+app.post("/api/aika/watch/:id/observe", rateLimit, (req, res) => {
+  const { rawInput } = req.body || {};
+  const result = observeWatchItem({ watchItemId: req.params.id, rawInput, userId: getUserId(req) });
+  if (result.status === "error") return res.status(404).json(result);
+  res.json(result);
+});
+
+app.get("/api/aika/watch/:id/events", rateLimit, (req, res) => {
+  const events = listWatchEvents({ watchItemId: req.params.id, limit: 50 });
+  res.json({ events });
+});
+
+app.get("/api/aika/digests", rateLimit, (req, res) => {
+  const type = req.query?.type ? String(req.query.type) : "";
+  const digests = listDigests({ userId: getUserId(req), type, limit: 20 });
+  res.json({ digests });
+});
+
+app.post("/api/aika/digests", rateLimit, (req, res) => {
+  const { type } = req.body || {};
+  const digest = buildDigestByType(type || "daily", { userId: getUserId(req) });
+  const record = recordDigest({ userId: getUserId(req), digest });
+  res.json({ digest, record });
+});
+
+app.get("/api/aika/settings", rateLimit, (req, res) => {
+  res.json({ settings: getSettings(getUserId(req)) });
+});
+
+app.post("/api/aika/settings", rateLimit, (req, res) => {
+  const updated = upsertSettings(getUserId(req), req.body || {});
+  res.json({ settings: updated });
+});
+
+app.get("/api/aika/memory", rateLimit, (req, res) => {
+  const scope = req.query?.scope ? String(req.query.scope) : "";
+  const items = listMemoryItems({ userId: getUserId(req), scope });
+  res.json({ items });
+});
+
+app.post("/api/aika/memory", rateLimit, (req, res) => {
+  const { scope = "general", key, value, sensitivity = "normal", source = "manual" } = req.body || {};
+  if (!key) return res.status(400).json({ error: "memory_key_required" });
+  if (sensitivity === "do_not_store") return res.status(403).json({ error: "memory_storage_blocked" });
+  if (detectPhi(JSON.stringify(value || {}))) {
+    return res.status(403).json({ error: "phi_detected" });
+  }
+  const item = upsertMemoryItem({
+    userId: getUserId(req),
+    scope,
+    key,
+    value: value || {},
+    sensitivity,
+    source
+  });
+  res.json({ item });
+});
+
+app.get("/api/aika/manual-actions", rateLimit, (req, res) => {
+  const status = req.query?.status ? String(req.query.status) : "";
+  const actions = listManualActions({ userId: getUserId(req), status, limit: 50 });
+  res.json({ actions });
+});
+
+app.post("/api/aika/manual-actions/:id/complete", rateLimit, (req, res) => {
+  const updated = updateManualAction(req.params.id, { status: "completed", completedAt: new Date().toISOString() });
+  if (!updated) return res.status(404).json({ error: "manual_action_not_found" });
+  res.json({ action: updated });
+});
+
+app.get("/api/aika/confirmations", rateLimit, (req, res) => {
+  const status = req.query?.status ? String(req.query.status) : "";
+  const confirmations = listConfirmations({ userId: getUserId(req), status, limit: 50 });
+  res.json({ confirmations });
+});
+
+app.post("/api/aika/confirmations/:id/resolve", rateLimit, (req, res) => {
+  const status = req.body?.status || "approved";
+  const updated = updateConfirmation(req.params.id, { status, resolvedAt: new Date().toISOString() });
+  if (!updated) return res.status(404).json({ error: "confirmation_not_found" });
+  res.json({ confirmation: updated });
+});
+
 // Chat endpoint
 app.post("/chat", async (req, res) => {
   try {
@@ -2588,6 +2761,28 @@ app.post("/chat", async (req, res) => {
         `Here's what I remember:\n${memoryText}`,
         makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.45 }),
         { memories: displayMatches, memoryRecall: true }
+      );
+    }
+
+    const aikaOutcome = await routeAikaCommand({
+      text: userText,
+      context: {
+        channel,
+        senderId,
+        senderName,
+        chatId,
+        threadId,
+        recordingId,
+        userId: getUserId(req),
+        sessionId: req.aikaSessionId
+      }
+    });
+    if (aikaOutcome?.handled) {
+      const mood = aikaOutcome.status === "error" ? Emotion.SAD : Emotion.NEUTRAL;
+      return sendAssistantReply(
+        aikaOutcome.reply || "Done.",
+        makeBehavior({ emotion: mood, intensity: 0.4 }),
+        { aika: aikaOutcome.data || null }
       );
     }
 
