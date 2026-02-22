@@ -356,6 +356,17 @@ function formatActionStatus(status = "") {
   return value.replace(/_/g, " ");
 }
 
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    const snippet = text.replace(/\s+/g, " ").slice(0, 160);
+    throw new Error(`Invalid JSON response (${response.status}). ${snippet}`);
+  }
+}
+
 function toLocalDateInput(value) {
   const date = value instanceof Date ? value : new Date(value || Date.now());
   if (Number.isNaN(date.getTime())) return "";
@@ -3250,7 +3261,7 @@ export default function Home() {
         timezone: calendarTimezone
       });
       const resp = await fetch(`${SERVER_URL}/api/calendar/events?${params.toString()}`, { credentials: "include" });
-      const data = await resp.json();
+      const data = await readJsonResponse(resp);
       if (!resp.ok) throw new Error(data?.error || "calendar_events_failed");
       setCalendarEvents(Array.isArray(data.events) ? data.events : []);
     } catch (err) {

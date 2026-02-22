@@ -12,6 +12,17 @@ function fetchWithCreds(url, options = {}) {
   return fetch(url, { ...options, credentials: "include" });
 }
 
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    const snippet = text.replace(/\s+/g, " ").slice(0, 160);
+    throw new Error(`Invalid JSON response (${response.status}). ${snippet}`);
+  }
+}
+
 function formatDateTime(value, timeZone) {
   if (!value) return "--";
   const ts = Date.parse(value);
@@ -102,9 +113,9 @@ export default function CalendarPage() {
         fetchWithCreds(`${baseUrl}/api/integrations/microsoft/status`),
         fetchWithCreds(`${baseUrl}/api/assistant/profile`)
       ]);
-      const googleData = await googleResp.json();
-      const msData = await msResp.json();
-      const profileData = await profileResp.json();
+      const googleData = await readJsonResponse(googleResp);
+      const msData = await readJsonResponse(msResp);
+      const profileData = await readJsonResponse(profileResp);
       setGoogleStatus(googleData);
       setMicrosoftStatus(msData);
       const profileEmail = profileData?.profile?.preferences?.calendar?.assistantEmail || "";
@@ -151,7 +162,7 @@ export default function CalendarPage() {
         timezone: timezone || ""
       });
       const resp = await fetchWithCreds(`${baseUrl}/api/calendar/events?${params.toString()}`);
-      const data = await resp.json();
+      const data = await readJsonResponse(resp);
       if (!resp.ok) throw new Error(data?.error || "calendar_events_failed");
       setEvents(Array.isArray(data.events) ? data.events : []);
     } catch (err) {
@@ -208,7 +219,7 @@ export default function CalendarPage() {
           preferences: { calendar: { assistantEmail: assistantEmailInput } }
         })
       });
-      const data = await resp.json();
+      const data = await readJsonResponse(resp);
       if (!resp.ok) throw new Error(data?.error || "assistant_email_update_failed");
       const next = data?.profile?.preferences?.calendar?.assistantEmail || assistantEmailInput;
       setAssistantEmail(next);
@@ -239,7 +250,7 @@ export default function CalendarPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await resp.json();
+      const data = await readJsonResponse(resp);
       if (!resp.ok) throw new Error(data?.error || "calendar_event_create_failed");
       setNotice("Event created.");
       resetForm();
@@ -272,7 +283,7 @@ export default function CalendarPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await resp.json();
+      const data = await readJsonResponse(resp);
       if (!resp.ok) throw new Error(data?.error || "calendar_event_update_failed");
       setNotice("Event updated.");
       resetForm();
@@ -296,7 +307,7 @@ export default function CalendarPage() {
       const resp = await fetchWithCreds(`${baseUrl}/api/calendar/events?${params.toString()}`, {
         method: "DELETE"
       });
-      const data = await resp.json();
+      const data = await readJsonResponse(resp);
       if (!resp.ok) throw new Error(data?.error || "calendar_event_delete_failed");
       setNotice("Event deleted.");
       resetForm();
