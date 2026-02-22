@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Emotion } from "@myaika/shared";
 import AikaAvatar from "../src/components/AikaAvatar";
 import AikaToolsWorkbench from "../src/components/AikaToolsWorkbench";
@@ -381,12 +381,83 @@ function fromDateInput(value, endOfDay = false) {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
+function parseDateInput(value) {
+  if (!value) return null;
+  const [year, month, day] = String(value).split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return { year, month, day };
+}
+
 function addDays(dateInput, delta) {
   if (!dateInput) return "";
   const base = new Date(`${dateInput}T00:00:00`);
   if (Number.isNaN(base.getTime())) return dateInput;
   base.setDate(base.getDate() + delta);
   return toLocalDateInput(base);
+}
+
+function getTimeZoneParts(date, timeZone) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+  const parts = dtf.formatToParts(date);
+  const lookup = {};
+  for (const part of parts) {
+    if (part.type !== "literal") lookup[part.type] = part.value;
+  }
+  return {
+    year: Number(lookup.year),
+    month: Number(lookup.month),
+    day: Number(lookup.day),
+    hour: Number(lookup.hour),
+    minute: Number(lookup.minute),
+    second: Number(lookup.second)
+  };
+}
+
+function getTimeZoneOffsetMinutes(date, timeZone) {
+  const parts = getTimeZoneParts(date, timeZone);
+  const utcMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return (utcMs - date.getTime()) / 60000;
+}
+
+function zonedTimeToUtcMs({ year, month, day, hour, minute, second }, timeZone) {
+  const guessUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offset = getTimeZoneOffsetMinutes(new Date(guessUtc), timeZone);
+  const adjusted = guessUtc - offset * 60000;
+  const offset2 = getTimeZoneOffsetMinutes(new Date(adjusted), timeZone);
+  return offset2 === offset ? adjusted : guessUtc - offset2 * 60000;
+}
+
+function getZonedDayRange(dateInput, timeZone) {
+  const parts = parseDateInput(dateInput);
+  if (!parts) return null;
+  const startMs = zonedTimeToUtcMs({ ...parts, hour: 0, minute: 0, second: 0 }, timeZone);
+  const endMs = zonedTimeToUtcMs({ ...parts, hour: 23, minute: 59, second: 59 }, timeZone);
+  return {
+    startMs,
+    endMs,
+    startISO: new Date(startMs).toISOString(),
+    endISO: new Date(endMs).toISOString()
+  };
+}
+
+function formatTimeInTimeZone(value, timeZone) {
+  if (!value) return "--";
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return value;
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: timeZone || undefined
+  });
 }
 
 function formatCalendarTime(value) {
@@ -614,6 +685,41 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState("connections");
   const calendarTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const calendarDayRange = useMemo(() => getZonedDayRange(calendarDate, calendarTimezone), [calendarDate, calendarTimezone]);
+  const calendarHourHeight = 44;
+  const calendarHours = useMemo(() => Array.from({ length: 24 }, (_, idx) => idx), []);
+  const calendarDayLabel = useMemo(() => {
+    if (!calendarDayRange?.startMs) return "";
+    return new Date(calendarDayRange.startMs).toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      timeZone: calendarTimezone
+    });
+  }, [calendarDayRange, calendarTimezone]);
+  const calendarEventsNormalized = useMemo(() => {
+    return (calendarEvents || [])
+      .map(event => {
+        const startMs = Date.parse(event.start);
+        if (!Number.isFinite(startMs)) return null;
+        const rawEnd = event.end ? Date.parse(event.end) : NaN;
+        const endMs = Number.isFinite(rawEnd) ? rawEnd : startMs + 30 * 60000;
+        return {
+          ...event,
+          _startMs: startMs,
+          _endMs: Math.max(endMs, startMs)
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a._startMs - b._startMs);
+  }, [calendarEvents]);
+  const calendarDayEvents = useMemo(() => {
+    if (!calendarDayRange) return [];
+    const { startMs, endMs } = calendarDayRange;
+    return calendarEventsNormalized.filter(event => event._endMs >= startMs && event._startMs <= endMs);
+  }, [calendarEventsNormalized, calendarDayRange]);
+  const calendarAllDayEvents = useMemo(() => calendarDayEvents.filter(event => event.allDay), [calendarDayEvents]);
+  const calendarTimedEvents = useMemo(() => calendarDayEvents.filter(event => !event.allDay), [calendarDayEvents]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -3251,13 +3357,15 @@ export default function Home() {
 
   async function loadCalendarDayEvents(selectedDate = calendarDate) {
     if (!selectedDate) return;
+    const range = getZonedDayRange(selectedDate, calendarTimezone);
+    if (!range) return;
     setCalendarLoading(true);
     setCalendarError("");
     try {
       const params = new URLSearchParams({
         providers: calendarProvider,
-        start: fromDateInput(selectedDate, false),
-        end: fromDateInput(selectedDate, true),
+        start: range.startISO,
+        end: range.endISO,
         timezone: calendarTimezone
       });
       const resp = await fetch(`${SERVER_URL}/api/calendar/events?${params.toString()}`, { credentials: "include" });
@@ -4997,6 +5105,12 @@ export default function Home() {
                   Prev
                 </button>
                 <button
+                  onClick={() => setCalendarDate(toLocalDateInput(new Date()))}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Today
+                </button>
+                <button
                   onClick={() => setCalendarDate(addDays(calendarDate, 1))}
                   style={{ padding: "6px 10px", borderRadius: 8 }}
                 >
@@ -5004,7 +5118,7 @@ export default function Home() {
                 </button>
               </div>
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                {calendarTimezone}
+                {calendarDayLabel || "Day view"} · {calendarTimezone}
               </div>
             </div>
 
@@ -5018,57 +5132,131 @@ export default function Home() {
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No events scheduled for this day.</div>
             )}
 
-            <div style={{ display: "grid", gap: 10 }}>
-              {calendarEvents.map(event => (
-                <div
-                  key={`${event.provider}-${event.id}`}
-                  style={{
-                    border: "1px solid var(--panel-border)",
-                    borderRadius: 12,
-                    padding: 12,
-                    background: "var(--panel-bg)"
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                    <div style={{ fontWeight: 600 }}>{event.summary || "Untitled event"}</div>
-                    <div style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)" }}>
-                      {event.provider}
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
-                    {formatCalendarRange(event.start, event.end)}
-                  </div>
-                  {event.location && (
-                    <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
-                      Location: {event.location}
-                    </div>
+            <div style={{
+              border: "1px solid var(--panel-border)",
+              borderRadius: 14,
+              overflow: "hidden",
+              background: "var(--panel-bg)"
+            }}>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "72px 1fr",
+                borderBottom: "1px solid var(--panel-border-subtle)",
+                background: "var(--panel-bg-soft)"
+              }}>
+                <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--text-muted)" }}>All day</div>
+                <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {calendarAllDayEvents.length === 0 && (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>No all-day events</div>
                   )}
-                  {event.meetingLink && (
-                    <div style={{ marginTop: 6 }}>
-                      <a
-                        href={event.meetingLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ fontSize: 12, color: "var(--accent)", textDecoration: "none" }}
-                      >
-                        Join meeting
-                      </a>
-                    </div>
-                  )}
-                  {event.webLink && (
-                    <div style={{ marginTop: 6 }}>
-                      <a
-                        href={event.webLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ fontSize: 12, color: "var(--accent-3)", textDecoration: "none" }}
-                      >
-                        Open in provider
-                      </a>
-                    </div>
-                  )}
+                  {calendarAllDayEvents.map(event => (
+                    (() => {
+                      const isOutlook = event.provider === "outlook";
+                      const borderColor = isOutlook ? "rgba(16, 185, 129, 0.4)" : "rgba(59, 130, 246, 0.35)";
+                      const bgColor = isOutlook ? "rgba(16, 185, 129, 0.12)" : "rgba(59, 130, 246, 0.12)";
+                      const tagColor = isOutlook ? "var(--accent-3)" : "var(--accent)";
+                      return (
+                        <div
+                          key={`${event.provider}-${event.id}-allday`}
+                          style={{
+                            padding: "6px 8px",
+                            borderRadius: 8,
+                            border: `1px solid ${borderColor}`,
+                            background: bgColor,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 8
+                          }}
+                        >
+                          <span>{event.summary || "Untitled event"}</span>
+                          <span style={{ fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: tagColor }}>
+                            {event.provider}
+                          </span>
+                        </div>
+                      );
+                    })()
+                  ))}
                 </div>
-              ))}
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "72px 1fr"
+              }}>
+                <div style={{
+                  borderRight: "1px solid var(--panel-border-subtle)",
+                  background: "var(--panel-bg-soft)"
+                }}>
+                  {calendarHours.map(hour => (
+                    <div
+                      key={`calendar-hour-${hour}`}
+                      style={{
+                        height: calendarHourHeight,
+                        fontSize: 10,
+                        padding: "4px 6px",
+                        color: "var(--text-muted)",
+                        borderBottom: "1px solid var(--panel-border-subtle)"
+                      }}
+                    >
+                      {hour === 0 ? "12 AM" : hour < 12 ? `${hour} AM` : hour === 12 ? "12 PM" : `${hour - 12} PM`}
+                    </div>
+                  ))}
+                </div>
+                <div style={{
+                  position: "relative",
+                  height: calendarHourHeight * 24,
+                  background: "rgba(15,23,42,0.35)"
+                }}>
+                  {calendarHours.map(hour => (
+                    <div
+                      key={`calendar-line-${hour}`}
+                      style={{
+                        position: "absolute",
+                        top: hour * calendarHourHeight,
+                        left: 0,
+                        right: 0,
+                        borderTop: "1px solid var(--panel-border-subtle)"
+                      }}
+                    />
+                  ))}
+                  {calendarTimedEvents.map(event => {
+                    if (!calendarDayRange) return null;
+                    const startMs = Math.max(event._startMs, calendarDayRange.startMs);
+                    const endMs = Math.min(event._endMs, calendarDayRange.endMs);
+                    const top = ((startMs - calendarDayRange.startMs) / 3600000) * calendarHourHeight;
+                    const height = Math.max(24, ((endMs - startMs) / 3600000) * calendarHourHeight);
+                    const timeLabel = `${formatTimeInTimeZone(event.start, calendarTimezone)} - ${formatTimeInTimeZone(event.end || event.start, calendarTimezone)}`;
+                    const isOutlook = event.provider === "outlook";
+                    const borderColor = isOutlook ? "rgba(16, 185, 129, 0.4)" : "rgba(59, 130, 246, 0.35)";
+                    const bgColor = isOutlook ? "rgba(16, 185, 129, 0.18)" : "rgba(59, 130, 246, 0.16)";
+                    return (
+                      <div
+                        key={`${event.provider}-${event.id}-timed`}
+                        style={{
+                          position: "absolute",
+                          left: 12,
+                          right: 12,
+                          top,
+                          height,
+                          padding: "6px 8px",
+                          borderRadius: 10,
+                          border: `1px solid ${borderColor}`,
+                          background: bgColor,
+                          color: "var(--text-primary)",
+                          overflow: "hidden"
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: 11 }}>{event.summary || "Untitled event"}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{timeLabel}</div>
+                        {event.location && (
+                          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{event.location}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}
