@@ -367,6 +367,36 @@ async function readJsonResponse(response) {
   }
 }
 
+async function fetchCalendarEventsWithFallback({ baseUrl, query, credentials = "include" }) {
+  const candidates = [];
+  const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "") : "";
+  if (normalizedBase) candidates.push(normalizedBase);
+  if (typeof window !== "undefined") {
+    const origin = window.location.origin?.replace(/\/$/, "");
+    if (origin) candidates.push(origin);
+  }
+  candidates.push("");
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const trimmed = candidate || "";
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    const url = trimmed ? `${trimmed}/api/calendar/events?${query}` : `/api/calendar/events?${query}`;
+    try {
+      const resp = await fetch(url, { credentials });
+      if (resp.status === 404) continue;
+      const data = await readJsonResponse(resp);
+      if (!resp.ok) throw new Error(data?.error || "calendar_events_failed");
+      return data;
+    } catch (err) {
+      if (String(err?.message || "").includes("calendar_events_failed")) throw err;
+      if (String(err?.message || "").includes("Invalid JSON response")) continue;
+      if (String(err?.message || "").includes("calendar_events_not_found")) continue;
+    }
+  }
+  throw new Error("calendar_api_not_found");
+}
+
 function toLocalDateInput(value) {
   const date = value instanceof Date ? value : new Date(value || Date.now());
   if (Number.isNaN(date.getTime())) return "";
@@ -420,6 +450,18 @@ function getTimeZoneParts(date, timeZone) {
     minute: Number(lookup.minute),
     second: Number(lookup.second)
   };
+}
+
+function compareDateParts(a, b) {
+  if (!a || !b) return 0;
+  if (a.year !== b.year) return a.year - b.year;
+  if (a.month !== b.month) return a.month - b.month;
+  return a.day - b.day;
+}
+
+function getMinutesIntoDay(date, timeZone) {
+  const parts = getTimeZoneParts(date, timeZone);
+  return parts.hour * 60 + parts.minute + parts.second / 60;
 }
 
 function getTimeZoneOffsetMinutes(date, timeZone) {
@@ -686,6 +728,7 @@ export default function Home() {
   const [settingsTab, setSettingsTab] = useState("connections");
   const calendarTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const calendarDayRange = useMemo(() => getZonedDayRange(calendarDate, calendarTimezone), [calendarDate, calendarTimezone]);
+  const calendarDayParts = useMemo(() => parseDateInput(calendarDate), [calendarDate]);
   const calendarHourHeight = 44;
   const calendarHours = useMemo(() => Array.from({ length: 24 }, (_, idx) => idx), []);
   const calendarDayLabel = useMemo(() => {
@@ -3368,13 +3411,14 @@ export default function Home() {
         end: range.endISO,
         timezone: calendarTimezone
       });
-      const resp = await fetch(`${SERVER_URL}/api/calendar/events?${params.toString()}`, { credentials: "include" });
-      const data = await readJsonResponse(resp);
-      if (!resp.ok) throw new Error(data?.error || "calendar_events_failed");
+      const data = await fetchCalendarEventsWithFallback({ baseUrl: SERVER_URL, query: params.toString() });
       setCalendarEvents(Array.isArray(data.events) ? data.events : []);
     } catch (err) {
       setCalendarEvents([]);
-      setCalendarError(err?.message || "calendar_events_failed");
+      const message = err?.message === "calendar_api_not_found"
+        ? "Calendar API not available. Restart the server or update to the latest build."
+        : err?.message || "calendar_events_failed";
+      setCalendarError(message);
     } finally {
       setCalendarLoading(false);
     }
@@ -5222,10 +5266,19 @@ export default function Home() {
                   ))}
                   {calendarTimedEvents.map(event => {
                     if (!calendarDayRange) return null;
-                    const startMs = Math.max(event._startMs, calendarDayRange.startMs);
-                    const endMs = Math.min(event._endMs, calendarDayRange.endMs);
-                    const top = ((startMs - calendarDayRange.startMs) / 3600000) * calendarHourHeight;
-                    const height = Math.max(24, ((endMs - startMs) / 3600000) * calendarHourHeight);
+                    const startDate = new Date(event._startMs);
+                    const endDate = new Date(event._endMs);
+                    const startParts = getTimeZoneParts(startDate, calendarTimezone);
+                    const endParts = getTimeZoneParts(endDate, calendarTimezone);
+                    const startCompare = compareDateParts(startParts, calendarDayParts);
+                    const endCompare = compareDateParts(endParts, calendarDayParts);
+                    let startMinutes = startCompare < 0 ? 0 : startCompare > 0 ? 24 * 60 : getMinutesIntoDay(startDate, calendarTimezone);
+                    let endMinutes = endCompare > 0 ? 24 * 60 : endCompare < 0 ? 0 : getMinutesIntoDay(endDate, calendarTimezone);
+                    if (endMinutes <= startMinutes) {
+                      endMinutes = Math.min(startMinutes + 30, 24 * 60);
+                    }
+                    const top = (startMinutes / 60) * calendarHourHeight;
+                    const height = Math.max(24, ((endMinutes - startMinutes) / 60) * calendarHourHeight);
                     const timeLabel = `${formatTimeInTimeZone(event.start, calendarTimezone)} - ${formatTimeInTimeZone(event.end || event.start, calendarTimezone)}`;
                     const isOutlook = event.provider === "outlook";
                     const borderColor = isOutlook ? "rgba(16, 185, 129, 0.4)" : "rgba(59, 130, 246, 0.35)";

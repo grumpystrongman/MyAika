@@ -23,6 +23,35 @@ async function readJsonResponse(response) {
   }
 }
 
+async function fetchCalendarEventsWithFallback({ baseUrl, query }) {
+  const candidates = [];
+  const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "") : "";
+  if (normalizedBase) candidates.push(normalizedBase);
+  if (typeof window !== "undefined") {
+    const origin = window.location.origin?.replace(/\/$/, "");
+    if (origin) candidates.push(origin);
+  }
+  candidates.push("");
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const trimmed = candidate || "";
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    const url = trimmed ? `${trimmed}/api/calendar/events?${query}` : `/api/calendar/events?${query}`;
+    try {
+      const resp = await fetchWithCreds(url);
+      if (resp.status === 404) continue;
+      const data = await readJsonResponse(resp);
+      if (!resp.ok) throw new Error(data?.error || "calendar_events_failed");
+      return data;
+    } catch (err) {
+      if (String(err?.message || "").includes("calendar_events_failed")) throw err;
+      if (String(err?.message || "").includes("Invalid JSON response")) continue;
+    }
+  }
+  throw new Error("calendar_api_not_found");
+}
+
 function toDateInput(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -332,13 +361,14 @@ export default function CalendarPage() {
         end: fromDateInput(rangeEnd, true),
         timezone: timezone || ""
       });
-      const resp = await fetchWithCreds(`${baseUrl}/api/calendar/events?${params.toString()}`);
-      const data = await readJsonResponse(resp);
-      if (!resp.ok) throw new Error(data?.error || "calendar_events_failed");
+      const data = await fetchCalendarEventsWithFallback({ baseUrl, query: params.toString() });
       setEvents(Array.isArray(data.events) ? data.events : []);
     } catch (err) {
       setEvents([]);
-      setError(err?.message || "calendar_events_failed");
+      const message = err?.message === "calendar_api_not_found"
+        ? "Calendar API not available. Restart the server or update to the latest build."
+        : err?.message || "calendar_events_failed";
+      setError(message);
     } finally {
       setLoading(false);
     }
