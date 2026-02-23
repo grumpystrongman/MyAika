@@ -35,13 +35,13 @@
           "output_key": "analysis"
         },
         {
-          "name": "Capture KPI snapshot",
+          "name": "Fetch inbox preview",
           "step_type": "tool_call",
-          "tool_name": "bi.snapshot",
+          "tool_name": "email.inboxTriage",
           "input_mapping": {
-            "metric": "{{structured_input.metric}}",
-            "value": "{{structured_input.value}}",
-            "watchTemplateId": "kpi_drift"
+            "providers": "{{structured_input.providers}}",
+            "limit": "{{structured_input.limit}}",
+            "lookbackDays": "{{structured_input.lookbackDays}}"
           },
           "requires_confirmation": false,
           "on_no_integration": "manual_checklist",
@@ -503,7 +503,7 @@
           "tool_name": "notes.create",
           "input_mapping": {
             "title": "File Sorting Plan",
-            "content": "{{context_text}}"
+            "body": "{{context_text}}"
           },
           "requires_confirmation": false,
           "on_no_integration": "manual_checklist",
@@ -595,7 +595,7 @@
           "tool_name": "notes.create",
           "input_mapping": {
             "title": "Meeting Packet",
-            "content": "{{context_text}}"
+            "body": "{{context_text}}"
           },
           "requires_confirmation": false,
           "on_no_integration": "manual_checklist",
@@ -766,7 +766,7 @@
           "step_type": "tool_call",
           "tool_name": "messaging.telegramSend",
           "input_mapping": {
-            "text": "{{context_text}}",
+            "message": "{{context_text}}",
             "chatId": "{{structured_input.chatId}}"
           },
           "requires_confirmation": false,

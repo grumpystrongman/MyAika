@@ -4,7 +4,7 @@ import { createNote, searchNotesTool } from "./tools/notes.js";
 import { createTodo, listTodos, updateTodo, completeTodo, createTodoList, listTodoLists, updateTodoList } from "./tools/todos.js";
 import { summarizeMeeting } from "./tools/meeting.js";
 import { proposeHold } from "./tools/calendar.js";
-import { draftReply, sendEmail, convertEmailToTodo, scheduleFollowUp, replyWithContextTool, sendWithContext } from "./tools/email.js";
+import { draftReply, sendEmail, convertEmailToTodo, scheduleFollowUp, replyWithContextTool, sendWithContext, inboxTriage } from "./tools/email.js";
 import { applyChanges } from "./tools/spreadsheet.js";
 import { writeMemoryTool, searchMemoryTool, rotateKeyTool } from "./tools/memory.js";
 import { actionRun } from "./tools/actionRunner.js";
@@ -183,6 +183,16 @@ registry.register(
     riskLevel: "medium"
   },
   draftReply
+);
+
+registry.register(
+  {
+    name: "email.inboxTriage",
+    description: "Fetch inbox previews and return a triage summary.",
+    paramsSchema: { providers: "string[]", limit: "number", lookbackDays: "number" },
+    riskLevel: "low"
+  },
+  inboxTriage
 );
 
 registry.register(

@@ -1,5 +1,5 @@
 import { getProvider } from "../../integrations/store.js";
-import { getMicrosoftAccessToken } from "../../integrations/microsoft.js";
+import { getMicrosoftAccessToken, getMicrosoftStatus } from "../../integrations/microsoft.js";
 import { ingestConnectorDocument } from "./ingest.js";
 import { fetchJson, parseList, normalizeText, stripHtml } from "./utils.js";
 import { setRagMeta } from "../rag/vectorStore.js";
@@ -149,8 +149,11 @@ export async function syncOutlook({ userId = "local", limit } = {}) {
 }
 
 export function isOutlookConfigured(userId = "local") {
-  const stored = getProvider("outlook", userId) || getProvider("microsoft", userId);
-  return Boolean(stored?.access_token || stored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN);
+  const status = getMicrosoftStatus(userId);
+  if (!status?.connected) return false;
+  const scopes = new Set(Array.isArray(status.scopes) ? status.scopes : []);
+  const mailReadable = scopes.has("mail.read") || scopes.has("mail.readbasic") || scopes.has("mail.readwrite");
+  return mailReadable || Boolean(process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN);
 }
 
 export async function listOutlookPreview({ userId = "local", limit = 20, lookbackDays, folderIds = [] } = {}) {

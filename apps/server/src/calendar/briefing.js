@@ -449,7 +449,10 @@ export async function buildCalendarBriefing({ userId = "local" } = {}) {
     contextText,
     outputText: contextText,
     warnings,
-    config
+    config,
+    todayEvents: limitedToday,
+    weekEvents: limitedWeek,
+    prepBlocks
   };
 }
 

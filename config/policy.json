@@ -59,7 +59,8 @@
     "audit.view",
     "approvals.view",
     "kill_switch.enable",
-    "kill_switch.disable"
+    "kill_switch.disable",
+    "email.inboxTriage"
   ],
   "requires_approval": [
     "email.send",

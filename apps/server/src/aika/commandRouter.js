@@ -37,6 +37,14 @@ function parseConfigure(text) {
   return { key: match[1].trim(), value: match[2].trim() };
 }
 
+function parseNumericValue(value) {
+  if (value == null) return null;
+  const match = String(value).match(/-?\d+(\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export async function routeAikaCommand({ text, context = {} } = {}) {
   const raw = normalize(text);
   if (!raw) return { handled: false };
@@ -69,19 +77,19 @@ export async function routeAikaCommand({ text, context = {} } = {}) {
   }
 
   if (/run (my )?daily digest|daily digest/.test(lower)) {
-    const digest = buildDigestByType("daily", { userId: context.userId || "local" });
+    const digest = await buildDigestByType("daily", { userId: context.userId || "local" });
     recordDigest({ userId: context.userId || "local", digest });
     return { handled: true, status: "completed", reply: digest.text, data: digest };
   }
 
   if (/midday pulse|daily pulse|pulse/.test(lower)) {
-    const digest = buildDigestByType("pulse", { userId: context.userId || "local" });
+    const digest = await buildDigestByType("pulse", { userId: context.userId || "local" });
     recordDigest({ userId: context.userId || "local", digest });
     return { handled: true, status: "completed", reply: digest.text, data: digest };
   }
 
   if (/weekly review|run weekly/.test(lower)) {
-    const digest = buildDigestByType("weekly", { userId: context.userId || "local" });
+    const digest = await buildDigestByType("weekly", { userId: context.userId || "local" });
     recordDigest({ userId: context.userId || "local", digest });
     return { handled: true, status: "completed", reply: digest.text, data: digest };
   }
@@ -179,10 +187,18 @@ export async function routeAikaCommand({ text, context = {} } = {}) {
     const patch = {};
     if (key.includes("daily") || key.includes("digest")) patch.digestTime = parsed.value;
     else if (key.includes("pulse") || key.includes("midday")) patch.pulseTime = parsed.value;
-    else if (key.includes("weekly")) patch.weeklyTime = parsed.value;
-    else if (key.includes("noise")) patch.noiseBudgetPerDay = Number(parsed.value);
+    else if (key.includes("weekly day") || key.includes("weekly review day") || key.includes("weekday")) {
+      patch.modeFlags = { weekly_day: parsed.value };
+    } else if (key.includes("weekly")) patch.weeklyTime = parsed.value;
+    else if (key.includes("noise")) {
+      const numeric = parseNumericValue(parsed.value);
+      patch.noiseBudgetPerDay = Number.isFinite(numeric) ? numeric : 3;
+    }
     else if (key.includes("confirm")) patch.confirmationPolicy = parsed.value;
-    else patch.modeFlags = { [parsed.key]: parsed.value };
+    else if (key.includes("no integration") || key.includes("no-integrations")) {
+      const enabled = /true|on|enable|yes|1/i.test(parsed.value);
+      patch.modeFlags = { no_integrations: enabled };
+    } else patch.modeFlags = { [parsed.key]: parsed.value };
     const updated = upsertSettings(context.userId || "local", patch);
     return { handled: true, status: "completed", reply: `Updated ${parsed.key} to ${parsed.value}.`, data: updated };
   }
@@ -215,6 +231,26 @@ export async function routeAikaCommand({ text, context = {} } = {}) {
   if (/writing off/.test(lower)) {
     setModeFlag(context.userId || "local", "writing_mode", false);
     return { handled: true, status: "completed", reply: "Writing Mode disabled." };
+  }
+
+  if (/travel mode/.test(lower)) {
+    setModeFlag(context.userId || "local", "travel_mode", true);
+    return { handled: true, status: "completed", reply: "Travel Mode enabled." };
+  }
+
+  if (/travel off|exit travel/.test(lower)) {
+    setModeFlag(context.userId || "local", "travel_mode", false);
+    return { handled: true, status: "completed", reply: "Travel Mode disabled." };
+  }
+
+  if (/executive brief mode|exec brief mode/.test(lower)) {
+    setModeFlag(context.userId || "local", "executive_brief_mode", true);
+    return { handled: true, status: "completed", reply: "Executive Brief Mode enabled." };
+  }
+
+  if (/executive brief off|exec brief off|exit executive brief/.test(lower)) {
+    setModeFlag(context.userId || "local", "executive_brief_mode", false);
+    return { handled: true, status: "completed", reply: "Executive Brief Mode disabled." };
   }
 
   if (/run /.test(lower)) {

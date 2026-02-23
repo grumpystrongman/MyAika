@@ -81,16 +81,20 @@ function injectTradingKnowledgeSnapshot(prompt) {
   return output;
 }
 
-function injectAikaDigest(prompt, task) {
+async function injectAikaDigest(prompt, task) {
   let output = String(prompt || "");
   if (!output.includes("{{aika_digest")) return { output, used: false };
   const ownerId = task?.ownerId || "local";
   const regex = /\{\{aika_digest:([^}]+)\}\}/gi;
-  output = output.replace(regex, (_match, type) => {
-    const digest = buildDigestByType(String(type || "daily").trim(), { userId: ownerId });
-    return digest?.text || "";
-  });
-  return { output, used: true };
+  let used = false;
+  const matches = Array.from(output.matchAll(regex));
+  for (const match of matches) {
+    const type = String(match[1] || "daily").trim();
+    const digest = await buildDigestByType(type, { userId: ownerId });
+    output = output.replace(match[0], digest?.text || "");
+    used = true;
+  }
+  return { output, used };
 }
 
 function injectOpsSnapshots(prompt, task) {
@@ -115,7 +119,7 @@ async function runTaskPrompt(task) {
   let prompt = String(task.prompt || "").trim();
   prompt = injectTradingKnowledgeSnapshot(prompt);
   prompt = injectOpsSnapshots(prompt, task);
-  const digestInjected = injectAikaDigest(prompt, task);
+  const digestInjected = await injectAikaDigest(prompt, task);
   prompt = digestInjected.output;
   let fallbackOutput = "";
   if (prompt.includes("{{calendar_briefing_context}}")) {

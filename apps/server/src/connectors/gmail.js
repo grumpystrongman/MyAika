@@ -1,5 +1,4 @@
-import { getGoogleAccessToken } from "../../integrations/google.js";
-import { getProvider } from "../../integrations/store.js";
+import { getGoogleAccessToken, getGoogleStatus } from "../../integrations/google.js";
 import { ingestConnectorDocument } from "./ingest.js";
 import { fetchJson, normalizeText, parseList, stripHtml } from "./utils.js";
 import { setRagMeta } from "../rag/vectorStore.js";
@@ -207,11 +206,9 @@ export async function syncGmail({ userId = "local", limit } = {}) {
 }
 
 export function isGmailConfigured(userId = "local") {
-  const stored = getProvider("google", userId);
-  if (!stored?.access_token) return false;
-  const scopes = String(stored.scope || "")
-    .split(" ")
-    .map(s => s.trim())
-    .filter(Boolean);
-  return scopes.includes("https://www.googleapis.com/auth/gmail.readonly") || scopes.includes("https://www.googleapis.com/auth/gmail.modify");
+  const status = getGoogleStatus(userId);
+  if (!status?.connected) return false;
+  const scopes = new Set(Array.isArray(status.scopes) ? status.scopes : []);
+  return scopes.has("https://www.googleapis.com/auth/gmail.readonly")
+    || scopes.has("https://www.googleapis.com/auth/gmail.modify");
 }

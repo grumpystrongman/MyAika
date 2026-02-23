@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS = {
   noiseBudgetPerDay: 3,
   confirmationPolicy: "always_confirm_external",
   modeFlags: {
-    no_integrations: true,
+    no_integrations: false,
     focus_mode: false,
     high_alert_mode: false,
     travel_mode: false,
