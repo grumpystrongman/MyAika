@@ -17,7 +17,7 @@ export function getBootSequence(userId = "local") {
       "Current configuration:",
       `- Daily Digest: ${settings.digestTime}`,
       `- Midday Pulse: ${settings.pulseTime}`,
-      `- Weekly Review: ${settings.modeFlags?.weekly_day || \"Friday\"} ${settings.weeklyTime}`,
+      `- Weekly Review: ${settings.modeFlags?.weekly_day || "Friday"} ${settings.weeklyTime}`,
       `- Noise Budget: ${settings.noiseBudgetPerDay} alerts/day`,
       "",
       "Module Registry Summary:",
