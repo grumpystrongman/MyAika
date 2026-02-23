@@ -231,7 +231,7 @@ const VALID_TABS = new Set([
   "capabilities"
 ]);
 
-const VALID_SETTINGS_TABS = new Set(["connections", "knowledge", "skills", "trading", "appearance", "voice", "legacy"]);
+const VALID_SETTINGS_TABS = new Set(["connections", "knowledge", "skills", "trading", "appearance", "voice", "aika", "legacy"]);
 const VALID_FEATURES_VIEWS = new Set(["mcp"]);
 
 function pickThinkingCue() {
@@ -646,6 +646,25 @@ export default function Home() {
   const [toolApprovalStatus, setToolApprovalStatus] = useState("");
   const [toolHistory, setToolHistory] = useState([]);
   const [toolHistoryError, setToolHistoryError] = useState("");
+  const [aikaModules, setAikaModules] = useState([]);
+  const [aikaRunbooks, setAikaRunbooks] = useState([]);
+  const [aikaWatchItems, setAikaWatchItems] = useState([]);
+  const [aikaWatchTemplates, setAikaWatchTemplates] = useState([]);
+  const [aikaSettings, setAikaSettings] = useState(null);
+  const [aikaPanelStatus, setAikaPanelStatus] = useState("");
+  const [aikaPanelError, setAikaPanelError] = useState("");
+  const [aikaModuleId, setAikaModuleId] = useState("");
+  const [aikaModuleContext, setAikaModuleContext] = useState("");
+  const [aikaModuleStructured, setAikaModuleStructured] = useState("");
+  const [aikaModuleResult, setAikaModuleResult] = useState("");
+  const [aikaRunbookName, setAikaRunbookName] = useState("");
+  const [aikaRunbookContext, setAikaRunbookContext] = useState("");
+  const [aikaRunbookResult, setAikaRunbookResult] = useState("");
+  const [aikaWatchTemplateId, setAikaWatchTemplateId] = useState("");
+  const [aikaWatchConfig, setAikaWatchConfig] = useState("");
+  const [aikaWatchObserveId, setAikaWatchObserveId] = useState("");
+  const [aikaWatchObserveValue, setAikaWatchObserveValue] = useState("");
+  const [aikaWatchResult, setAikaWatchResult] = useState("");
   const [featuresServices, setFeaturesServices] = useState([]);
   const [featuresSelected, setFeaturesSelected] = useState("");
   const [featuresError, setFeaturesError] = useState("");
@@ -2138,6 +2157,11 @@ export default function Home() {
   }, [activeTab, settingsTab]);
 
   useEffect(() => {
+    if (activeTab !== "settings" || settingsTab !== "aika") return;
+    loadAikaPanel();
+  }, [activeTab, settingsTab]);
+
+  useEffect(() => {
     if (activeTab !== "settings" || settingsTab !== "knowledge") return;
     loadRagModels();
   }, [activeTab, settingsTab]);
@@ -2805,6 +2829,16 @@ export default function Home() {
     return list.join(", ");
   }
 
+  function parseJsonInput(raw, label = "JSON") {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return null;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      throw new Error(`${label} must be valid JSON.`);
+    }
+  }
+
   function addTradingQuestion() {
     const id = (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
@@ -2820,6 +2854,183 @@ export default function Home() {
 
   function removeTradingQuestion(idx) {
     setTradingQuestions(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  async function loadAikaPanel() {
+    setAikaPanelStatus("Loading AIKA data...");
+    setAikaPanelError("");
+    try {
+      const [modulesRes, runbooksRes, watchRes, templateRes, settingsRes] = await Promise.all([
+        fetch(`${SERVER_URL}/api/aika/modules`),
+        fetch(`${SERVER_URL}/api/aika/runbooks`),
+        fetch(`${SERVER_URL}/api/aika/watch`),
+        fetch(`${SERVER_URL}/api/aika/watch/templates`),
+        fetch(`${SERVER_URL}/api/aika/settings`)
+      ]);
+      const modulesData = await readJsonResponse(modulesRes);
+      const runbooksData = await readJsonResponse(runbooksRes);
+      const watchData = await readJsonResponse(watchRes);
+      const templateData = await readJsonResponse(templateRes);
+      const settingsData = await readJsonResponse(settingsRes);
+      if (!modulesRes.ok) throw new Error(modulesData?.error || "aika_modules_failed");
+      if (!runbooksRes.ok) throw new Error(runbooksData?.error || "aika_runbooks_failed");
+      if (!watchRes.ok) throw new Error(watchData?.error || "aika_watch_failed");
+      if (!templateRes.ok) throw new Error(templateData?.error || "aika_watch_templates_failed");
+      if (!settingsRes.ok) throw new Error(settingsData?.error || "aika_settings_failed");
+      setAikaModules(modulesData.modules || []);
+      setAikaRunbooks(runbooksData.runbooks || []);
+      setAikaWatchItems(watchData.items || []);
+      setAikaWatchTemplates(templateData.templates || []);
+      setAikaSettings(settingsData.settings || null);
+      if (!aikaModuleId && modulesData.modules?.length) setAikaModuleId(modulesData.modules[0].id);
+      if (!aikaRunbookName && runbooksData.runbooks?.length) setAikaRunbookName(runbooksData.runbooks[0].name);
+      if (!aikaWatchTemplateId && templateData.templates?.length) setAikaWatchTemplateId(templateData.templates[0].id);
+      if (!aikaWatchObserveId && watchData.items?.length) setAikaWatchObserveId(watchData.items[0].id);
+      setAikaPanelStatus("AIKA data loaded.");
+    } catch (err) {
+      setAikaPanelError(err?.message || "aika_panel_failed");
+      setAikaPanelStatus("");
+    }
+  }
+
+  async function updateAikaSettings(next) {
+    setAikaPanelStatus("Saving settings...");
+    setAikaPanelError("");
+    try {
+      const r = await fetch(`${SERVER_URL}/api/aika/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next || {})
+      });
+      const data = await readJsonResponse(r);
+      if (!r.ok) throw new Error(data?.error || "aika_settings_save_failed");
+      setAikaSettings(data.settings || null);
+      setAikaPanelStatus("Settings saved.");
+    } catch (err) {
+      setAikaPanelError(err?.message || "aika_settings_save_failed");
+      setAikaPanelStatus("");
+    }
+  }
+
+  async function runAikaModule() {
+    if (!aikaModuleId) {
+      setAikaPanelError("Select a module to run.");
+      return;
+    }
+    setAikaPanelStatus("Running module...");
+    setAikaPanelError("");
+    setAikaModuleResult("");
+    try {
+      const structured = parseJsonInput(aikaModuleStructured, "Structured input");
+      const payload = {
+        moduleId: aikaModuleId,
+        inputPayload: {
+          context_text: aikaModuleContext,
+          structured_input: structured || {}
+        }
+      };
+      const r = await fetch(`${SERVER_URL}/api/aika/modules/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await readJsonResponse(r);
+      if (!r.ok) throw new Error(data?.error || "module_run_failed");
+      setAikaModuleResult(JSON.stringify(data, null, 2));
+      setAikaPanelStatus(`Module ${data?.status || "completed"}.`);
+      await loadAikaPanel();
+    } catch (err) {
+      setAikaPanelError(err?.message || "module_run_failed");
+      setAikaPanelStatus("");
+    }
+  }
+
+  async function runAikaRunbook() {
+    if (!aikaRunbookName) {
+      setAikaPanelError("Select a runbook to run.");
+      return;
+    }
+    setAikaPanelStatus("Running runbook...");
+    setAikaPanelError("");
+    setAikaRunbookResult("");
+    try {
+      const payload = {
+        name: aikaRunbookName,
+        inputPayload: { context_text: aikaRunbookContext }
+      };
+      const r = await fetch(`${SERVER_URL}/api/aika/runbooks/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await readJsonResponse(r);
+      if (!r.ok) throw new Error(data?.error || "runbook_run_failed");
+      setAikaRunbookResult(JSON.stringify(data, null, 2));
+      setAikaPanelStatus(`Runbook ${data?.status || "completed"}.`);
+      await loadAikaPanel();
+    } catch (err) {
+      setAikaPanelError(err?.message || "runbook_run_failed");
+      setAikaPanelStatus("");
+    }
+  }
+
+  async function createAikaWatch() {
+    if (!aikaWatchTemplateId) {
+      setAikaPanelError("Select a watch template.");
+      return;
+    }
+    setAikaPanelStatus("Creating watch item...");
+    setAikaPanelError("");
+    try {
+      const config = parseJsonInput(aikaWatchConfig, "Watch config") || {};
+      const r = await fetch(`${SERVER_URL}/api/aika/watch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId: aikaWatchTemplateId, config })
+      });
+      const data = await readJsonResponse(r);
+      if (!r.ok) throw new Error(data?.error || "watch_create_failed");
+      setAikaPanelStatus("Watch item created.");
+      setAikaWatchObserveId(data?.item?.id || "");
+      await loadAikaPanel();
+    } catch (err) {
+      setAikaPanelError(err?.message || "watch_create_failed");
+      setAikaPanelStatus("");
+    }
+  }
+
+  async function observeAikaWatch() {
+    if (!aikaWatchObserveId) {
+      setAikaPanelError("Select a watch item to observe.");
+      return;
+    }
+    setAikaPanelStatus("Recording watch event...");
+    setAikaPanelError("");
+    setAikaWatchResult("");
+    try {
+      let rawInput = aikaWatchObserveValue;
+      const trimmed = String(aikaWatchObserveValue || "").trim();
+      if (trimmed) {
+        try {
+          rawInput = JSON.parse(trimmed);
+        } catch {
+          rawInput = trimmed;
+        }
+      }
+      const r = await fetch(`${SERVER_URL}/api/aika/watch/${encodeURIComponent(aikaWatchObserveId)}/observe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawInput })
+      });
+      const data = await readJsonResponse(r);
+      if (!r.ok) throw new Error(data?.error || "watch_observe_failed");
+      setAikaWatchResult(JSON.stringify(data, null, 2));
+      setAikaPanelStatus("Watch event recorded.");
+      await loadAikaPanel();
+    } catch (err) {
+      setAikaPanelError(err?.message || "watch_observe_failed");
+      setAikaPanelStatus("");
+    }
   }
 
   async function loadTradingSettings() {
@@ -3797,6 +4008,7 @@ export default function Home() {
                 { key: "trading", label: "Trading" },
                 { key: "appearance", label: "Appearance" },
                 { key: "voice", label: "Voice" },
+                { key: "aika", label: "AIKA" },
                 { key: "legacy", label: "Legacy" }
               ].map(item => (
                 <button
@@ -4787,6 +4999,224 @@ export default function Home() {
                         For a more feminine voice, add a speaker WAV and set it above.
                       </div>
                     </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "settings" && settingsTab === "aika" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                AIKA Control Panel
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Manage modules, runbooks, and Watchtower signals. Toggle No-Integrations Mode to allow tool execution.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button onClick={loadAikaPanel} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Refresh
+                </button>
+                {aikaPanelStatus && <span style={{ fontSize: 12, color: "var(--accent)" }}>{aikaPanelStatus}</span>}
+              </div>
+              {aikaPanelError && (
+                <div style={{ fontSize: 12, color: "#b91c1c" }}>{aikaPanelError}</div>
+              )}
+
+              <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Execution Mode</div>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-muted)" }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(aikaSettings?.modeFlags?.no_integrations)}
+                    onChange={(e) => updateAikaSettings({ modeFlags: { no_integrations: e.target.checked } })}
+                  />
+                  No-Integrations Mode (manual checklists only)
+                </label>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
+                  Email: {integrations?.gmail?.connected || integrations?.outlook?.connected ? "connected" : "not connected"} ·
+                  Calendar: {integrations?.google_docs?.connected ? "connected" : "not connected"} ·
+                  BI Snapshot: ready
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Modules</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
+                    {aikaModules.length} modules loaded
+                  </div>
+                  <div style={{ maxHeight: 220, overflow: "auto", fontSize: 12 }}>
+                    {aikaModules.map(mod => (
+                      <div key={mod.id} style={{ paddingBottom: 8, marginBottom: 8, borderBottom: "1px solid var(--panel-border-subtle)" }}>
+                        <div style={{ fontWeight: 600 }}>
+                          {mod.name} <span style={{ fontSize: 11, color: "#6b7280" }}>Lv {mod.level}</span>
+                        </div>
+                        <div style={{ color: "#6b7280" }}>{mod.description}</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                          {(mod.trigger_phrases || []).slice(0, 2).join(" · ")}
+                        </div>
+                      </div>
+                    ))}
+                    {aikaModules.length === 0 && <div>No modules loaded.</div>}
+                  </div>
+                </div>
+
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Run Module</div>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Module
+                    <select
+                      value={aikaModuleId}
+                      onChange={(e) => setAikaModuleId(e.target.value)}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                    >
+                      {aikaModules.map(mod => (
+                        <option key={mod.id} value={mod.id}>{mod.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                    Context text
+                    <textarea
+                      value={aikaModuleContext}
+                      onChange={(e) => setAikaModuleContext(e.target.value)}
+                      rows={3}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                    />
+                  </label>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                    Structured input (JSON)
+                    <textarea
+                      value={aikaModuleStructured}
+                      onChange={(e) => setAikaModuleStructured(e.target.value)}
+                      rows={4}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", fontFamily: "monospace", fontSize: 11 }}
+                    />
+                  </label>
+                  <button onClick={runAikaModule} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+                    Run Module
+                  </button>
+                  {aikaModuleResult && (
+                    <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, maxHeight: 220, overflow: "auto" }}>
+{aikaModuleResult}
+                    </pre>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Runbooks</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
+                    {aikaRunbooks.length} runbooks loaded
+                  </div>
+                  <div style={{ maxHeight: 200, overflow: "auto", fontSize: 12 }}>
+                    {aikaRunbooks.map(runbook => (
+                      <div key={runbook.name} style={{ paddingBottom: 8, marginBottom: 8, borderBottom: "1px solid var(--panel-border-subtle)" }}>
+                        <div style={{ fontWeight: 600 }}>{runbook.name}</div>
+                        <div style={{ color: "#6b7280" }}>{runbook.description}</div>
+                      </div>
+                    ))}
+                    {aikaRunbooks.length === 0 && <div>No runbooks loaded.</div>}
+                  </div>
+                </div>
+
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Run Runbook</div>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Runbook
+                    <select
+                      value={aikaRunbookName}
+                      onChange={(e) => setAikaRunbookName(e.target.value)}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                    >
+                      {aikaRunbooks.map(runbook => (
+                        <option key={runbook.name} value={runbook.name}>{runbook.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                    Context text
+                    <textarea
+                      value={aikaRunbookContext}
+                      onChange={(e) => setAikaRunbookContext(e.target.value)}
+                      rows={3}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                    />
+                  </label>
+                  <button onClick={runAikaRunbook} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+                    Run Runbook
+                  </button>
+                  {aikaRunbookResult && (
+                    <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, maxHeight: 220, overflow: "auto" }}>
+{aikaRunbookResult}
+                    </pre>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Watchtower Templates</div>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Template
+                    <select
+                      value={aikaWatchTemplateId}
+                      onChange={(e) => setAikaWatchTemplateId(e.target.value)}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                    >
+                      {aikaWatchTemplates.map(template => (
+                        <option key={template.id} value={template.id}>{template.name || template.id}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                    Config override (JSON)
+                    <textarea
+                      value={aikaWatchConfig}
+                      onChange={(e) => setAikaWatchConfig(e.target.value)}
+                      rows={3}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)", fontFamily: "monospace", fontSize: 11 }}
+                    />
+                  </label>
+                  <button onClick={createAikaWatch} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+                    Create Watch Item
+                  </button>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+                    Use config to attach KPI metadata like metric name or thresholds.
+                  </div>
+                </div>
+
+                <div style={{ border: "1px solid var(--panel-border)", borderRadius: 12, padding: 12, background: "var(--panel-bg)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Observe Watch Item</div>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Watch item
+                    <select
+                      value={aikaWatchObserveId}
+                      onChange={(e) => setAikaWatchObserveId(e.target.value)}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                    >
+                      {aikaWatchItems.map(item => (
+                        <option key={item.id} value={item.id}>{item.type} · {item.config?.metric || item.id}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                    Raw value (JSON or scalar)
+                    <input
+                      value={aikaWatchObserveValue}
+                      onChange={(e) => setAikaWatchObserveValue(e.target.value)}
+                      style={{ width: "100%", marginTop: 4, padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                    />
+                  </label>
+                  <button onClick={observeAikaWatch} style={{ marginTop: 8, padding: "6px 10px", borderRadius: 8 }}>
+                    Record Observation
+                  </button>
+                  {aikaWatchResult && (
+                    <pre style={{ marginTop: 8, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, maxHeight: 220, overflow: "auto" }}>
+{aikaWatchResult}
+                    </pre>
                   )}
                 </div>
               </div>

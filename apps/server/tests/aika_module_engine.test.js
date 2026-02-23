@@ -35,3 +35,17 @@ test("module engine requires confirmation for risky actions", async () => {
   const confirmations = listConfirmations({ userId: "local", status: "pending", limit: 5 });
   assert.ok(confirmations.length > 0);
 });
+
+test("module engine skips manual checklist when tool executes", async () => {
+  const userId = "aika_auto_tool";
+  const result = await executeModule({
+    moduleId: "reminder_task_capture",
+    inputPayload: { context_text: "Follow up with the BI team", structured_input: { details: "Send status ping" } },
+    context: { userId },
+    modeFlags: { no_integrations: false }
+  });
+  assert.equal(result.status, "completed");
+  assert.ok(!result.output.manual_checklist || result.output.manual_checklist.length === 0);
+  const actions = listManualActions({ userId, status: "pending", limit: 5 });
+  assert.equal(actions.length, 0);
+});

@@ -74,6 +74,7 @@ export const defaultPolicy = policySchema.parse({
     "todo.reminder",
     "meeting.summarize",
     "calendar.proposeHold",
+    "bi.snapshot",
     "email.draftReply",
     "email.convertToTodo",
     "email.scheduleFollowUp",

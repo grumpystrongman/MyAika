@@ -14,6 +14,7 @@ import { assessDesktopPlan } from "../src/desktopRunner/runner.js";
 import { skillVaultRun } from "./tools/skillVault.js";
 import { assessSkillPermissions } from "../src/skillVault/registry.js";
 import { systemModify } from "./tools/system.js";
+import { snapshot as biSnapshot } from "./tools/bi.js";
 import {
   plexIdentity,
   firefliesTranscripts,
@@ -167,7 +168,9 @@ registry.register(
     name: "calendar.proposeHold",
     description: "Create a draft calendar hold locally.",
     paramsSchema: { title: "string", start: "string", end: "string", timezone: "string", attendees: "string[]", location: "string", description: "string" },
-    riskLevel: "medium"
+    riskLevel: "medium",
+    requiresApproval: params => Array.isArray(params?.attendees) && params.attendees.length > 0,
+    humanSummary: params => `Create calendar hold for ${params?.title || "event"}`
   },
   proposeHold
 );
@@ -265,6 +268,25 @@ registry.register(
     riskLevel: "medium"
   },
   applyChanges
+);
+
+registry.register(
+  {
+    name: "bi.snapshot",
+    description: "Record a KPI snapshot and emit watchtower event.",
+    paramsSchema: {
+      metric: "string",
+      value: "number",
+      rawInput: "object",
+      raw: "string",
+      watchItemId: "string",
+      watchTemplateId: "string",
+      thresholds: "object",
+      cadence: "string"
+    },
+    riskLevel: "low"
+  },
+  biSnapshot
 );
 
 registry.register(

@@ -114,6 +114,29 @@ function sanitizeMemoryPayload(payload = {}) {
   return { blocked: false };
 }
 
+function isIntegrationError(err) {
+  const message = String(err?.message || "").toLowerCase();
+  if (!message) return false;
+  if (message.includes("policy_")) return false;
+  const markers = [
+    "not_connected",
+    "not_configured",
+    "oauth",
+    "refresh_token_missing",
+    "token_missing",
+    "tenant_missing",
+    "domain_missing",
+    "calendar",
+    "gmail",
+    "microsoft",
+    "outlook",
+    "slack",
+    "discord",
+    "telegram"
+  ];
+  return markers.some(marker => message.includes(marker));
+}
+
 async function runToolStep(step, inputPayload, context = {}, options = {}) {
   const toolName = step.tool_name || step.toolName;
   if (!toolName) return { status: "skipped", result: { error: "tool_missing" } };
@@ -203,6 +226,9 @@ export async function executeModule({
 
   let runStatus = "completed";
   let approval = null;
+  let autoStepCompleted = false;
+  let manualChecklistCreated = false;
+  let manualFallback = false;
 
   const steps = Array.isArray(moduleDef.actionDefinition?.steps)
     ? moduleDef.actionDefinition.steps
@@ -229,6 +255,14 @@ export async function executeModule({
       }
 
       if (step.step_type === "manual") {
+        if (manualChecklistCreated) {
+          updateRunStep(stepRecord.id, { status: "skipped", response: { reason: "manual_already_created" }, endedAt: nowIso() });
+          continue;
+        }
+        if (step.on_no_integration === "manual_checklist" && !noIntegrations && autoStepCompleted && !manualFallback) {
+          updateRunStep(stepRecord.id, { status: "skipped", response: { reason: "auto_completed" }, endedAt: nowIso() });
+          continue;
+        }
         const checklist = moduleDef.templates?.manual_checklist || defaultChecklist(moduleDef);
         output.manual_checklist = checklist;
         createManualChecklistAction({
@@ -237,6 +271,7 @@ export async function executeModule({
           checklist,
           userId: context.userId || "local"
         });
+        manualChecklistCreated = true;
         updateRunStep(stepRecord.id, { status: "completed", response: { checklist }, endedAt: nowIso() });
         continue;
       }
@@ -263,7 +298,28 @@ export async function executeModule({
           updateRunStep(stepRecord.id, { status: "skipped", response: { reason: "no_integrations" }, endedAt: nowIso() });
           continue;
         }
-        const result = await runToolStep(step, inputPayload, context, { toolExecutor });
+        let result;
+        try {
+          result = await runToolStep(step, inputPayload, context, { toolExecutor });
+        } catch (err) {
+          if (step.on_no_integration === "manual_checklist" && isIntegrationError(err)) {
+            const checklist = moduleDef.templates?.manual_checklist || defaultChecklist(moduleDef);
+            output.manual_checklist = checklist;
+            createManualChecklistAction({
+              moduleDef,
+              runId: run.id,
+              checklist,
+              userId: context.userId || "local"
+            });
+            manualChecklistCreated = true;
+            manualFallback = true;
+            updateRunStep(stepRecord.id, { status: "skipped", response: { reason: "integration_missing" }, endedAt: nowIso() });
+            continue;
+          }
+          runStatus = "error";
+          updateRunStep(stepRecord.id, { status: "error", response: { error: err?.message || "step_failed" }, endedAt: nowIso() });
+          break;
+        }
         if (result?.status === "approval_required") {
           approval = result.approval || null;
           runStatus = "approval_required";
@@ -272,6 +328,7 @@ export async function executeModule({
         }
         updateRunStep(stepRecord.id, { status: "completed", response: result, endedAt: nowIso() });
         output.artifacts[step.output_key || `step_${index}`] = result?.data || result;
+        autoStepCompleted = true;
         continue;
       }
 
@@ -285,6 +342,8 @@ export async function executeModule({
             checklist,
             userId: context.userId || "local"
           });
+          manualChecklistCreated = true;
+          manualFallback = true;
           updateRunStep(stepRecord.id, { status: "skipped", response: { reason: "no_integrations" }, endedAt: nowIso() });
           continue;
         }
@@ -306,7 +365,28 @@ export async function executeModule({
           break;
         }
 
-        const result = await runToolStep(step, inputPayload, context, { toolExecutor });
+        let result;
+        try {
+          result = await runToolStep(step, inputPayload, context, { toolExecutor });
+        } catch (err) {
+          if (step.on_no_integration === "manual_checklist" && isIntegrationError(err)) {
+            const checklist = moduleDef.templates?.manual_checklist || defaultChecklist(moduleDef);
+            output.manual_checklist = checklist;
+            createManualChecklistAction({
+              moduleDef,
+              runId: run.id,
+              checklist,
+              userId: context.userId || "local"
+            });
+            manualChecklistCreated = true;
+            manualFallback = true;
+            updateRunStep(stepRecord.id, { status: "skipped", response: { reason: "integration_missing" }, endedAt: nowIso() });
+            continue;
+          }
+          runStatus = "error";
+          updateRunStep(stepRecord.id, { status: "error", response: { error: err?.message || "step_failed" }, endedAt: nowIso() });
+          break;
+        }
         if (result?.status === "approval_required") {
           approval = result.approval || null;
           runStatus = "approval_required";
@@ -341,6 +421,7 @@ export async function executeModule({
         }
         updateRunStep(stepRecord.id, { status: "completed", response: result, endedAt: nowIso() });
         output.artifacts[step.output_key || `step_${index}`] = result?.data || result;
+        autoStepCompleted = true;
         continue;
       }
 

@@ -128,7 +128,7 @@ import { getSettings, upsertSettings } from "./storage/settings.js";
 import { syncModuleRegistry, listModuleRegistry } from "./src/aika/moduleRegistry.js";
 import { executeModule } from "./src/aika/moduleEngine.js";
 import { listRunbooks, executeRunbook } from "./src/aika/runbookEngine.js";
-import { createWatchItemFromTemplate, observeWatchItem, listWatchtowerItems } from "./src/aika/watchtower.js";
+import { createWatchItemFromTemplate, observeWatchItem, listWatchtowerItems, loadWatchTemplates } from "./src/aika/watchtower.js";
 import { buildDigestByType, recordDigest } from "./src/aika/digestEngine.js";
 import { getBootSequence, completeBootSequence } from "./src/aika/boot.js";
 import { ensureDigestTasks } from "./src/aika/scheduler.js";
@@ -2528,6 +2528,10 @@ app.post("/api/aika/runbooks/run", rateLimit, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err?.message || "runbook_run_failed" });
   }
+});
+
+app.get("/api/aika/watch/templates", rateLimit, (_req, res) => {
+  res.json({ templates: loadWatchTemplates() });
 });
 
 app.get("/api/aika/watch", rateLimit, (req, res) => {

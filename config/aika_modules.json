@@ -35,6 +35,19 @@
           "output_key": "analysis"
         },
         {
+          "name": "Capture KPI snapshot",
+          "step_type": "tool_call",
+          "tool_name": "bi.snapshot",
+          "input_mapping": {
+            "metric": "{{structured_input.metric}}",
+            "value": "{{structured_input.value}}",
+            "watchTemplateId": "kpi_drift"
+          },
+          "requires_confirmation": false,
+          "on_no_integration": "manual_checklist",
+          "output_key": "tool_result"
+        },
+        {
           "name": "Manual execution checklist",
           "step_type": "manual",
           "on_no_integration": "manual_checklist",
