@@ -118,6 +118,8 @@ import { getRuntimeFlags, setRuntimeFlag } from "./storage/runtime_flags.js";
 import { getAssistantProfile, updateAssistantProfile } from "./storage/assistant_profile.js";
 import { listAssistantTasks, createAssistantTask, updateAssistantTask } from "./storage/assistant_tasks.js";
 import { listAssistantProposals, createAssistantProposal, updateAssistantProposal, getAssistantProposal } from "./storage/assistant_change_proposals.js";
+import { listHealthSources } from "./src/health/sources.js";
+import { ingestHealthRecords } from "./src/health/ingest.js";
 import { listManualActions, updateManualAction } from "./storage/manual_actions.js";
 import { listConfirmations, updateConfirmation } from "./storage/confirmations.js";
 import { listWatchEvents } from "./storage/watch_events.js";
@@ -131,6 +133,7 @@ import { listRunbooks, executeRunbook } from "./src/aika/runbookEngine.js";
 import { createWatchItemFromTemplate, observeWatchItem, listWatchtowerItems, loadWatchTemplates } from "./src/aika/watchtower.js";
 import { buildDigestByType, recordDigest } from "./src/aika/digestEngine.js";
 import { getBootSequence, completeBootSequence } from "./src/aika/boot.js";
+import { handleBootFlow } from "./src/aika/bootFlow.js";
 import { ensureDigestTasks } from "./src/aika/scheduler.js";
 import { routeAikaCommand } from "./src/aika/commandRouter.js";
 import { combineChunks, transcribeAudio, splitAudioForTranscription } from "./recordings/processor.js";
@@ -693,16 +696,19 @@ function buildIntegrationsState(userId = "") {
     coinbase: { connected: false },
     robinhood: { connected: false }
   };
-  const googleStored = getProvider("google", userId);
+  const googleStatus = getGoogleStatus(userId);
   const metaStored = getProvider("meta", userId) || {};
-  if (googleStored) {
+  if (googleStatus?.connected) {
     state.google_docs.connected = true;
     state.google_drive.connected = true;
-    state.google_docs.connectedAt = googleStored.connectedAt || new Date().toISOString();
-    state.google_drive.connectedAt = googleStored.connectedAt || new Date().toISOString();
-    if (String(googleStored.scope || "").includes("gmail")) {
+    state.google_docs.connectedAt = googleStatus.connectedAt || new Date().toISOString();
+    state.google_drive.connectedAt = googleStatus.connectedAt || new Date().toISOString();
+    const googleScopes = new Set(Array.isArray(googleStatus.scopes) ? googleStatus.scopes : []);
+    const gmailReadable = googleScopes.has("https://www.googleapis.com/auth/gmail.readonly")
+      || googleScopes.has("https://www.googleapis.com/auth/gmail.modify");
+    if (gmailReadable) {
       state.gmail.connected = true;
-      state.gmail.connectedAt = googleStored.connectedAt || new Date().toISOString();
+      state.gmail.connectedAt = googleStatus.connectedAt || new Date().toISOString();
     }
   }
   const notionStored = getProvider("notion", userId);
@@ -710,12 +716,20 @@ function buildIntegrationsState(userId = "") {
     state.notion.connected = true;
     state.notion.connectedAt = notionStored?.connectedAt || new Date().toISOString();
   }
-  const outlookStored = getProvider("outlook", userId) || getProvider("microsoft", userId);
-  if (outlookStored?.access_token || outlookStored?.token || process.env.OUTLOOK_ACCESS_TOKEN || process.env.MICROSOFT_ACCESS_TOKEN) {
-    state.outlook.connected = true;
-    state.outlook.connectedAt = outlookStored?.connectedAt || new Date().toISOString();
-    state.microsoft.connected = true;
-    state.microsoft.connectedAt = outlookStored?.connectedAt || new Date().toISOString();
+  const microsoftStatus = getMicrosoftStatus(userId);
+  if (microsoftStatus?.connected) {
+    const msScopes = new Set(Array.isArray(microsoftStatus.scopes) ? microsoftStatus.scopes : []);
+    const mailReadable = msScopes.has("mail.read")
+      || msScopes.has("mail.readbasic")
+      || msScopes.has("mail.readwrite");
+    const calendarReadable = msScopes.has("calendars.read")
+      || msScopes.has("calendars.readwrite");
+    if (mailReadable || calendarReadable) {
+      state.outlook.connected = true;
+      state.outlook.connectedAt = microsoftStatus.connectedAt || new Date().toISOString();
+      state.microsoft.connected = true;
+      state.microsoft.connectedAt = microsoftStatus.connectedAt || new Date().toISOString();
+    }
   }
   if (process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN) {
     state.jira.connected = true;
@@ -1738,6 +1752,39 @@ function getRequestOrigin(req) {
   return `${proto}://${host}`;
 }
 
+function resolveUiBaseFromRequest(req) {
+  const explicit = String(req.query.ui_base || req.query.uiBase || "").trim();
+  if (explicit) return explicit;
+  const requestOrigin = getRequestOrigin(req);
+  const apiBase = String(getBaseUrl() || `http://localhost:${process.env.PORT || 8790}`).replace(/\/$/, "");
+  const normalizedOrigin = String(requestOrigin || "").replace(/\/$/, "");
+  if (!normalizedOrigin) return getUiBaseUrl();
+  if (apiBase && normalizedOrigin === apiBase) {
+    return getUiBaseUrl();
+  }
+  return normalizedOrigin;
+}
+
+function sanitizeUiBase(uiBase) {
+  const normalized = String(uiBase || "").replace(/\/$/, "");
+  if (!normalized) return getUiBaseUrl();
+  const apiBase = String(getBaseUrl() || `http://localhost:${process.env.PORT || 8790}`).replace(/\/$/, "");
+  if (apiBase && normalized === apiBase) return getUiBaseUrl();
+  return normalized;
+}
+
+function normalizeGooglePreset(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "core";
+  if (["full", "fulll", "gmail_full", "gmail-full", "gmailfull"].includes(raw)) {
+    return "gmail_full";
+  }
+  if (["readonly", "read", "gmail_readonly", "gmail-readonly", "gmailreadonly"].includes(raw)) {
+    return "gmail_readonly";
+  }
+  return raw;
+}
+
 function normalizeLocation(value) {
   return String(value || "")
     .trim()
@@ -2483,8 +2530,8 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 // AIKA core endpoints
-app.get("/api/aika/boot", rateLimit, (req, res) => {
-  const payload = getBootSequence(getUserId(req));
+app.get("/api/aika/boot", rateLimit, async (req, res) => {
+  const payload = await getBootSequence(getUserId(req));
   res.json(payload);
 });
 
@@ -2576,11 +2623,15 @@ app.get("/api/aika/digests", rateLimit, (req, res) => {
   res.json({ digests });
 });
 
-app.post("/api/aika/digests", rateLimit, (req, res) => {
-  const { type } = req.body || {};
-  const digest = buildDigestByType(type || "daily", { userId: getUserId(req) });
-  const record = recordDigest({ userId: getUserId(req), digest });
-  res.json({ digest, record });
+app.post("/api/aika/digests", rateLimit, async (req, res) => {
+  try {
+    const { type } = req.body || {};
+    const digest = await buildDigestByType(type || "daily", { userId: getUserId(req) });
+    const record = recordDigest({ userId: getUserId(req), digest });
+    res.json({ digest, record });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "digest_build_failed" });
+  }
 });
 
 app.get("/api/aika/settings", rateLimit, (req, res) => {
@@ -2705,6 +2756,23 @@ app.post("/chat", async (req, res) => {
       content: userText,
       tags: "message"
     });
+
+    const bootSequence = await getBootSequence(getUserId(req));
+    if (!bootSequence.completed) {
+      const bootResult = handleBootFlow({ userId: getUserId(req), userText });
+      if (bootResult?.handled) {
+        return sendAssistantReply(
+          bootResult.reply,
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+          { boot: { completed: true } }
+        );
+      }
+      return sendAssistantReply(
+        bootSequence.steps.join("\n"),
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
+        { boot: bootSequence }
+      );
+    }
 
     const statedLocation = extractLocationFromText(userText);
     if (statedLocation) {
@@ -7197,9 +7265,9 @@ app.post("/api/integrations/disconnect", (req, res) => {
 });
 
 app.get("/api/auth/google/connect", (req, res) => {
-  const preset = String(req.query.preset || "core");
+  const preset = normalizeGooglePreset(req.query.preset || "core");
   const redirectTo = String(req.query.redirect || "/");
-  const uiBase = String(req.query.ui_base || req.query.uiBase || "") || getRequestOrigin(req) || getUiBaseUrl();
+  const uiBase = resolveUiBaseFromRequest(req);
   res.redirect(`/api/integrations/google/connect?preset=${encodeURIComponent(preset)}&intent=login&redirect=${encodeURIComponent(redirectTo)}&ui_base=${encodeURIComponent(uiBase)}`);
 });
 
@@ -7208,11 +7276,13 @@ app.get("/api/integrations/google/connect", (req, res) => {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       return res.status(400).send("google_oauth_not_configured");
     }
-    const preset = String(req.query.preset || "core");
+    const preset = normalizeGooglePreset(req.query.preset || "core");
     const intent = String(req.query.intent || "connect");
     const redirectTo = String(req.query.redirect || "/");
-    const uiBase = String(req.query.ui_base || req.query.uiBase || "") || getRequestOrigin(req) || getUiBaseUrl();
-    const url = connectGoogle(preset, { intent, redirectTo, uiBase });
+    const uiBase = resolveUiBaseFromRequest(req);
+    const apiBase = getBaseUrl().replace(/\/$/, "");
+    const redirectUri = `${apiBase}/api/integrations/google/callback`;
+    const url = connectGoogle(preset, { intent, redirectTo, uiBase, redirectUri });
     res.redirect(url);
   } catch (err) {
     res.status(500).send(err.message || "google_auth_failed");
@@ -7653,23 +7723,55 @@ app.get("/api/integrations/google/callback", async (req, res) => {
         // ignore userinfo errors
       }
       const effectiveUserId = userId || `google_${Date.now()}`;
-      const existing = getProvider("google", effectiveUserId) || {};
-      setProvider("google", {
-        ...existing,
-        ...token,
-        refresh_token: token.refresh_token || existing.refresh_token,
-        scope: token.scope || existing.scope,
-        email: email || existing.email,
-        name: name || existing.name,
-        picture: picture || existing.picture,
-        connectedAt: new Date().toISOString()
-      }, effectiveUserId);
-      writeAudit({
-        type: "connection_token_stored",
-        at: new Date().toISOString(),
-        provider: "google",
-        userId: effectiveUserId
-      });
+      const requestUserId = getUserId(req);
+      const uiBase = token?.meta?.uiBase || "";
+      const redirectUri = token?.meta?.redirectUri || "";
+      const requestHost = String(req.headers["x-forwarded-host"] || req.headers.host || "");
+      const localHosts = new Set(["localhost", "127.0.0.1"]);
+
+      const isLocalHost = (value = "") => {
+        if (!value) return false;
+        try {
+          const host = new URL(value).hostname;
+          return localHosts.has(host);
+        } catch {
+          return localHosts.has(String(value || "").split(":")[0]);
+        }
+      };
+
+      const isLocalUi = isLocalHost(uiBase);
+      const isLocalRedirect = isLocalHost(redirectUri);
+      const isLocalRequest = localHosts.has(requestHost.split(":")[0]);
+      const isLocalEnv = String(process.env.PUBLIC_BASE_URL || "").includes("localhost")
+        || String(process.env.WEB_UI_URL || "").includes("localhost");
+
+      const targetUserIds = new Set([effectiveUserId]);
+      if (requestUserId && requestUserId !== effectiveUserId && requestUserId !== "local") {
+        targetUserIds.add(requestUserId);
+      }
+      if (requestUserId === "local" && (isLocalUi || isLocalRedirect || isLocalRequest || isLocalEnv)) {
+        targetUserIds.add("local");
+      }
+
+      for (const targetUserId of targetUserIds) {
+        const existing = getProvider("google", targetUserId) || {};
+        setProvider("google", {
+          ...existing,
+          ...token,
+          refresh_token: token.refresh_token || existing.refresh_token,
+          scope: token.scope || existing.scope,
+          email: email || existing.email,
+          name: name || existing.name,
+          picture: picture || existing.picture,
+          connectedAt: new Date().toISOString()
+        }, targetUserId);
+        writeAudit({
+          type: "connection_token_stored",
+          at: new Date().toISOString(),
+          provider: "google",
+          userId: targetUserId
+        });
+      }
 
       const sessionId = createSession({
         id: effectiveUserId,
@@ -7680,11 +7782,11 @@ app.get("/api/integrations/google/callback", async (req, res) => {
       });
       setSessionCookie(res, sessionId);
     })();
-    const uiBase = token?.meta?.uiBase || process.env.WEB_UI_URL || "http://localhost:3000";
+    const uiBase = sanitizeUiBase(token?.meta?.uiBase || process.env.WEB_UI_URL || "http://localhost:3000");
     const redirectTo = token?.meta?.redirectTo || "/";
     res.redirect(`${uiBase}${redirectTo}?integration=google&status=success`);
   } catch (err) {
-    const uiBase = process.env.WEB_UI_URL || "http://localhost:3000";
+    const uiBase = sanitizeUiBase(process.env.WEB_UI_URL || "http://localhost:3000");
     res.redirect(`${uiBase}/?integration=google&status=error`);
   }
 });
@@ -7848,37 +7950,52 @@ app.get("/api/calendar/events", rateLimit, async (req, res) => {
     const timezone = String(req.query.timezone || "").trim();
 
     const events = [];
+    const warnings = [];
     if (providers.includes("google")) {
-      const data = await listCalendarEventsRange({
-        timeMin: startISO,
-        timeMax: endISO,
-        max,
-        userId
-      });
-      const items = Array.isArray(data?.items) ? data.items : [];
-      items.forEach(item => {
-        const normalized = normalizeGoogleCalendarEvent(item);
-        if (normalized.status === "cancelled") return;
-        events.push(normalized);
-      });
+      try {
+        const data = await listCalendarEventsRange({
+          timeMin: startISO,
+          timeMax: endISO,
+          max,
+          userId
+        });
+        const items = Array.isArray(data?.items) ? data.items : [];
+        items.forEach(item => {
+          const normalized = normalizeGoogleCalendarEvent(item);
+          if (normalized.status === "cancelled") return;
+          events.push(normalized);
+        });
+      } catch (err) {
+        warnings.push({
+          provider: "google",
+          error: err?.message || "google_calendar_failed"
+        });
+      }
     }
     if (providers.includes("outlook")) {
-      const items = await listMicrosoftCalendarEvents({
-        startISO,
-        endISO,
-        max,
-        userId,
-        timezone
-      });
-      items.forEach(item => {
-        const normalized = normalizeOutlookCalendarEvent(item);
-        if (normalized.status === "cancelled") return;
-        events.push(normalized);
-      });
+      try {
+        const items = await listMicrosoftCalendarEvents({
+          startISO,
+          endISO,
+          max,
+          userId,
+          timezone
+        });
+        items.forEach(item => {
+          const normalized = normalizeOutlookCalendarEvent(item);
+          if (normalized.status === "cancelled") return;
+          events.push(normalized);
+        });
+      } catch (err) {
+        warnings.push({
+          provider: "outlook",
+          error: err?.message || "microsoft_calendar_failed"
+        });
+      }
     }
 
     events.sort((a, b) => new Date(a.start || 0).getTime() - new Date(b.start || 0).getTime());
-    res.json({ events });
+    res.json({ events, warnings });
   } catch (err) {
     res.status(500).json({ error: err?.message || "calendar_events_failed" });
   }
@@ -8051,6 +8168,47 @@ app.get("/api/calendar/briefing/preview", async (req, res) => {
     res.json({ briefing });
   } catch (err) {
     res.status(500).json({ error: err?.message || "calendar_briefing_failed" });
+  }
+});
+
+app.get("/api/health/sources", (_req, res) => {
+  try {
+    const sources = listHealthSources();
+    res.json({ sources });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "health_sources_failed" });
+  }
+});
+
+app.post("/api/health/ingest", rateLimit, async (req, res) => {
+  try {
+    const requiredToken = String(process.env.HEALTH_COMPANION_TOKEN || "").trim();
+    const providedToken = String(req.header("x-health-token") || "").trim();
+    if (requiredToken && providedToken !== requiredToken) {
+      return res.status(401).json({ error: "invalid_health_token" });
+    }
+
+    const payload = req.body || {};
+    const records = Array.isArray(payload.records)
+      ? payload.records
+      : payload.record
+        ? [payload.record]
+        : payload.text
+          ? [{ title: payload.title || "", text: payload.text, source: payload.source || "health" }]
+          : [];
+    if (!records.length) {
+      return res.status(400).json({ error: "health_records_required" });
+    }
+    const result = await ingestHealthRecords({
+      records,
+      source: payload.source,
+      tags: parseTagList(payload.tags),
+      collectionId: payload.collectionId,
+      sourceGroup: payload.sourceGroup
+    });
+    res.json({ ...result, warning: requiredToken ? undefined : "health_token_not_set" });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "health_ingest_failed" });
   }
 });
 

@@ -121,6 +121,22 @@ function formatTime(value, timeZone) {
   });
 }
 
+const TIME_STEP_MINUTES = 15;
+const DEFAULT_EVENT_MINUTES = 30;
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function buildDateAtMinutes(day, totalMinutes = 0) {
+  const date = new Date(day);
+  date.setHours(0, 0, 0, 0);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+}
+
 function toDateTimeInput(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -351,6 +367,36 @@ export default function CalendarPage() {
     }
   };
 
+  const draftEventAt = (day, totalMinutes) => {
+    const clampedMinutes = clampNumber(totalMinutes, 0, 24 * 60 - TIME_STEP_MINUTES);
+    const start = buildDateAtMinutes(day, clampedMinutes);
+    const end = new Date(start.getTime() + DEFAULT_EVENT_MINUTES * 60000);
+    setEditingEvent(null);
+    setForm(prev => ({
+      ...prev,
+      provider: prev.provider || "google",
+      title: "",
+      start: toDateTimeInput(start),
+      end: toDateTimeInput(end),
+      timezone: prev.timezone || timezone || "UTC",
+      location: "",
+      description: "",
+      attendees: "",
+      includeAssistant: true,
+      createMeetingLink: true
+    }));
+  };
+
+  const handleTimeGridClick = (day, evt) => {
+    if (!evt?.currentTarget) return;
+    if (evt.target?.closest?.("button")) return;
+    const rect = evt.currentTarget.getBoundingClientRect();
+    const offsetY = evt.clientY - rect.top;
+    const rawMinutes = (offsetY / rect.height) * 24 * 60;
+    const rounded = Math.floor(rawMinutes / TIME_STEP_MINUTES) * TIME_STEP_MINUTES;
+    draftEventAt(day, rounded);
+  };
+
   const loadEvents = async () => {
     setLoading(true);
     setError("");
@@ -462,7 +508,11 @@ export default function CalendarPage() {
       const data = await readJsonResponse(resp);
       if (!resp.ok) throw new Error(data?.error || "calendar_event_create_failed");
       setNotice("Event created.");
-      resetForm();
+      if (data?.event) {
+        beginEdit(data.event);
+      } else {
+        resetForm();
+      }
       await loadEvents();
     } catch (err) {
       setError(err?.message || "calendar_event_create_failed");
@@ -776,7 +826,12 @@ export default function CalendarPage() {
                     ))}
                   </div>
                   {daysInView.map(day => (
-                    <div key={day.toISOString()} className="time-grid-daycol" style={{ height: hourHeight * 24 }}>
+                    <div
+                      key={day.toISOString()}
+                      className="time-grid-daycol"
+                      style={{ height: hourHeight * 24 }}
+                      onClick={(e) => handleTimeGridClick(day, e)}
+                    >
                       {hours.map(hour => (
                         <div key={`${day.toISOString()}-${hour}`} className="time-grid-line" />
                       ))}
@@ -793,7 +848,10 @@ export default function CalendarPage() {
                             className="event-block"
                             data-provider={event.provider}
                             style={{ top: layout.top, height: layout.height }}
-                            onClick={() => beginEdit(event)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              beginEdit(event);
+                            }}
                           >
                             <div className="event-title">{event.summary}</div>
                             <div className="event-time">{timeLabel}</div>
@@ -868,6 +926,32 @@ export default function CalendarPage() {
                 <span>Create meeting link</span>
               </label>
             </div>
+            {editingEvent?.meetingLink ? (
+              <div className="meeting-link">
+                <div className="meeting-label">Meeting link</div>
+                <div className="meeting-actions">
+                  <a className="link-button" href={editingEvent.meetingLink} target="_blank" rel="noreferrer">
+                    Open Meet
+                  </a>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(editingEvent.meetingLink);
+                        setNotice("Meeting link copied.");
+                      } catch {
+                        setError("Unable to copy meeting link.");
+                      }
+                    }}
+                  >
+                    Copy link
+                  </button>
+                </div>
+              </div>
+            ) : form.createMeetingLink && (
+              <div className="meeting-hint">Meeting link will be generated on save.</div>
+            )}
 
             <div className="button-row">
               {!editingEvent ? (
@@ -1325,6 +1409,7 @@ export default function CalendarPage() {
           position: relative;
           border-left: 1px solid var(--panel-border-subtle);
           overflow: hidden;
+          cursor: pointer;
         }
 
         .time-grid-line {
@@ -1356,6 +1441,7 @@ export default function CalendarPage() {
           border-color: rgba(16, 185, 129, 0.45);
           background: rgba(16, 185, 129, 0.18);
         }
+
 
         .event-title {
           font-weight: 600;
@@ -1393,6 +1479,36 @@ export default function CalendarPage() {
           flex-wrap: wrap;
         }
 
+        .meeting-link {
+          margin-top: 6px;
+          padding: 10px 12px;
+          border-radius: 12px;
+          border: 1px dashed var(--panel-border);
+          background: var(--panel-bg-soft);
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .meeting-label {
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: var(--text-muted);
+        }
+
+        .meeting-actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+
+        .meeting-hint {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+
         .link-button {
           display: inline-flex;
           align-items: center;
@@ -1402,6 +1518,15 @@ export default function CalendarPage() {
           background: var(--button-bg);
           color: var(--text-primary);
           text-decoration: none;
+          font-size: 12px;
+        }
+
+        .ghost {
+          border: 1px solid var(--panel-border-subtle);
+          background: transparent;
+          color: var(--text-primary);
+          padding: 8px 12px;
+          border-radius: 10px;
           font-size: 12px;
         }
 

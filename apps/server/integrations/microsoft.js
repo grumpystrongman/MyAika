@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getProvider, setProvider } from "./store.js";
+import { getProvider, setProvider, findLatestProviderUserId, resolveProviderUserId } from "./store.js";
 
 const DEFAULT_AUTHORITY = "https://login.microsoftonline.com";
 const DEFAULT_TENANT = "common";
@@ -371,7 +371,15 @@ export async function resolveMicrosoftAccount({ accessToken, idToken = "" } = {}
 }
 
 export async function getMicrosoftAccessToken(requiredScopes = [], userId = "") {
-  const stored = getProvider("microsoft", userId) || getProvider("outlook", userId);
+  const resolvedUserId = (() => {
+    const resolved = resolveProviderUserId("microsoft", userId);
+    const direct = getProvider("microsoft", resolved) || getProvider("outlook", resolved);
+    if (direct || resolved !== "local") return resolved;
+    const fallback = findLatestProviderUserId("microsoft", { includeLocal: false })
+      || findLatestProviderUserId("outlook", { includeLocal: false });
+    return fallback || resolved;
+  })();
+  const stored = getProvider("microsoft", resolvedUserId) || getProvider("outlook", resolvedUserId);
   if (!stored) throw new Error("microsoft_not_connected");
   if (requiredScopes?.length) {
     const current = new Set(parseScopes(stored.scope).map(normalizeScope).filter(Boolean));
@@ -384,7 +392,7 @@ export async function getMicrosoftAccessToken(requiredScopes = [], userId = "") 
     }
   }
   if (stored.access_token && stored.expires_at && stored.expires_at > Date.now() + 30000) {
-    setProvider("microsoft", { ...stored, lastUsedAt: new Date().toISOString() }, userId);
+    setProvider("microsoft", { ...stored, lastUsedAt: new Date().toISOString() }, resolvedUserId);
     return stored.access_token;
   }
   if (!stored.refresh_token) throw new Error("microsoft_refresh_token_missing");
@@ -396,12 +404,20 @@ export async function getMicrosoftAccessToken(requiredScopes = [], userId = "") 
     scope: refreshed.scope || stored.scope,
     lastUsedAt: new Date().toISOString()
   };
-  setProvider("microsoft", updated, userId);
+  setProvider("microsoft", updated, resolvedUserId);
   return updated.access_token;
 }
 
 export function getMicrosoftStatus(userId = "") {
-  const stored = getProvider("microsoft", userId) || getProvider("outlook", userId);
+  const resolvedUserId = (() => {
+    const resolved = resolveProviderUserId("microsoft", userId);
+    const direct = getProvider("microsoft", resolved) || getProvider("outlook", resolved);
+    if (direct || resolved !== "local") return resolved;
+    const fallback = findLatestProviderUserId("microsoft", { includeLocal: false })
+      || findLatestProviderUserId("outlook", { includeLocal: false });
+    return fallback || resolved;
+  })();
+  const stored = getProvider("microsoft", resolvedUserId) || getProvider("outlook", resolvedUserId);
   if (!stored || !stored.access_token) {
     return { connected: false, scopes: [], email: null, tenantId: null, expiresAt: null };
   }
@@ -410,7 +426,9 @@ export function getMicrosoftStatus(userId = "") {
     scopes: parseScopes(stored.scope).map(normalizeScope),
     email: stored.email || null,
     tenantId: stored.tenantId || null,
-    expiresAt: stored.expires_at ? new Date(stored.expires_at).toISOString() : null
+    expiresAt: stored.expires_at ? new Date(stored.expires_at).toISOString() : null,
+    connectedAt: stored.connectedAt || null,
+    lastUsedAt: stored.lastUsedAt || null
   };
 }
 

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getProvider, setProvider } from "./store.js";
+import { getProvider, setProvider, resolveProviderUserId } from "./store.js";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -13,6 +13,7 @@ export const GOOGLE_SCOPE_PRESETS = {
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/presentations",
+    "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/meetings.space.readonly",
     "https://www.googleapis.com/auth/meetings.space.created",
@@ -246,7 +247,8 @@ async function refreshGoogleToken(refreshToken) {
 }
 
 export async function getGoogleAccessToken(requiredScopes = [], userId = "") {
-  const stored = getProvider("google", userId);
+  const resolvedUserId = resolveProviderUserId("google", userId);
+  const stored = getProvider("google", resolvedUserId);
   if (!stored) throw new Error("google_not_connected");
   if (requiredScopes?.length) {
     const current = new Set(parseScopes(stored.scope));
@@ -259,18 +261,19 @@ export async function getGoogleAccessToken(requiredScopes = [], userId = "") {
     }
   }
   if (stored.access_token && stored.expires_at && stored.expires_at > Date.now() + 30000) {
-    setProvider("google", { ...stored, lastUsedAt: new Date().toISOString() }, userId);
+    setProvider("google", { ...stored, lastUsedAt: new Date().toISOString() }, resolvedUserId);
     return stored.access_token;
   }
   if (!stored.refresh_token) throw new Error("google_refresh_token_missing");
   const refreshed = await refreshGoogleToken(stored.refresh_token);
   const updated = { ...stored, ...refreshed, lastUsedAt: new Date().toISOString() };
-  setProvider("google", updated, userId);
+  setProvider("google", updated, resolvedUserId);
   return updated.access_token;
 }
 
 export function getGoogleStatus(userId = "") {
-  const stored = getProvider("google", userId);
+  const resolvedUserId = resolveProviderUserId("google", userId);
+  const stored = getProvider("google", resolvedUserId);
   if (!stored || !stored.access_token) {
     return { connected: false, scopes: [], email: null, expiresAt: null };
   }
@@ -278,7 +281,9 @@ export function getGoogleStatus(userId = "") {
     connected: true,
     scopes: parseScopes(stored.scope),
     email: stored.email || null,
-    expiresAt: stored.expires_at ? new Date(stored.expires_at).toISOString() : null
+    expiresAt: stored.expires_at ? new Date(stored.expires_at).toISOString() : null,
+    connectedAt: stored.connectedAt || null,
+    lastUsedAt: stored.lastUsedAt || null
   };
 }
 

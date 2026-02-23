@@ -90,3 +90,47 @@ export function setProvider(provider, value, userId = "") {
   writeStore(store);
   return value || null;
 }
+
+function parseTimestamp(value) {
+  if (!value) return 0;
+  const ts = Date.parse(String(value));
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
+export function listProviderUsers(provider) {
+  const store = readStore();
+  const users = store.users || {};
+  const results = [];
+  for (const [userId, data] of Object.entries(users)) {
+    if (!data || !data[provider]) continue;
+    const unwrapped = unwrapSensitive(provider, data[provider]);
+    if (!unwrapped) continue;
+    results.push({ userId, value: unwrapped });
+  }
+  return results;
+}
+
+export function findLatestProviderUserId(provider, { includeLocal = false } = {}) {
+  const candidates = listProviderUsers(provider);
+  let best = null;
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    if (!includeLocal && candidate.userId === "local") continue;
+    const connectedAt = parseTimestamp(candidate.value?.connectedAt);
+    const lastUsedAt = parseTimestamp(candidate.value?.lastUsedAt);
+    const score = Math.max(connectedAt, lastUsedAt);
+    if (!best || score > bestScore) {
+      best = candidate.userId;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+export function resolveProviderUserId(provider, userId = "") {
+  const resolved = userId || "local";
+  const direct = getProvider(provider, resolved);
+  if (direct || resolved !== "local") return resolved;
+  const fallback = findLatestProviderUserId(provider, { includeLocal: false });
+  return fallback || resolved;
+}
