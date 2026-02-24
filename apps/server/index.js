@@ -7648,9 +7648,7 @@ app.get("/api/integrations/google/connect", (req, res) => {
     const intent = String(req.query.intent || "connect");
     const redirectTo = String(req.query.redirect || "/");
     const uiBase = resolveUiBaseFromRequest(req);
-    const apiBase = resolveApiBaseFromRequest(req);
-    const redirectUri = `${apiBase}/api/integrations/google/callback`;
-    const url = connectGoogle(preset, { intent, redirectTo, uiBase, redirectUri });
+    const url = connectGoogle(preset, { intent, redirectTo, uiBase });
     res.redirect(url);
   } catch (err) {
     res.status(500).send(err.message || "google_auth_failed");
