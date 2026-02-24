@@ -1752,6 +1752,29 @@ function getRequestOrigin(req) {
   return `${proto}://${host}`;
 }
 
+function normalizeOriginForCompare(origin) {
+  if (!origin) return null;
+  try {
+    const url = new URL(origin);
+    const hostname = String(url.hostname || "").toLowerCase();
+    const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(hostname);
+    let port = url.port;
+    if (!port) {
+      port = url.protocol === "https:" ? "443" : "80";
+    }
+    return { host: isLocalHost ? "local" : hostname, port };
+  } catch {
+    return null;
+  }
+}
+
+function isSameHostPort(a, b) {
+  const normA = normalizeOriginForCompare(a);
+  const normB = normalizeOriginForCompare(b);
+  if (!normA || !normB) return false;
+  return normA.host === normB.host && normA.port === normB.port;
+}
+
 function resolveUiBaseFromRequest(req) {
   const explicit = String(req.query.ui_base || req.query.uiBase || "").trim();
   if (explicit) return explicit;
@@ -1759,7 +1782,7 @@ function resolveUiBaseFromRequest(req) {
   const apiBase = String(getBaseUrl() || `http://localhost:${process.env.PORT || 8790}`).replace(/\/$/, "");
   const normalizedOrigin = String(requestOrigin || "").replace(/\/$/, "");
   if (!normalizedOrigin) return getUiBaseUrl();
-  if (apiBase && normalizedOrigin === apiBase) {
+  if (apiBase && (normalizedOrigin === apiBase || isSameHostPort(normalizedOrigin, apiBase))) {
     return getUiBaseUrl();
   }
   return normalizedOrigin;
@@ -1769,7 +1792,7 @@ function sanitizeUiBase(uiBase) {
   const normalized = String(uiBase || "").replace(/\/$/, "");
   if (!normalized) return getUiBaseUrl();
   const apiBase = String(getBaseUrl() || `http://localhost:${process.env.PORT || 8790}`).replace(/\/$/, "");
-  if (apiBase && normalized === apiBase) return getUiBaseUrl();
+  if (apiBase && (normalized === apiBase || isSameHostPort(normalized, apiBase))) return getUiBaseUrl();
   return normalized;
 }
 
