@@ -6537,6 +6537,24 @@ export default function Home() {
             overflow: visible !important;
           }
         }
+
+        @media (max-width: 1400px) and (pointer: coarse) {
+          html,
+          body,
+          #__next {
+            height: auto;
+            min-height: 100%;
+          }
+          body {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+          }
+          .app-shell {
+            grid-template-columns: 1fr !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
+        }
       `}</style>
     </div>
   );
