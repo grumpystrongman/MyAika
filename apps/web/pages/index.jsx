@@ -6525,9 +6525,16 @@ export default function Home() {
         }
 
         @media (max-width: 1100px) {
+          html,
+          body,
+          #__next {
+            height: auto;
+            min-height: 100%;
+          }
           .app-shell {
             grid-template-columns: 1fr !important;
             height: auto !important;
+            overflow: visible !important;
           }
         }
       `}</style>
