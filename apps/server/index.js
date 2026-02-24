@@ -73,6 +73,7 @@ import {
 } from "./integrations/messaging.js";
 import { startDiscordBot } from "./integrations/discord_bot.js";
 import { handleInboundMessage } from "./integrations/inbound.js";
+import { tryHandleRemoteCommand } from "./integrations/remoteCommands.js";
 import { fetchCurrentWeather } from "./integrations/weather.js";
 import { searchWeb } from "./integrations/web_search.js";
 import { buildAmazonAddToCartUrl, runProductResearch } from "./integrations/product_research.js";
@@ -2727,9 +2728,20 @@ app.post("/chat", async (req, res) => {
     const profile = getAssistantProfile(getUserId(req));
     const defaultRagModel = profile?.preferences?.rag?.defaultModel || "auto";
     const threadHistoryLimit = Math.max(1, Number(process.env.THREAD_HISTORY_MAX_MESSAGES || 14) || 14);
-    const thread = threadId ? getThread(threadId) : null;
+    let thread = threadId ? getThread(threadId) : null;
+    if (!thread && channel && senderId) {
+      thread = ensureActiveThread({
+        channel,
+        senderId,
+        chatId,
+        senderName,
+        workspaceId: getWorkspaceId(req),
+        ragModel: defaultRagModel
+      });
+    }
     const threadActive = Boolean(thread && thread.status === "active");
-    const threadHistory = threadActive ? listThreadMessages(threadId, threadHistoryLimit) : [];
+    const resolvedThreadId = thread?.id || threadId || null;
+    const threadHistory = threadActive ? listThreadMessages(resolvedThreadId, threadHistoryLimit) : [];
     const threadContextText = threadHistory.length
       ? threadHistory
           .map(m => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
@@ -2769,6 +2781,22 @@ app.post("/chat", async (req, res) => {
         "Aika is in stand-down mode. You can view status/logs or disable the kill switch from the Safety tab.",
         makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
         { killSwitch: true }
+      );
+    }
+
+    const commandOutcome = await tryHandleRemoteCommand({
+      channel,
+      senderId,
+      senderName,
+      chatId,
+      text: userText,
+      allowUnknown: false
+    });
+    if (commandOutcome?.handled) {
+      return sendAssistantReply(
+        commandOutcome.response || "Done.",
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+        { command: true }
       );
     }
 
@@ -2866,7 +2894,7 @@ app.post("/chat", async (req, res) => {
         senderId,
         senderName,
         chatId,
-        threadId,
+        threadId: resolvedThreadId,
         recordingId,
         userId: getUserId(req),
         sessionId: req.aikaSessionId
@@ -2888,7 +2916,7 @@ app.post("/chat", async (req, res) => {
         senderId,
         senderName,
         chatId,
-        threadId,
+        threadId: resolvedThreadId,
         recordingId,
         userId: getUserId(req),
         sessionId: req.aikaSessionId,

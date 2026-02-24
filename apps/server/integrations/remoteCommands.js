@@ -17,6 +17,7 @@ import {
   removeTradingSource
 } from "../src/trading/knowledgeRag.js";
 import { listMacros, getMacro, applyMacroParams } from "../src/actionRunner/macros.js";
+import { listDesktopMacros, getDesktopMacro, buildDesktopMacroPlan } from "../src/desktopRunner/macros.js";
 import { listRagModels } from "../src/rag/collections.js";
 import { getActiveThread, createThread, closeThread, ensureActiveThread, setThreadRagModel } from "../storage/threads.js";
 import { getSkillsState } from "../skills/index.js";
@@ -90,6 +91,33 @@ function parseList(value) {
     .split(",")
     .map(item => item.trim())
     .filter(Boolean);
+}
+
+function parseJsonPayload(raw) {
+  if (!raw) return null;
+  const cleaned = String(raw || "").trim();
+  if (!cleaned) return null;
+  if (!cleaned.startsWith("{") && !cleaned.startsWith("[")) return null;
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+}
+
+function parseKeyValueArgs(args = []) {
+  const params = {};
+  for (const arg of args) {
+    const raw = String(arg || "");
+    if (!raw || raw.startsWith("--")) continue;
+    const idx = raw.indexOf("=");
+    if (idx === -1) continue;
+    const key = raw.slice(0, idx).trim();
+    const value = raw.slice(idx + 1).trim();
+    if (!key) continue;
+    params[key] = value;
+  }
+  return params;
 }
 
 function formatList(items, formatter, max = 8) {
@@ -211,19 +239,55 @@ async function handleKnowledgeCommand(args) {
 async function handleMacroCommand(args, context) {
   const sub = (args[0] || "help").toLowerCase();
   if (["help", "?"].includes(sub)) {
-    return "Macro commands: /macro list | /macro run <id>";
+    return "Macro commands: /macro list | /macro run <id> [--desktop|--browser] [key=value...]";
   }
   if (["list", "ls"].includes(sub)) {
     const macros = listMacros();
-    const formatted = formatList(macros, macro => `- ${macro.id}: ${macro.name}`);
-    return `Macros (${macros.length}):\n${formatted}`;
+    const desktop = listDesktopMacros();
+    const formatted = formatList(macros, macro => `- [browser] ${macro.id}: ${macro.name}`);
+    const formattedDesktop = formatList(desktop, macro => `- [desktop] ${macro.id}: ${macro.name}`);
+    return [
+      `Browser macros (${macros.length}):`,
+      formatted,
+      `Desktop macros (${desktop.length}):`,
+      formattedDesktop
+    ].join("\n");
   }
   if (["run", "start"].includes(sub)) {
-    const id = args[1];
-    if (!id) return "Usage: /macro run <id>";
-    const macro = getMacro(id);
+    const isDesktop = parseBoolFlag(args, "desktop") || parseBoolFlag(args, "d");
+    const isBrowser = parseBoolFlag(args, "browser") || parseBoolFlag(args, "web");
+    const filtered = args.slice(1).filter(arg => !String(arg || "").startsWith("--"));
+    const id = filtered[0] || "";
+    if (!id) return "Usage: /macro run <id> [--desktop|--browser] [key=value...]";
+    const params = parseKeyValueArgs(filtered.slice(1));
+
+    let macro = null;
+    let mode = "";
+    if (!isDesktop) {
+      macro = getMacro(id);
+      if (macro) mode = "browser";
+    }
+    if (!macro && !isBrowser) {
+      macro = getDesktopMacro(id);
+      if (macro) mode = "desktop";
+    }
     if (!macro) return `Macro not found: ${id}`;
-    const plan = applyMacroParams(macro, {});
+
+    if (mode === "desktop") {
+      const plan = buildDesktopMacroPlan(macro, { params });
+      const result = await executor.callTool({
+        name: "desktop.run",
+        params: { ...plan, async: true },
+        context
+      });
+      if (result?.status === "approval_required") {
+        return `Approval required: ${result.approval?.id}. Reply /approve ${result.approval?.id}`;
+      }
+      const runId = result?.data?.runId || result?.data?.id || "";
+      return runId ? `Desktop macro started. Run ID: ${runId}` : "Desktop macro started.";
+    }
+
+    const plan = applyMacroParams(macro, params);
     const result = await executor.callTool({
       name: "action.run",
       params: { ...plan, async: true },
@@ -661,6 +725,7 @@ function handleResources() {
   const rssSources = listTradingRssSourcesUi({ limit: 200, includeDisabled: true });
   const knowledgeSources = listTradingSourcesUi({ limit: 200, includeDisabled: true });
   const macros = listMacros();
+  const desktopMacros = listDesktopMacros();
 
   const toolLines = tools.length
     ? tools.map(tool => `- ${tool.name}${tool.description ? `: ${tool.description}` : ""}`).join("\n")
@@ -678,7 +743,8 @@ function handleResources() {
     item => `- ${item.id} [${item.enabled ? "on" : "off"}] ${item.url}`,
     6
   );
-  const macroLines = formatList(macros, macro => `- ${macro.id}: ${macro.name}`, 6);
+  const macroLines = formatList(macros, macro => `- [browser] ${macro.id}: ${macro.name}`, 6);
+  const desktopMacroLines = formatList(desktopMacros, macro => `- [desktop] ${macro.id}: ${macro.name}`, 6);
 
   return [
     "Resources:",
@@ -690,13 +756,71 @@ function handleResources() {
     rssLines,
     `Knowledge sources (${knowledgeSources.length}):`,
     knowledgeLines,
-    `Macros (${macros.length}):`,
+    `Browser macros (${macros.length}):`,
     macroLines,
-    "Tips: /rss list, /knowledge list, /macro list for details."
+    `Desktop macros (${desktopMacros.length}):`,
+    desktopMacroLines,
+    "Tips: /tool list, /rss list, /knowledge list, /macro list for details."
   ].join("\n");
 }
 
-export async function tryHandleRemoteCommand({ channel, senderId, senderName, chatId, text } = {}) {
+async function handleToolCommand(args, context) {
+  const sub = (args[0] || "help").toLowerCase();
+  if (["help", "?"].includes(sub)) {
+    return "Tool commands: /tool list | /tool info <name> | /tool call <name> <json|key=value...>";
+  }
+  if (["list", "ls"].includes(sub)) {
+    const tools = registry.list().slice().sort((a, b) => a.name.localeCompare(b.name));
+    const formatted = formatList(tools, tool => `- ${tool.name}${tool.description ? `: ${tool.description}` : ""}`, 12);
+    return `Tools (${tools.length}):\n${formatted}`;
+  }
+  if (["info", "schema", "show"].includes(sub)) {
+    const name = args[1] || "";
+    if (!name) return "Usage: /tool info <name>";
+    const tool = registry.get(name);
+    if (!tool) return `Tool not found: ${name}`;
+    const def = tool.def || {};
+    return [
+      `Tool: ${def.name}`,
+      def.description ? `Description: ${def.description}` : "",
+      def.riskLevel ? `Risk: ${def.riskLevel}` : "",
+      def.requiresApproval ? "Requires approval: yes" : "Requires approval: no",
+      def.paramsSchema ? `Params: ${JSON.stringify(def.paramsSchema)}` : ""
+    ].filter(Boolean).join("\n");
+  }
+  if (["call", "run"].includes(sub)) {
+    const name = args[1] || "";
+    if (!name) return "Usage: /tool call <name> <json|key=value...>";
+    const rawPayload = args.slice(2).join(" ").trim();
+    let params = {};
+    const parsedJson = parseJsonPayload(rawPayload);
+    if (parsedJson) {
+      params = parsedJson;
+    } else if (rawPayload) {
+      params = parseKeyValueArgs(args.slice(2));
+      if (!Object.keys(params).length) {
+        return "Unable to parse params. Provide JSON or key=value pairs.";
+      }
+    }
+    const result = await executor.callTool({
+      name,
+      params,
+      context
+    });
+    if (result?.status === "approval_required") {
+      return `Approval required: ${result.approval?.id}. Reply /approve ${result.approval?.id}`;
+    }
+    if (result?.status === "error") {
+      return `Tool error: ${result.error?.message || "tool_failed"}`;
+    }
+    const payload = result?.data ?? result;
+    const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+    return text.length > 3500 ? `${text.slice(0, 3500)}\n...` : text;
+  }
+  return "Unknown tool command. Try /tool help";
+}
+
+export async function tryHandleRemoteCommand({ channel, senderId, senderName, chatId, text, allowUnknown = true } = {}) {
   const parsed = parseCommand(text);
   if (!parsed) return { handled: false };
   const { cmd, args } = parsed;
@@ -716,6 +840,7 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
           "/status",
           "/restart",
           "/resources",
+          "/tool list | /tool info <name> | /tool call <name> <json>",
           "/thread new | /thread stop | /thread status",
           "/rag list | /rag use <id|all|auto> | /rag status",
           "/codex <instructions> | /codex status <runId> | /codex last | /codex tail <runId>",
@@ -764,6 +889,10 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
 
     if (["resources", "resource", "tools", "capabilities"].includes(cmd)) {
       return { handled: true, response: handleResources() };
+    }
+
+    if (["tool", "tools"].includes(cmd)) {
+      return { handled: true, response: await handleToolCommand(args, context) };
     }
 
     if (["restart", "reboot"].includes(cmd)) {
@@ -886,6 +1015,7 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
       return { handled: true, response: await handleCodexCommand(args, meta) };
     }
 
+    if (!allowUnknown) return { handled: false };
     return { handled: true, response: "Unknown command. Try /help." };
   } catch (err) {
     return { handled: true, response: `Command failed: ${err?.message || "unknown_error"}` };
