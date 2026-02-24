@@ -1,8 +1,33 @@
 // MCP-lite smoke tests (feature coverage)
 // Usage: node scripts/mcp_smoke_test.js
+const path = require("node:path");
+const fs = require("node:fs");
+const dotenv = require("dotenv");
+
+const repoRoot = path.resolve(process.cwd());
+const envPath = path.join(repoRoot, "apps", "server", ".env");
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+} else {
+  dotenv.config();
+}
 const BASE = process.env.MCP_BASE_URL || "http://127.0.0.1:8790";
 const SMOKE_USER = process.env.SMOKE_USER_ID || "smoke-user";
 const STRICT = process.env.STRICT_SMOKE === "true";
+const SKIP_SLACK = String(process.env.SMOKE_SKIP_SLACK || process.env.SMOKE_SKIP_SLACK_DISCORD || "").toLowerCase() === "true";
+const SKIP_DISCORD = String(process.env.SMOKE_SKIP_DISCORD || process.env.SMOKE_SKIP_SLACK_DISCORD || "").toLowerCase() === "true";
+
+function firstFromCsv(value) {
+  const raw = String(value || "");
+  if (!raw) return "";
+  return raw.split(",").map(v => v.trim()).filter(Boolean)[0] || "";
+}
+
+const TELEGRAM_CHAT_ID =
+  String(process.env.SMOKE_TELEGRAM_CHAT_ID || "").trim()
+  || String(process.env.ASSISTANT_TASK_TELEGRAM_CHAT_ID || "").trim()
+  || String(process.env.TELEGRAM_CHAT_ID || "").trim()
+  || firstFromCsv(process.env.TODO_REMINDER_TELEGRAM_CHAT_IDS);
 
 const defaultHeaders = {
   "Content-Type": "application/json",
@@ -32,6 +57,15 @@ async function get(path) {
 
 async function callTool(name, params) {
   return post("/api/tools/call", { name, params, context: { source: "smoke" } });
+}
+
+async function approveAndExecute(approvalId) {
+  const adminHeaders = { "x-user-role": "admin" };
+  const approval = await post(`/api/approvals/${approvalId}/approve`, {}, adminHeaders);
+  const token = approval.data?.approval?.token;
+  if (!token) return { ok: false, detail: summarizeResult(approval.data) };
+  const exec = await post(`/api/approvals/${approvalId}/execute`, { token }, adminHeaders);
+  return { ok: exec.data?.status === "ok", detail: summarizeResult(exec.data) };
 }
 
 function summarizeResult(res) {
@@ -129,7 +163,12 @@ async function run() {
     attendees: ["smoke@example.com"],
     description: "Smoke test hold"
   });
-  record("calendar.proposeHold", hold.data?.status === "ok", summarizeResult(hold.data));
+  if (hold.data?.status === "approval_required" && hold.data?.approval?.id) {
+    const exec = await approveAndExecute(hold.data.approval.id);
+    record("calendar.proposeHold", exec.ok, exec.detail);
+  } else {
+    record("calendar.proposeHold", hold.data?.status === "ok", summarizeResult(hold.data));
+  }
 
   const draft = await callTool("email.draftReply", {
     originalEmail: {
@@ -148,12 +187,8 @@ async function run() {
   record("email.send (approval required)", sendAttempt.data?.status === "approval_required", summarizeResult(sendAttempt.data));
 
   if (sendAttempt.data?.approval?.id) {
-    const adminHeaders = { "x-user-role": "admin" };
-    const approval = await post(`/api/approvals/${sendAttempt.data.approval.id}/approve`, {}, adminHeaders);
-    const exec = await post(`/api/approvals/${sendAttempt.data.approval.id}/execute`, {
-      token: approval.data?.approval?.token
-    }, adminHeaders);
-    record("email.send execute", exec.data?.status === "ok", summarizeResult(exec.data));
+    const exec = await approveAndExecute(sendAttempt.data.approval.id);
+    record("email.send execute", exec.ok, exec.detail);
   }
 
   const patch = await callTool("spreadsheet.applyChanges", {
@@ -205,14 +240,31 @@ async function run() {
   const cart = await callTool("shopping.amazonAddToCart", { asin: "B0006T2IV6", quantity: 1 });
   record("shopping.amazonAddToCart", cart.data?.status === "ok", summarizeResult(cart.data));
 
-  const slack = await callTool("messaging.slackPost", { channel: "#smoke", message: "Smoke test" });
-  record("messaging.slackPost", slack.data?.status === "approval_required", summarizeResult(slack.data));
+  if (SKIP_SLACK) {
+    record("messaging.slackPost", true, "skipped");
+  } else {
+    const slack = await callTool("messaging.slackPost", { channel: "#smoke", message: "Smoke test" });
+    record("messaging.slackPost", slack.data?.status === "approval_required", summarizeResult(slack.data));
+  }
 
-  const telegram = await callTool("messaging.telegramSend", { chatId: "12345", message: "Smoke test" });
-  record("messaging.telegramSend", telegram.data?.status === "approval_required", summarizeResult(telegram.data));
+  if (TELEGRAM_CHAT_ID) {
+    const telegram = await callTool("messaging.telegramSend", { chatId: TELEGRAM_CHAT_ID, message: "Smoke test" });
+    if (telegram.data?.status === "approval_required" && telegram.data?.approval?.id) {
+      const exec = await approveAndExecute(telegram.data.approval.id);
+      record("messaging.telegramSend", exec.ok, exec.detail);
+    } else {
+      record("messaging.telegramSend", telegram.data?.status === "ok", summarizeResult(telegram.data));
+    }
+  } else {
+    record("messaging.telegramSend", false, "missing TELEGRAM_CHAT_ID");
+  }
 
-  const discord = await callTool("messaging.discordSend", { channelId: "12345", message: "Smoke test" });
-  record("messaging.discordSend", discord.data?.status === "approval_required", summarizeResult(discord.data));
+  if (SKIP_DISCORD) {
+    record("messaging.discordSend", true, "skipped");
+  } else {
+    const discord = await callTool("messaging.discordSend", { channelId: "12345", message: "Smoke test" });
+    record("messaging.discordSend", discord.data?.status === "approval_required", summarizeResult(discord.data));
+  }
 
   const failed = results.filter(r => !r.ok && (!r.warn || STRICT)).length;
   if (failed) {
