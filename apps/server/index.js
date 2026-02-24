@@ -1797,6 +1797,16 @@ function sanitizeUiBase(uiBase) {
   return normalized;
 }
 
+function resolveApiBaseFromRequest(req) {
+  const explicit = String(getBaseUrl() || "").replace(/\/$/, "");
+  const origin = String(getRequestOrigin(req) || "").replace(/\/$/, "");
+  if (!origin) return explicit;
+  const originNorm = normalizeOriginForCompare(origin);
+  if (originNorm?.host === "local") return explicit;
+  if (explicit && isSameHostPort(origin, explicit)) return explicit;
+  return origin;
+}
+
 function normalizeGooglePreset(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "core";
@@ -7638,7 +7648,7 @@ app.get("/api/integrations/google/connect", (req, res) => {
     const intent = String(req.query.intent || "connect");
     const redirectTo = String(req.query.redirect || "/");
     const uiBase = resolveUiBaseFromRequest(req);
-    const apiBase = getBaseUrl().replace(/\/$/, "");
+    const apiBase = resolveApiBaseFromRequest(req);
     const redirectUri = `${apiBase}/api/integrations/google/callback`;
     const url = connectGoogle(preset, { intent, redirectTo, uiBase, redirectUri });
     res.redirect(url);
