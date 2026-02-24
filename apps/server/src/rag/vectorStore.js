@@ -4,6 +4,7 @@ import path from "node:path";
 import { threadId } from "node:worker_threads";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
+import { getEmbeddingConfig } from "./embeddings.js";
 
 let db = null;
 let vecEnabled = false;
@@ -964,10 +965,17 @@ export function getVectorStoreStatus() {
   initRagStore();
   const totalChunks = countRows("chunks");
   const indexedChunks = ftsEnabled ? countRows("chunks_fts") : 0;
+  const storedDim = getMeta("embedding_dim");
+  const embedding = getEmbeddingConfig();
   return {
     vecEnabled,
     ftsEnabled,
     dbPath,
+    embedding: {
+      ...embedding,
+      storedDim: storedDim ? Number(storedDim) : null,
+      mismatch: storedDim ? Number(storedDim) !== Number(embedding.resolvedDim) : false
+    },
     chunks: {
       total: totalChunks,
       ftsIndexed: indexedChunks,

@@ -17,6 +17,7 @@
     "aika": "node apps/server/cli/aika.js",
     "ingest:signals": "node apps/server/scripts/signals_ingest.js",
     "rag:backup": "node apps/server/scripts/backup_rag_drive.js",
+    "rag:doctor": "node apps/server/scripts/rag_doctor.js",
     "rag:fts": "node apps/server/scripts/rebuild_rag_fts.js",
     "rag:sample": "node apps/server/scripts/rag_hybrid_sample.js",
     "rag:eval": "node apps/server/scripts/rag_eval.js",

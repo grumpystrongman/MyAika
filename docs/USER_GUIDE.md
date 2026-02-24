@@ -860,6 +860,7 @@ How to use
 ## CLI Samples
 - `npm run rag:sample` : Run a hybrid RAG query sample.
 - `npm run rag:eval` : Run the RAG golden query harness (add `-- --strict` to enforce thresholds).
+- `npm run rag:doctor` : Inspect embedding configuration vs stored RAG dimension.
 - `npm run rag:fts` : Rebuild the lexical FTS index.
 - `npm run desktop:sample` : Desktop sample (set `DESKTOP_SAMPLE_RUN=1` to execute).
 - `npm run desktop:record` : Desktop recorder sample (press `F8` to stop, set `DESKTOP_RECORD_SAMPLE_RUN=1`).

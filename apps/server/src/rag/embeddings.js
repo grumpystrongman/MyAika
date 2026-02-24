@@ -183,3 +183,10 @@ export async function getEmbeddingDimension(sampleText = "dimension probe") {
   cachedDim = vec.length;
   return cachedDim;
 }
+
+export function getEmbeddingConfig() {
+  const provider = getEmbeddingProvider();
+  const model = provider === "local" ? resolveLocalEmbeddingModel() : resolveOpenAIEmbeddingModel();
+  const resolvedDim = resolveEmbeddingDim(provider, model);
+  return { provider, model, resolvedDim };
+}
