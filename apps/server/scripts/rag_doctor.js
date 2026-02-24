@@ -1,6 +1,16 @@
-import "dotenv/config";
+import path from "node:path";
+import fs from "node:fs";
+import dotenv from "dotenv";
 import { getVectorStoreStatus, getRagMeta } from "../src/rag/vectorStore.js";
 import { getEmbeddingConfig } from "../src/rag/embeddings.js";
+
+const repoRoot = path.resolve(process.cwd());
+const envPath = path.join(repoRoot, "apps", "server", ".env");
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+} else {
+  dotenv.config();
+}
 
 function toNumber(value) {
   const num = Number(value);
