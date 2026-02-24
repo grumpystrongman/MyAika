@@ -7772,7 +7772,7 @@ app.get("/api/integrations/google/callback", async (req, res) => {
       if (requestUserId && requestUserId !== effectiveUserId && requestUserId !== "local") {
         targetUserIds.add(requestUserId);
       }
-      if (requestUserId === "local" && (isLocalUi || isLocalRedirect || isLocalRequest || isLocalEnv)) {
+      if (isLocalUi || isLocalRedirect || isLocalRequest || isLocalEnv) {
         targetUserIds.add("local");
       }
 
