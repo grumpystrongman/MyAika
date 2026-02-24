@@ -2233,6 +2233,279 @@ function resolveRagSelection(text, requested) {
   return { id: "auto", forced: false, filters: {} };
 }
 
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function endOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+function getWeekStart(date) {
+  const day = date.getDay();
+  const diff = (day + 6) % 7;
+  const start = new Date(date);
+  start.setDate(date.getDate() - diff);
+  return startOfDay(start);
+}
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function endOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+}
+
+function parseCalendarDateRange(text = "") {
+  const lower = String(text || "").toLowerCase();
+  const now = new Date();
+
+  const matchNextDays = lower.match(/\bnext\s+(\d+)\s+days?\b/);
+  if (matchNextDays) {
+    const days = Number(matchNextDays[1]);
+    if (Number.isFinite(days) && days > 0) {
+      return { start: now, end: endOfDay(addDays(now, days)), label: `next_${days}_days` };
+    }
+  }
+
+  const matchLastDays = lower.match(/\b(last|past)\s+(\d+)\s+days?\b/);
+  if (matchLastDays) {
+    const days = Number(matchLastDays[2]);
+    if (Number.isFinite(days) && days > 0) {
+      const start = startOfDay(addDays(now, -days));
+      return { start, end: endOfDay(now), label: `past_${days}_days` };
+    }
+  }
+
+  if (lower.includes("yesterday")) {
+    const y = addDays(now, -1);
+    return { start: startOfDay(y), end: endOfDay(y), label: "yesterday" };
+  }
+  if (lower.includes("today")) {
+    return { start: startOfDay(now), end: endOfDay(now), label: "today" };
+  }
+  if (lower.includes("tomorrow")) {
+    const t = addDays(now, 1);
+    return { start: startOfDay(t), end: endOfDay(t), label: "tomorrow" };
+  }
+
+  if (lower.includes("last week")) {
+    const start = getWeekStart(addDays(now, -7));
+    return { start, end: endOfDay(addDays(start, 6)), label: "last_week" };
+  }
+  if (lower.includes("next week")) {
+    const start = getWeekStart(addDays(now, 7));
+    return { start, end: endOfDay(addDays(start, 6)), label: "next_week" };
+  }
+  if (lower.includes("this week") || /\bweek\b/.test(lower)) {
+    const start = getWeekStart(now);
+    return { start, end: endOfDay(addDays(start, 6)), label: "this_week" };
+  }
+
+  if (lower.includes("last month")) {
+    const start = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    return { start, end: endOfMonth(start), label: "last_month" };
+  }
+  if (lower.includes("next month")) {
+    const start = startOfMonth(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+    return { start, end: endOfMonth(start), label: "next_month" };
+  }
+  if (lower.includes("this month")) {
+    const start = startOfMonth(now);
+    return { start, end: endOfMonth(now), label: "this_month" };
+  }
+
+  if (/\b(upcoming|next)\b/.test(lower)) {
+    return { start: now, end: endOfDay(addDays(now, 7)), label: "next_7_days" };
+  }
+
+  return { start: now, end: endOfDay(addDays(now, 7)), label: "next_7_days" };
+}
+
+function resolveCalendarProvidersFromText(text = "") {
+  const lower = String(text || "").toLowerCase();
+  const wantsGoogle = /\b(google|gmail)\b/.test(lower);
+  const wantsOutlook = /\b(outlook|microsoft)\b/.test(lower);
+  if (wantsGoogle && !wantsOutlook) return ["google"];
+  if (wantsOutlook && !wantsGoogle) return ["outlook"];
+  return ["google", "outlook"];
+}
+
+function formatCalendarDate(value, timezone, opts) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || "");
+  const format = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone || undefined,
+    ...opts
+  });
+  return format.format(date);
+}
+
+function formatCalendarEventLine(event, timezone) {
+  const title = event.summary || "(no title)";
+  if (event.allDay) {
+    const day = formatCalendarDate(event.start, timezone, { weekday: "short", month: "short", day: "numeric" });
+    const location = event.location ? ` @ ${event.location}` : "";
+    return `- ${day} (all-day): ${title}${location}`;
+  }
+  const day = formatCalendarDate(event.start, timezone, { weekday: "short", month: "short", day: "numeric" });
+  const startTime = formatCalendarDate(event.start, timezone, { hour: "numeric", minute: "2-digit" });
+  const endTime = formatCalendarDate(event.end, timezone, { hour: "numeric", minute: "2-digit" });
+  const timeRange = startTime && endTime ? `${startTime}–${endTime}` : startTime || "";
+  const location = event.location ? ` @ ${event.location}` : "";
+  return `- ${day} ${timeRange}: ${title}${location}`.trim();
+}
+
+function isCalendarQuery(text = "") {
+  const lower = String(text || "").toLowerCase();
+  if (!/(calendar|schedule|event|events|appointments|meetings)/.test(lower)) return false;
+  if (/(create|add|book|set up|schedule a|schedule an)/.test(lower)) return false;
+  return /\b(what|what's|what is|show|list|do i have|anything|upcoming|next|this|today|tomorrow|week|month)\b/.test(lower)
+    || /\bmy (calendar|schedule)\b/.test(lower);
+}
+
+async function handleCalendarQuery({ text, userId, timezone } = {}) {
+  const range = parseCalendarDateRange(text);
+  const providers = resolveCalendarProvidersFromText(text);
+  const warnings = [];
+  const events = [];
+
+  if (providers.includes("google")) {
+    const googleStatus = getGoogleStatus(userId);
+    if (!googleStatus?.connected) {
+      warnings.push("Google Calendar not connected.");
+    } else {
+      try {
+        const data = await listCalendarEventsRange({
+          timeMin: range.start.toISOString(),
+          timeMax: range.end.toISOString(),
+          max: 80,
+          userId
+        });
+        const items = Array.isArray(data?.items) ? data.items : [];
+        items.forEach(item => {
+          const normalized = normalizeGoogleCalendarEvent(item);
+          if (normalized.status === "cancelled") return;
+          events.push(normalized);
+        });
+      } catch (err) {
+        warnings.push(`Google Calendar fetch failed (${err?.message || "google_calendar_failed"}).`);
+      }
+    }
+  }
+
+  if (providers.includes("outlook")) {
+    const outlookStatus = getMicrosoftStatus(userId);
+    if (!outlookStatus?.connected) {
+      warnings.push("Microsoft Calendar not connected.");
+    } else {
+      try {
+        const items = await listMicrosoftCalendarEvents({
+          startISO: range.start.toISOString(),
+          endISO: range.end.toISOString(),
+          max: 80,
+          userId,
+          timezone: timezone || ""
+        });
+        items.forEach(item => {
+          const normalized = normalizeOutlookCalendarEvent(item);
+          if (normalized.status === "cancelled") return;
+          events.push(normalized);
+        });
+      } catch (err) {
+        warnings.push(`Microsoft Calendar fetch failed (${err?.message || "microsoft_calendar_failed"}).`);
+      }
+    }
+  }
+
+  events.sort((a, b) => new Date(a.start || 0).getTime() - new Date(b.start || 0).getTime());
+  const label = `${formatCalendarDate(range.start, timezone, { month: "short", day: "numeric" })} – ${formatCalendarDate(range.end, timezone, { month: "short", day: "numeric" })}`;
+  if (!events.length) {
+    const warningText = warnings.length ? `\n${warnings.join(" ")}` : "";
+    return { text: `No calendar events found for ${label}.${warningText}` };
+  }
+
+  const maxEvents = 12;
+  const lines = events.slice(0, maxEvents).map(event => formatCalendarEventLine(event, timezone));
+  if (events.length > maxEvents) {
+    lines.push(`...and ${events.length - maxEvents} more.`);
+  }
+  const warningText = warnings.length ? `\n${warnings.join(" ")}` : "";
+  return { text: `Calendar (${label}):\n${lines.join("\n")}${warningText}` };
+}
+
+function isEmailQuery(text = "") {
+  const lower = String(text || "").toLowerCase();
+  if (/(send|compose|draft|reply)\s+.*\b(email|mail)\b/.test(lower)) return false;
+  if (!/(email|emails|inbox|mail|messages|gmail|outlook)/.test(lower)) return false;
+  return /\b(what|what's|what is|show|list|any|new|latest|recent|unread|inbox)\b/.test(lower)
+    || /\bmy (inbox|email|emails)\b/.test(lower);
+}
+
+function resolveEmailProvidersFromText(text = "") {
+  const lower = String(text || "").toLowerCase();
+  const wantsGmail = /\b(gmail|google)\b/.test(lower);
+  const wantsOutlook = /\b(outlook|microsoft)\b/.test(lower);
+  if (wantsGmail && !wantsOutlook) return ["gmail"];
+  if (wantsOutlook && !wantsGmail) return ["outlook"];
+  return ["gmail", "outlook"];
+}
+
+function resolveEmailLookbackDays(text = "") {
+  const lower = String(text || "").toLowerCase();
+  if (lower.includes("today")) return 1;
+  if (lower.includes("yesterday")) return 2;
+  if (lower.includes("this week") || lower.includes("last week") || /\bweek\b/.test(lower)) return 7;
+  const match = lower.match(/\b(last|past)\s+(\d+)\s+days?\b/);
+  if (match) {
+    const days = Number(match[2]);
+    if (Number.isFinite(days) && days > 0) return days;
+  }
+  return 5;
+}
+
+async function handleEmailQuery({ text, userId } = {}) {
+  const providers = resolveEmailProvidersFromText(text);
+  const lookbackDays = resolveEmailLookbackDays(text);
+  const warnings = [];
+  if (providers.includes("gmail")) {
+    const googleStatus = getGoogleStatus(userId);
+    if (!googleStatus?.connected) warnings.push("Gmail not connected.");
+  }
+  if (providers.includes("outlook")) {
+    const outlookStatus = getMicrosoftStatus(userId);
+    if (!outlookStatus?.connected) warnings.push("Outlook not connected.");
+  }
+
+  const messages = await getEmailInbox({
+    userId,
+    providers,
+    limit: 10,
+    lookbackDays
+  });
+  if (!messages.length) {
+    const warningText = warnings.length ? `\n${warnings.join(" ")}` : "";
+    return { text: `No recent emails found in the last ${lookbackDays} day(s).${warningText}` };
+  }
+
+  const lines = messages.slice(0, 10).map(msg => {
+    const from = msg.from || msg.sender || "Unknown sender";
+    const subject = msg.subject || "(no subject)";
+    const received = msg.receivedAt ? formatCalendarDate(msg.receivedAt, "", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+    return `- ${subject} — ${from}${received ? ` (${received})` : ""}`;
+  });
+  const warningText = warnings.length ? `\n${warnings.join(" ")}` : "";
+  return { text: `Inbox preview (last ${lookbackDays} day(s)):\n${lines.join("\n")}${warningText}` };
+}
+
 function isAdmin(req) {
   return (
     String(req.headers["x-user-role"] || "").toLowerCase() === "admin"
@@ -2936,6 +3209,31 @@ app.post("/chat", async (req, res) => {
           approval: actionOutcome.approval || null,
           retryable: Boolean(actionOutcome.retryable)
         }
+      );
+    }
+
+    if (isCalendarQuery(userText)) {
+      const calendarResult = await handleCalendarQuery({
+        text: userText,
+        userId: getUserId(req),
+        timezone: profile?.timezone || ""
+      });
+      return sendAssistantReply(
+        calendarResult.text || "No calendar response available.",
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+        { calendar: true }
+      );
+    }
+
+    if (isEmailQuery(userText)) {
+      const emailResult = await handleEmailQuery({
+        text: userText,
+        userId: getUserId(req)
+      });
+      return sendAssistantReply(
+        emailResult.text || "No inbox response available.",
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+        { inbox: true }
       );
     }
 
