@@ -316,10 +316,10 @@ Generated: 2026-02-20
 | Assistant profile | data/db/aika.sqlite | (not surfaced) | /api/assistant/profile |
 
 ## Gaps and Parity Issues (UI vs Chat vs Telegram)
-- Chat does not invoke MCP tools (meeting summaries, notes, todos, calendar, email, spreadsheet, memory) even though UI does via /api/tools/call. Entry points: apps/server/index.js (POST /chat), apps/server/mcp/index.js, apps/web/src/components/AikaToolsWorkbench.jsx.
+- Chat can invoke MCP tools via `/tool call <name> <json|key=value...>` but does not auto-map most natural language requests to tools beyond the existing intent router. UI still uses /api/tools/call. Entry points: apps/server/index.js (POST /chat), apps/server/mcp/index.js, apps/web/src/components/AikaToolsWorkbench.jsx.
 - Chat "record meeting" only returns UI guidance; it does not call /api/recordings/start or manage recording state. Entry points: apps/server/skills/index.js, apps/web/src/components/MeetingCopilot.jsx.
 - Telegram remote commands cover status, RAG selection, macros, approvals, RSS/knowledge admin, but not most UI functions (recordings, tools, trading workflows, email workspace). Entry points: apps/server/integrations/remoteCommands.js.
-- Tools tab features (tool list, tool execution) are UI-only; no natural-language chat router maps user requests to MCP tools yet. Entry points: apps/web/pages/index.jsx, apps/server/mcp/index.js.
+- Tools tab features are also available via `/tool` commands in chat/Telegram; natural-language routing to MCP tools remains limited. Entry points: apps/web/pages/index.jsx, apps/server/integrations/remoteCommands.js, apps/server/mcp/index.js.
 - Trading UI actions (order ticket, paper/backtest/options) rely on external trading API and are not reachable from chat/Telegram. Entry points: apps/web/src/components/TradingPanel.jsx, aika-trading-assistant.
 - Email workspace actions (triage, Gmail bulk actions) are UI-only. Entry points: apps/web/pages/email.jsx, apps/server/index.js (/api/email/*).
 - Signals monitor can be triggered via /api/signals/run from UI only; chat has no intent mapping for signals. Entry points: apps/web/src/components/SignalsPanel.jsx, apps/server/src/signals.

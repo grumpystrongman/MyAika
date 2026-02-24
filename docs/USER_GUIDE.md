@@ -113,6 +113,16 @@ Use the same grammar across voice, chat, and Telegram:
 - `AIKA, show my modules ...`
 - `AIKA, run my daily digest.`
 
+## Remote Commands (Chat + Telegram)
+Use slash commands when you want direct control over tools, macros, or knowledge routing:
+- `/tool list`
+- `/tool info <name>`
+- `/tool call <name> <json|key=value...>`
+- `/macro list`
+- `/macro run <id> [--desktop|--browser] [key=value...]`
+- `/rag list`
+- `/rag use <id|all|auto>`
+
 ## No-Integrations Mode
 If integrations are not connected, use structured prefixes to provide inputs and receive manual checklists:
 - `EMAIL:`

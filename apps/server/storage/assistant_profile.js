@@ -4,6 +4,7 @@ import { nowIso, safeJsonParse } from "./utils.js";
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || "America/New_York";
 const DEFAULT_ASSISTANT_EMAIL = process.env.CALENDAR_ASSISTANT_EMAIL || "";
 const DEFAULT_MEMORY_MODE = "opt_in";
+const DEFAULT_RAG_MODEL = process.env.DEFAULT_RAG_MODEL || "all";
 const MAX_SUMMARY_CHARS = 2000;
 
 function limitText(value, max) {
@@ -49,7 +50,7 @@ function defaultPreferences() {
       }
     },
     rag: {
-      defaultModel: "auto",
+      defaultModel: DEFAULT_RAG_MODEL,
       tradingModel: "trading"
     },
     calendar: {
@@ -120,10 +121,15 @@ function buildDefaultProfile(userId) {
 function mapRow(row, userId) {
   const defaults = buildDefaultProfile(userId);
   if (!row) return defaults;
-  const preferences = normalizePreferences(
+  let preferences = normalizePreferences(
     safeJsonParse(row.preferences_json, null),
     defaults.preferences
   );
+  const currentDefault = String(preferences?.rag?.defaultModel || "").trim().toLowerCase();
+  const desiredDefault = String(DEFAULT_RAG_MODEL || "").trim().toLowerCase();
+  if ((!currentDefault || currentDefault === "auto") && desiredDefault && desiredDefault !== currentDefault) {
+    preferences = mergePreferences(preferences, { rag: { defaultModel: DEFAULT_RAG_MODEL } });
+  }
   const summary = safeJsonParse(row.summary_json, null) || {};
   return {
     id: row.id,
