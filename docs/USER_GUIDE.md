@@ -872,6 +872,7 @@ How to use
 - Audio locked: click `Enable Audio` once.
 - GPT-SoVITS or Piper offline: check TTS Diagnostics in Debug.
 - Integrations show missing config: update `apps/server/.env` and restart the server.
+- `embedding_dim_mismatch_<old>_<new>`: your RAG store was built with a different embedding dimension. Keep `RAG_EMBEDDINGS_PROVIDER` + `RAG_LOCAL_EMBEDDING_MODEL` aligned to the existing store, or rebuild/ re-ingest RAG data after switching models.
 - RAG lexical search not returning results: run `npm run rag:fts` to rebuild the FTS index.
 - Desktop recorder not stopping: make sure the stop key (default `F8`) is not blocked and the session is active/unlocked.
 - Desktop UI Automation not finding elements: ensure the target app is visible and use `automationId` or `className`.
