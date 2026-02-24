@@ -6798,6 +6798,7 @@ app.post("/api/integrations/telegram/webhook", rateLimit, async (req, res) => {
           if (!replyBody) return;
           const isChatReply = meta?.kind === "chat";
           const useVoice = voiceRepliesEnabled && isChatReply;
+          const requireApproval = String(process.env.TELEGRAM_REPLY_APPROVAL_REQUIRED || "0") === "1";
           if (useVoice) {
             try {
               const cfg = readAikaConfig();
@@ -6809,6 +6810,10 @@ app.post("/api/integrations/telegram/webhook", rateLimit, async (req, res) => {
                 }
               };
               const voiceResult = await generateAikaVoice({ text: replyBody, settings: mergedSettings });
+              if (!requireApproval) {
+                await sendTelegramVoiceNote(chatId, voiceResult.filePath, "");
+                return;
+              }
               const result = await executeAction({
                 actionType: "messaging.telegramVoiceSend",
                 params: { chatId, text: replyBody },
@@ -6824,6 +6829,10 @@ app.post("/api/integrations/telegram/webhook", rateLimit, async (req, res) => {
             } catch (err) {
               console.warn("telegram voice reply failed", err?.message || err);
             }
+          }
+          if (!requireApproval) {
+            await sendTelegramMessage(chatId, replyBody);
+            return;
           }
           const result = await executeAction({
             actionType: "messaging.telegramSend",
