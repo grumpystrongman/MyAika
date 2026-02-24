@@ -148,6 +148,61 @@ function formatStatus(status) {
   ].join("\n");
 }
 
+async function callLocalChat({ userText, channel, senderId, senderName, chatId } = {}) {
+  const base = getBaseUrl();
+  const resp = await fetch(`${base}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userText,
+      channel,
+      senderId,
+      senderName,
+      chatId
+    })
+  });
+  if (!resp.ok) {
+    return { text: "I'm having trouble responding right now." };
+  }
+  return await resp.json();
+}
+
+function buildCalendarPrompt(args = []) {
+  const raw = args.join(" ").trim();
+  if (!raw) return "what's on my calendar this week";
+  return `what's on my calendar ${raw}`;
+}
+
+function buildInboxPrompt(args = []) {
+  const raw = args.join(" ").trim();
+  if (!raw) return "what's in my inbox";
+  return `what's in my inbox ${raw}`;
+}
+
+async function handleCalendarCommand(args, meta) {
+  const prompt = buildCalendarPrompt(args);
+  const response = await callLocalChat({
+    userText: prompt,
+    channel: meta.channel,
+    senderId: meta.senderId,
+    senderName: meta.senderName,
+    chatId: meta.chatId
+  });
+  return response?.text || "No calendar response available.";
+}
+
+async function handleInboxCommand(args, meta) {
+  const prompt = buildInboxPrompt(args);
+  const response = await callLocalChat({
+    userText: prompt,
+    channel: meta.channel,
+    senderId: meta.senderId,
+    senderName: meta.senderName,
+    chatId: meta.chatId
+  });
+  return response?.text || "No inbox response available.";
+}
+
 async function handleRssCommand(args) {
   const sub = (args[0] || "help").toLowerCase();
   if (["help", "?"].includes(sub)) {
@@ -841,6 +896,8 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
           "/restart",
           "/resources",
           "/tool list | /tool info <name> | /tool call <name> <json>",
+          "/calendar [today|tomorrow|this week|next week|this month]",
+          "/inbox [today|this week|last 3 days]",
           "/thread new | /thread stop | /thread status",
           "/rag list | /rag use <id|all|auto> | /rag status",
           "/codex <instructions> | /codex status <runId> | /codex last | /codex tail <runId>",
@@ -893,6 +950,14 @@ export async function tryHandleRemoteCommand({ channel, senderId, senderName, ch
 
     if (["tool", "tools"].includes(cmd)) {
       return { handled: true, response: await handleToolCommand(args, context) };
+    }
+
+    if (["calendar", "agenda", "schedule"].includes(cmd)) {
+      return { handled: true, response: await handleCalendarCommand(args, meta) };
+    }
+
+    if (["inbox", "email", "emails", "mail"].includes(cmd)) {
+      return { handled: true, response: await handleInboxCommand(args, meta) };
     }
 
     if (["restart", "reboot"].includes(cmd)) {
