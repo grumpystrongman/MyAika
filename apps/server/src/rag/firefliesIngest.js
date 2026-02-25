@@ -31,6 +31,7 @@ let syncStartedAt = 0;
 let lastSyncResult = null;
 
 const DEFAULT_SYNC_STALE_MS = 30 * 60 * 1000;
+const DEFAULT_FIREFLIES_EMAIL_BLOCKLIST = [];
 
 function getSyncStaleMs() {
   const raw = Number(process.env.FIREFLIES_SYNC_STALE_MS || DEFAULT_SYNC_STALE_MS);
@@ -83,7 +84,9 @@ async function runFirefliesSync({ limit = 0, force = false, sendEmail } = {}) {
       const existingCount = countChunksForMeeting(transcriptId);
       const existingMeeting = existingCount ? getMeeting(transcriptId) : null;
       const existingEmail = autoEmail ? getMeetingEmail(transcriptId) : null;
-      const needsEmail = autoEmail && (!existingEmail || existingEmail.status !== "sent");
+      const emailStatus = existingEmail?.status || "";
+      const emailSuppressed = emailStatus === "sent" || emailStatus === "blocked";
+      const needsEmail = autoEmail && !emailSuppressed;
       const needsNotify = notifyChannels.length > 0;
       const needsIndex = !existingCount || force;
       const needsDetail = needsIndex || !existingMeeting?.raw_transcript || !existingMeeting?.title || !existingMeeting?.occurred_at;
@@ -228,6 +231,26 @@ function parseRecipients(value) {
     .filter(addr => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr));
 }
 
+function buildFirefliesEmailBlocklist() {
+  const envBlocklist = parseRecipients(process.env.FIREFLIES_EMAIL_BLOCKLIST || "");
+  const combined = [...DEFAULT_FIREFLIES_EMAIL_BLOCKLIST, ...envBlocklist];
+  return new Set(combined.map(addr => addr.toLowerCase()));
+}
+
+export function filterFirefliesRecipients(recipients) {
+  const blockedSet = buildFirefliesEmailBlocklist();
+  const allowed = [];
+  const blocked = [];
+  for (const recipient of recipients || []) {
+    if (blockedSet.has(String(recipient || "").toLowerCase())) {
+      blocked.push(recipient);
+    } else {
+      allowed.push(recipient);
+    }
+  }
+  return { allowed, blocked };
+}
+
 function normalizeDate(detail) {
   const raw = detail?.date;
   if (raw) {
@@ -307,7 +330,22 @@ async function ensureSummary({ meetingId, transcriptText, title, force }) {
 
 async function maybeSendEmail({ meetingId, title, occurredAt, summary, transcriptText, sourceUrl }) {
   const recipients = parseRecipients(process.env.FIREFLIES_EMAIL_TO || "");
-  if (!recipients.length) return { sent: false, reason: "no_recipients" };
+  const { allowed: allowedRecipients, blocked: blockedRecipients } = filterFirefliesRecipients(recipients);
+  if (!allowedRecipients.length) {
+    const subjectPrefix = process.env.FIREFLIES_EMAIL_SUBJECT_PREFIX || "Fireflies Meeting Notes";
+    const subject = `${subjectPrefix}: ${title || "Meeting"}`;
+    if (blockedRecipients.length) {
+      recordMeetingEmail({
+        meetingId,
+        to: blockedRecipients,
+        subject,
+        status: "blocked",
+        error: "blocked_recipients"
+      });
+      return { sent: false, reason: "blocked_recipients" };
+    }
+    return { sent: false, reason: "no_recipients" };
+  }
   const prior = getMeetingEmail(meetingId);
   if (prior?.status === "sent") return { sent: false, reason: "already_sent" };
 
@@ -331,28 +369,28 @@ async function maybeSendEmail({ meetingId, title, occurredAt, summary, transcrip
       throw new Error("gmail_send_scope_missing");
     }
     const sent = await sendGmailMessage({
-      to: recipients,
+      to: allowedRecipients,
       subject,
       text,
       fromName,
       userId: "local"
     });
-    recordMeetingEmail({ meetingId, to: recipients, subject, status: "sent", sentAt: new Date().toISOString() });
+    recordMeetingEmail({ meetingId, to: allowedRecipients, subject, status: "sent", sentAt: new Date().toISOString() });
     return { sent: true, messageId: sent?.id || null };
   } catch (err) {
     if (!allowOutboxFallback) {
-      recordMeetingEmail({ meetingId, to: recipients, subject, status: "failed", error: String(err?.message || "gmail_send_failed") });
+      recordMeetingEmail({ meetingId, to: allowedRecipients, subject, status: "failed", error: String(err?.message || "gmail_send_failed") });
       return { sent: false, error: err?.message || "gmail_send_failed" };
     }
     const outbox = writeOutbox({
       type: "fireflies_email",
-      to: recipients,
+      to: allowedRecipients,
       subject,
       text,
       meetingId,
       reason: String(err?.message || "gmail_send_failed")
     });
-    recordMeetingEmail({ meetingId, to: recipients, subject, status: "outbox", error: String(err?.message || "gmail_send_failed") });
+    recordMeetingEmail({ meetingId, to: allowedRecipients, subject, status: "outbox", error: String(err?.message || "gmail_send_failed") });
     return { sent: false, outboxId: outbox.id, status: "outbox" };
   }
 }
