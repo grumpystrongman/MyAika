@@ -269,6 +269,7 @@ Setup:
 - Set `RAG_EMBEDDINGS_PROVIDER=local`
 - Optional: `FIREFLIES_SYNC_INTERVAL_MINUTES` and `FIREFLIES_SYNC_ON_STARTUP=1` for auto-sync
 - Optional: `FIREFLIES_AUTO_EMAIL=1` and `FIREFLIES_EMAIL_TO=you@example.com` for email summaries
+- Optional: `FIREFLIES_EMAIL_BLOCKLIST=blocked@example.com` to suppress recipients
 
 Manual sync + ask:
 - `POST /api/fireflies/sync` `{ limit?: number, force?: boolean }`
