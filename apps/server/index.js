@@ -91,7 +91,10 @@ import { writeAudit } from "./mcp/audit.js";
 import { listToolHistory } from "./storage/history.js";
 import { initDb } from "./storage/db.js";
 import { runMigrations } from "./storage/schema.js";
-import { getSession, createSession, setSessionCookie, clearSessionCookie, destroySession } from "./auth/session.js";
+import { createSession, setSessionCookie, clearSessionCookie, destroySession } from "./auth/session.js";
+import { authMiddleware, requireAuth, isAuthRequired } from "./auth/middleware.js";
+import { checkAllowlist } from "./auth/allowlist.js";
+import { signJwt, setJwtCookie, clearJwtCookie } from "./auth/jwt.js";
 import {
   createRecording,
   updateRecording,
@@ -324,6 +327,7 @@ import {
 } from "./skills/index.js";
 import { getTradingSettings, updateTradingSettings, getTradingEmailSettings, getTradingTrainingSettings, getDefaultTradingUniverse } from "./storage/trading_settings.js";
 import { listManualTrades, createManualTrade, updateManualTrade, deleteManualTrade, summarizeManualTrades } from "./storage/trading_manual_trades.js";
+import { ensureUser, updateUser } from "./storage/users.js";
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -334,11 +338,25 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: false }));
-app.use((req, _res, next) => {
-  const session = getSession(req);
-  req.aikaUser = session?.user || null;
-  req.aikaSessionId = session?.id || null;
-  next();
+app.use(authMiddleware);
+app.use((req, res, next) => {
+  if (!isAuthRequired()) return next();
+  const path = req.path || "";
+  const publicPrefixes = [
+    "/health",
+    "/api/auth",
+    "/api/integrations/google/callback",
+    "/api/integrations/microsoft/callback",
+    "/api/integrations/slack/callback",
+    "/api/integrations/discord/callback",
+    "/api/integrations/notion/callback",
+    "/api/integrations/coinbase/callback",
+    "/api/integrations/meta/callback",
+    "/api/integrations/telegram/webhook",
+    "/api/integrations/messages/webhook"
+  ];
+  if (publicPrefixes.some(prefix => path.startsWith(prefix))) return next();
+  return requireAuth(req, res, next);
 });
 startReminderScheduler();
 startDiscordBot();
@@ -1722,20 +1740,15 @@ function verifySlackSignature(req) {
 }
 
 function getWorkspaceId(req) {
-  return (
-    req.aikaUser?.workspaceId
-    || req.headers["x-workspace-id"]
-    || req.aikaUser?.id
-    || "default"
-  );
+  const tenant = req.aikaTenantId || req.aikaUser?.workspaceId || req.headers["x-workspace-id"] || "";
+  if (tenant) return tenant;
+  return isAuthRequired() ? "" : (req.aikaUser?.id || "default");
 }
 
 function getUserId(req) {
-  return (
-    req.aikaUser?.id
-    || req.headers["x-user-id"]
-    || "local"
-  );
+  const id = req.aikaUser?.id || req.headers["x-user-id"] || "";
+  if (id) return id;
+  return isAuthRequired() ? "" : "local";
 }
 
 function getBaseUrl() {
@@ -1810,6 +1823,9 @@ function resolveApiBaseFromRequest(req) {
 function normalizeGooglePreset(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "core";
+  if (["login", "auth", "signin", "sign-in", "oidc"].includes(raw)) {
+    return "login";
+  }
   if (["full", "fulll", "gmail_full", "gmail-full", "gmailfull"].includes(raw)) {
     return "gmail_full";
   }
@@ -2517,6 +2533,8 @@ async function handleEmailQuery({ text, userId } = {}) {
 }
 
 function isAdmin(req) {
+  const roles = Array.isArray(req?.aikaRoles) ? req.aikaRoles : [];
+  if (roles.includes("admin")) return true;
   return (
     String(req.headers["x-user-role"] || "").toLowerCase() === "admin"
     || String(req.aikaUser?.role || "").toLowerCase() === "admin"
@@ -2815,16 +2833,19 @@ app.get("/health", (_req, res) => {
 
 app.get("/api/auth/me", (req, res) => {
   if (!req.aikaUser) {
-    return res.json({ authenticated: false });
+    return res.json({ authenticated: false, authRequired: isAuthRequired() });
   }
   res.json({
     authenticated: true,
+    authRequired: isAuthRequired(),
     user: {
       id: req.aikaUser.id,
       email: req.aikaUser.email || null,
       name: req.aikaUser.name || null,
       picture: req.aikaUser.picture || null
-    }
+    },
+    roles: Array.isArray(req.aikaRoles) ? req.aikaRoles : [],
+    tenantId: req.aikaTenantId || null
   });
 });
 
@@ -2833,6 +2854,7 @@ app.post("/api/auth/logout", (req, res) => {
     destroySession(req.aikaSessionId);
   }
   clearSessionCookie(res);
+  clearJwtCookie(res);
   res.json({ ok: true });
 });
 
@@ -7633,7 +7655,7 @@ app.post("/api/integrations/disconnect", (req, res) => {
 });
 
 app.get("/api/auth/google/connect", (req, res) => {
-  const preset = normalizeGooglePreset(req.query.preset || "core");
+  const preset = normalizeGooglePreset(req.query.preset || "login");
   const redirectTo = String(req.query.redirect || "/");
   const uiBase = resolveUiBaseFromRequest(req);
   res.redirect(`/api/integrations/google/connect?preset=${encodeURIComponent(preset)}&intent=login&redirect=${encodeURIComponent(redirectTo)}&ui_base=${encodeURIComponent(uiBase)}`);
@@ -7648,7 +7670,7 @@ app.get("/api/integrations/google/connect", (req, res) => {
     const intent = String(req.query.intent || "connect");
     const redirectTo = String(req.query.redirect || "/");
     const uiBase = resolveUiBaseFromRequest(req);
-    const url = connectGoogle(preset, { intent, redirectTo, uiBase });
+    const url = connectGoogle(preset, { intent, redirectTo, uiBase, userId: getUserId(req) });
     res.redirect(url);
   } catch (err) {
     res.status(500).send(err.message || "google_auth_failed");
@@ -8072,84 +8094,77 @@ app.get("/api/integrations/google/callback", async (req, res) => {
     const state = req.query.state;
     if (!code || !state) return res.status(400).send("missing_code_or_state");
     const token = await exchangeGoogleCode(String(code), String(state));
-    // store token in persistent store
-    await (async () => {
-      const { setProvider } = await import("./integrations/store.js");
-      let email = null;
-      let name = null;
-      let picture = null;
-      let userId = null;
-      try {
-        const info = await fetchGoogleUserInfo(token.access_token);
-        email = info?.email || null;
-        name = info?.name || info?.given_name || null;
-        picture = info?.picture || null;
-        userId = info?.id || info?.email || null;
-      } catch {
-        // ignore userinfo errors
+    const intent = String(token?.meta?.intent || "connect");
+    const uiBase = sanitizeUiBase(token?.meta?.uiBase || process.env.WEB_UI_URL || "http://localhost:3000");
+    const redirectTo = token?.meta?.redirectTo || "/";
+
+    let email = null;
+    let name = null;
+    let picture = null;
+    let googleUserId = null;
+    try {
+      const info = await fetchGoogleUserInfo(token.access_token);
+      email = info?.email || null;
+      name = info?.name || info?.given_name || null;
+      picture = info?.picture || null;
+      googleUserId = info?.id || info?.email || null;
+    } catch {
+      // ignore userinfo errors
+    }
+
+    if (intent === "login") {
+      const allow = checkAllowlist({ email, userId: googleUserId || email || "" });
+      if (!allow.allowed) {
+        clearSessionCookie(res);
+        clearJwtCookie(res);
+        return res.redirect(`${uiBase}${redirectTo}?auth=denied`);
       }
-      const effectiveUserId = userId || `google_${Date.now()}`;
-      const requestUserId = getUserId(req);
-      const uiBase = token?.meta?.uiBase || "";
-      const redirectUri = token?.meta?.redirectUri || "";
-      const requestHost = String(req.headers["x-forwarded-host"] || req.headers.host || "");
-      const localHosts = new Set(["localhost", "127.0.0.1"]);
-
-      const isLocalHost = (value = "") => {
-        if (!value) return false;
-        try {
-          const host = new URL(value).hostname;
-          return localHosts.has(host);
-        } catch {
-          return localHosts.has(String(value || "").split(":")[0]);
-        }
-      };
-
-      const isLocalUi = isLocalHost(uiBase);
-      const isLocalRedirect = isLocalHost(redirectUri);
-      const isLocalRequest = localHosts.has(requestHost.split(":")[0]);
-      const isLocalEnv = String(process.env.PUBLIC_BASE_URL || "").includes("localhost")
-        || String(process.env.WEB_UI_URL || "").includes("localhost");
-
-      const targetUserIds = new Set([effectiveUserId]);
-      if (requestUserId && requestUserId !== effectiveUserId && requestUserId !== "local") {
-        targetUserIds.add(requestUserId);
-      }
-      if (isLocalUi || isLocalRedirect || isLocalRequest || isLocalEnv) {
-        targetUserIds.add("local");
-      }
-
-      for (const targetUserId of targetUserIds) {
-        const existing = getProvider("google", targetUserId) || {};
-        setProvider("google", {
-          ...existing,
-          ...token,
-          refresh_token: token.refresh_token || existing.refresh_token,
-          scope: token.scope || existing.scope,
-          email: email || existing.email,
-          name: name || existing.name,
-          picture: picture || existing.picture,
-          connectedAt: new Date().toISOString()
-        }, targetUserId);
-        writeAudit({
-          type: "connection_token_stored",
-          at: new Date().toISOString(),
-          provider: "google",
-          userId: targetUserId
-        });
-      }
-
+      const effectiveUserId = allow.userId || googleUserId || email || `google_${Date.now()}`;
+      const roles = Array.isArray(allow.roles) ? allow.roles : [];
+      const tenantId = allow.tenantId || "";
+      ensureUser(effectiveUserId, { name: name || email || effectiveUserId, email: email || "" });
+      updateUser(effectiveUserId, { name: name || undefined, email: email || undefined });
       const sessionId = createSession({
         id: effectiveUserId,
         email,
         name,
         picture,
-        workspaceId: effectiveUserId
+        workspaceId: tenantId || effectiveUserId,
+        roles
       });
       setSessionCookie(res, sessionId);
-    })();
-    const uiBase = sanitizeUiBase(token?.meta?.uiBase || process.env.WEB_UI_URL || "http://localhost:3000");
-    const redirectTo = token?.meta?.redirectTo || "/";
+      const jwtToken = signJwt({
+        sub: effectiveUserId,
+        sid: sessionId,
+        tenantId,
+        roles,
+        user: { id: effectiveUserId, email, name, picture }
+      });
+      setJwtCookie(res, jwtToken);
+      return res.redirect(`${uiBase}${redirectTo}?integration=google&status=success`);
+    }
+
+    const targetUserId = token?.meta?.userId || getUserId(req) || (isAuthRequired() ? "" : "local");
+    if (!targetUserId && isAuthRequired()) {
+      return res.redirect(`${uiBase}${redirectTo}?integration=google&status=unauthorized`);
+    }
+    const existing = getProvider("google", targetUserId) || {};
+    setProvider("google", {
+      ...existing,
+      ...token,
+      refresh_token: token.refresh_token || existing.refresh_token,
+      scope: token.scope || existing.scope,
+      email: email || existing.email,
+      name: name || existing.name,
+      picture: picture || existing.picture,
+      connectedAt: new Date().toISOString()
+    }, targetUserId);
+    writeAudit({
+      type: "connection_token_stored",
+      at: new Date().toISOString(),
+      provider: "google",
+      userId: targetUserId
+    });
     res.redirect(`${uiBase}${redirectTo}?integration=google&status=success`);
   } catch (err) {
     const uiBase = sanitizeUiBase(process.env.WEB_UI_URL || "http://localhost:3000");
