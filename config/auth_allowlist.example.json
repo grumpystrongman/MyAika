@@ -1,0 +1,13 @@
+{
+  "emails": ["user@example.com"],
+  "domains": ["example.com"],
+  "admins": ["admin@example.com"],
+  "users": [
+    {
+      "email": "user@example.com",
+      "userId": "user-123",
+      "roles": ["admin"],
+      "tenantId": "tenant-1"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+node_modules
+apps/web/node_modules
+apps/server/node_modules
+packages/shared/node_modules
+data
+apps/server/data
+apps/web/.next
+apps/web/out
+.git
+.gitignore
+*.log
+*.sqlite
+*.db
+*.local
+*.env
