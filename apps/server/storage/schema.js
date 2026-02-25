@@ -787,6 +787,16 @@ const migrations = [
     INSERT OR IGNORE INTO users (id, name, timezone, email, telegram_user_id, created_at)
     VALUES ('local', 'Jeff', '', '', '', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
     `
+  },
+  {
+    id: 17,
+    sql: `
+    ALTER TABLE chat_threads ADD COLUMN user_id TEXT;
+    UPDATE chat_threads SET user_id = 'local' WHERE user_id IS NULL OR user_id = '';
+
+    CREATE INDEX IF NOT EXISTS chat_threads_lookup_user
+      ON chat_threads (user_id, channel, sender_id, chat_id, status, updated_at);
+    `
   }
 ];
 
