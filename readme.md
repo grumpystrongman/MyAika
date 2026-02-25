@@ -37,6 +37,32 @@ iPad/Safari microphone note:
 - Easiest path: `npm run dev:ipad` (starts server + web + HTTPS tunnel and prints a `https://...trycloudflare.com` URL for iPad, then falls back to localtunnel if needed).
 - If running without tunnel, use HTTPS dev mode: `npm run dev:web:https`.
 
+## Tests
+- Run the full suite: `npm test`
+
+## Auth + Multi-user (small group hosting)
+Enable sign-in and per-user isolation:
+- Set `AUTH_REQUIRED=1` and `AUTH_JWT_SECRET=...` in `apps/server/.env`.
+- Configure allowlist via env (`AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_DOMAINS`) or a JSON file (template: `config/auth_allowlist.example.json`, default path: `config/auth_allowlist.json`, override with `AUTH_ALLOWLIST_PATH`).
+- Turn on strict isolation: `RAG_MULTIUSER_ENABLED=1` and `AIKA_STRICT_USER_SCOPE=1`.
+
+Login flow:
+- The web app will prompt for Google sign-in when auth is required.
+- Sessions are stored as HttpOnly JWT cookies; all API calls use cookie auth.
+
+## Worker (background jobs)
+Run the worker loop separately from the API:
+- `npm run worker` (or `npm run dev:worker`)
+- For split deployments, set `WORKER_EXECUTION_MODE=off` on the API container and run the worker container.
+
+## Docker (API + worker)
+Build and run both services:
+- `docker compose up --build`
+
+Defaults:
+- API: `http://localhost:8787`
+- Worker shares the same `./data` and `./apps/server/data` volumes.
+
 Default UI behavior:
 - Voice Mode is on by default (auto-listen + auto-speak).
 - Settings and advanced voice controls are behind the "Settings" button.
