@@ -5,15 +5,9 @@ import { threadId } from "node:worker_threads";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { getEmbeddingConfig } from "./embeddings.js";
+import { getContextUserId } from "../../auth/context.js";
 
-let db = null;
-let vecEnabled = false;
-let ftsEnabled = false;
-let cachedDim = null;
-let hnswIndex = null;
-let hnswMeta = { nextLabel: 0, chunkIdToLabel: {}, labelToChunkId: {} };
-let hnswDirty = false;
-let hnswInitialized = false;
+const stores = new Map();
 
 function resolveRepoRoot() {
   const cwd = process.cwd();
@@ -25,15 +19,87 @@ function resolveRepoRoot() {
 const repoRoot = resolveRepoRoot();
 const defaultDbPath = path.join(repoRoot, "apps", "server", "data", "aika_rag.sqlite");
 const envPath = process.env.RAG_SQLITE_PATH || "";
-const testPath = path.join(os.tmpdir(), `aika_rag_test_${process.pid}-${threadId || 0}.sqlite`);
 const isTestEnv = process.env.NODE_ENV === "test" || process.argv.includes("--test") || process.env.AIKA_TEST_MODE === "1";
-const dbPath = (!isTestEnv && envPath)
-  ? (path.isAbsolute(envPath) ? envPath : path.join(repoRoot, envPath))
-  : (isTestEnv ? testPath : defaultDbPath);
-const dataDir = path.dirname(dbPath);
-const hnswDir = path.join(dataDir, "rag_hnsw");
-const hnswIndexPath = path.join(hnswDir, "index.bin");
-const hnswMetaPath = path.join(hnswDir, "index.json");
+
+function isMultiUserEnabled() {
+  return String(process.env.RAG_MULTIUSER_ENABLED || process.env.AIKA_RAG_MULTIUSER || "") === "1";
+}
+
+function isStrictUserScope() {
+  return String(process.env.AIKA_STRICT_USER_SCOPE || process.env.AUTH_REQUIRED || "") === "1";
+}
+
+function sanitizeUserId(userId) {
+  return String(userId || "local").replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function resolveUserId(userId = "") {
+  const explicit = String(userId || "").trim();
+  const ctxUser = getContextUserId({ fallback: "" });
+  if (ctxUser) {
+    if (explicit && explicit !== ctxUser && isStrictUserScope()) {
+      throw new Error("rag_user_scope_mismatch");
+    }
+    return ctxUser;
+  }
+  if (explicit) return explicit;
+  return process.env.AIKA_DEFAULT_USER_ID || "local";
+}
+
+function resolveBaseDbPath() {
+  if (envPath) {
+    if (envPath === ":memory:") return envPath;
+    return path.isAbsolute(envPath) ? envPath : path.join(repoRoot, envPath);
+  }
+  return defaultDbPath;
+}
+
+function resolveDbPathForUser(userId) {
+  const safeUser = sanitizeUserId(userId);
+  if (isTestEnv) {
+    return path.join(os.tmpdir(), `aika_rag_test_${process.pid}-${threadId || 0}-${safeUser}.sqlite`);
+  }
+  const basePath = resolveBaseDbPath();
+  if (!isMultiUserEnabled() || basePath === ":memory:") return basePath;
+  const baseDir = path.extname(basePath) ? path.dirname(basePath) : basePath;
+  const baseName = path.extname(basePath) ? path.basename(basePath, path.extname(basePath)) : "aika_rag";
+  return path.join(baseDir, "rag_users", safeUser, `${baseName}.sqlite`);
+}
+
+function createStore(userId) {
+  const resolvedUser = resolveUserId(userId);
+  const dbPath = resolveDbPathForUser(resolvedUser);
+  const dataDir = dbPath === ":memory:" ? "" : path.dirname(dbPath);
+  const hnswDir = dataDir ? path.join(dataDir, "rag_hnsw") : "";
+  return {
+    userId: resolvedUser,
+    dbPath,
+    dataDir,
+    hnswDir,
+    hnswIndexPath: hnswDir ? path.join(hnswDir, "index.bin") : "",
+    hnswMetaPath: hnswDir ? path.join(hnswDir, "index.json") : "",
+    db: null,
+    vecEnabled: false,
+    ftsEnabled: false,
+    cachedDim: null,
+    hnswIndex: null,
+    hnswMeta: { nextLabel: 0, chunkIdToLabel: {}, labelToChunkId: {} },
+    hnswDirty: false,
+    hnswInitialized: false,
+    initialized: false
+  };
+}
+
+function getStore(userId) {
+  const resolved = resolveUserId(userId);
+  const key = isMultiUserEnabled() ? resolved : "shared";
+  let store = stores.get(key);
+  if (!store) {
+    store = createStore(resolved);
+    stores.set(key, store);
+  }
+  return store;
+}
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -64,7 +130,8 @@ function toHnswVector(vec) {
   }
 }
 
-function ensureSchema() {
+function ensureSchema(store) {
+  const db = store.db;
   db.exec(`
     CREATE TABLE IF NOT EXISTS rag_meta (
       key TEXT PRIMARY KEY,
@@ -329,8 +396,9 @@ function ensureSchema() {
   `);
 }
 
-function ensureFts() {
-  if (ftsEnabled) return;
+function ensureFts(store) {
+  if (store.ftsEnabled) return;
+  const db = store.db;
   try {
     db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
       chunk_id UNINDEXED,
@@ -339,14 +407,15 @@ function ensureFts() {
       text,
       tokenize='porter'
     );`);
-    ftsEnabled = true;
+    store.ftsEnabled = true;
   } catch (err) {
-    ftsEnabled = false;
+    store.ftsEnabled = false;
     console.warn("fts5 unavailable, lexical search disabled:", err?.message || err);
   }
 }
 
-function countRows(table) {
+function countRows(store, table) {
+  const db = store.db;
   try {
     const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get();
     return row?.count || 0;
@@ -355,9 +424,10 @@ function countRows(table) {
   }
 }
 
-function rebuildChunksFtsCore({ batchSize = 500 } = {}) {
-  if (!ftsEnabled) return { ok: false, reason: "fts_disabled" };
-  const total = countRows("chunks");
+function rebuildChunksFtsCore(store, { batchSize = 500 } = {}) {
+  if (!store.ftsEnabled) return { ok: false, reason: "fts_disabled" };
+  const db = store.db;
+  const total = countRows(store, "chunks");
   if (!total) return { ok: true, indexed: 0 };
 
   db.exec("DELETE FROM chunks_fts");
@@ -378,19 +448,19 @@ function rebuildChunksFtsCore({ batchSize = 500 } = {}) {
     indexed += rows.length;
     offset += rows.length;
   }
-  setMeta("fts_last_rebuild", nowIso());
+  setMeta(store, "fts_last_rebuild", nowIso());
   return { ok: true, indexed };
 }
 
-function maybeRebuildChunksFts() {
-  if (!ftsEnabled) return;
-  const total = countRows("chunks");
+function maybeRebuildChunksFts(store) {
+  if (!store.ftsEnabled) return;
+  const total = countRows(store, "chunks");
   if (!total) return;
-  const indexed = countRows("chunks_fts");
+  const indexed = countRows(store, "chunks_fts");
   const diff = total - indexed;
   if (diff <= 0) return;
 
-  const last = getMeta("fts_last_rebuild");
+  const last = getMeta(store, "fts_last_rebuild");
   if (last) {
     const elapsed = Date.now() - Date.parse(last);
     if (Number.isFinite(elapsed) && elapsed < 15 * 60_000) return;
@@ -398,12 +468,13 @@ function maybeRebuildChunksFts() {
 
   const threshold = Math.max(200, Math.floor(total * 0.1));
   if (indexed === 0 || diff > threshold) {
-    rebuildChunksFtsCore({ batchSize: 500 });
+    rebuildChunksFtsCore(store, { batchSize: 500 });
   }
 }
 
-function upsertChunksFts(chunks) {
-  if (!ftsEnabled || !chunks?.length) return;
+function upsertChunksFts(store, chunks) {
+  if (!store.ftsEnabled || !chunks?.length) return;
+  const db = store.db;
   const deleteStmt = db.prepare("DELETE FROM chunks_fts WHERE chunk_id = ?");
   const insertStmt = db.prepare("INSERT INTO chunks_fts (chunk_id, meeting_id, speaker, text) VALUES (?, ?, ?, ?)");
   const tx = db.transaction(items => {
@@ -415,8 +486,9 @@ function upsertChunksFts(chunks) {
   tx(chunks);
 }
 
-function deleteChunksFts(chunkIds = []) {
-  if (!ftsEnabled || !chunkIds.length) return;
+function deleteChunksFts(store, chunkIds = []) {
+  if (!store.ftsEnabled || !chunkIds.length) return;
+  const db = store.db;
   const stmt = db.prepare("DELETE FROM chunks_fts WHERE chunk_id = ?");
   const tx = db.transaction(ids => {
     for (const id of ids) stmt.run(id);
@@ -424,135 +496,136 @@ function deleteChunksFts(chunkIds = []) {
   tx(chunkIds);
 }
 
-function getTableColumns(table) {
-  return db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
+function getTableColumns(store, table) {
+  return store.db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
 }
 
-function ensureColumn(table, column, definition) {
-  const cols = getTableColumns(table);
+function ensureColumn(store, table, column, definition) {
+  const cols = getTableColumns(store, table);
   if (!cols.includes(column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    store.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }
 
-function ensureIndex(table, column, indexName) {
-  const cols = getTableColumns(table);
+function ensureIndex(store, table, column, indexName) {
+  const cols = getTableColumns(store, table);
   if (!cols.includes(column)) return;
-  db.exec(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${table}(${column})`);
+  store.db.exec(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${table}(${column})`);
 }
 
-function ensureMigrations() {
-  ensureColumn("meeting_summaries", "decisions_json", "TEXT");
-  ensureColumn("meeting_summaries", "tasks_json", "TEXT");
-  ensureColumn("meeting_summaries", "risks_json", "TEXT");
-  ensureColumn("meeting_summaries", "next_steps_json", "TEXT");
-  ensureColumn("meeting_summaries", "updated_at", "TEXT");
-  ensureColumn("meeting_emails", "error", "TEXT");
-  ensureColumn("meetings", "source_group", "TEXT");
-  ensureColumn("trading_sources", "collection_id", "TEXT");
-  ensureColumn("trading_rss_sources", "collection_id", "TEXT");
-  ensureColumn("trading_rss_sources", "tags_json", "TEXT");
-  ensureColumn("trading_rss_sources", "include_foreign", "INTEGER");
-  ensureColumn("trading_rss_sources", "updated_at", "TEXT");
-  ensureColumn("trading_rss_sources", "last_crawled_at", "TEXT");
-  ensureColumn("trading_rss_sources", "last_status", "TEXT");
-  ensureColumn("trading_rss_sources", "last_error", "TEXT");
-  ensureColumn("trading_rss_items", "published_at", "TEXT");
-  ensureColumn("trading_rss_items", "decision", "TEXT");
-  ensureColumn("trading_rss_items", "reason", "TEXT");
-  ensureColumn("trading_rss_items", "content_hash", "TEXT");
-  ensureColumn("trading_youtube_sources", "collection_id", "TEXT");
-  ensureColumn("trading_youtube_sources", "channel_id", "TEXT");
-  ensureColumn("trading_youtube_sources", "handle", "TEXT");
-  ensureColumn("trading_youtube_sources", "title", "TEXT");
-  ensureColumn("trading_youtube_sources", "description", "TEXT");
-  ensureColumn("trading_youtube_sources", "url", "TEXT");
-  ensureColumn("trading_youtube_sources", "tags_json", "TEXT");
-  ensureColumn("trading_youtube_sources", "enabled", "INTEGER");
-  ensureColumn("trading_youtube_sources", "subscriber_count", "INTEGER");
-  ensureColumn("trading_youtube_sources", "video_count", "INTEGER");
-  ensureColumn("trading_youtube_sources", "view_count", "INTEGER");
-  ensureColumn("trading_youtube_sources", "max_videos", "INTEGER");
-  ensureColumn("trading_youtube_sources", "created_at", "TEXT");
-  ensureColumn("trading_youtube_sources", "updated_at", "TEXT");
-  ensureColumn("trading_youtube_sources", "last_crawled_at", "TEXT");
-  ensureColumn("trading_youtube_sources", "last_status", "TEXT");
-  ensureColumn("trading_youtube_sources", "last_error", "TEXT");
-  ensureColumn("trading_youtube_sources", "last_published_at", "TEXT");
-  ensureColumn("trading_youtube_items", "source_id", "INTEGER");
-  ensureColumn("trading_youtube_items", "video_id", "TEXT");
-  ensureColumn("trading_youtube_items", "url", "TEXT");
-  ensureColumn("trading_youtube_items", "title", "TEXT");
-  ensureColumn("trading_youtube_items", "published_at", "TEXT");
-  ensureColumn("trading_youtube_items", "ingested_at", "TEXT");
-  ensureColumn("trading_youtube_items", "transcript_hash", "TEXT");
-  ensureColumn("trading_youtube_items", "description_hash", "TEXT");
-  migrateSignalsDocumentsSchema();
-  migrateSignalsRunsSchema();
-  migrateSignalsTrendsSchema();
-  ensureColumn("signals_documents", "source_title", "TEXT");
-  ensureColumn("signals_documents", "source_url", "TEXT");
-  ensureColumn("signals_documents", "canonical_url", "TEXT");
-  ensureColumn("signals_documents", "title", "TEXT");
-  ensureColumn("signals_documents", "summary", "TEXT");
-  ensureColumn("signals_documents", "raw_text", "TEXT");
-  ensureColumn("signals_documents", "cleaned_text", "TEXT");
-  ensureColumn("signals_documents", "content_hash", "TEXT");
-  ensureColumn("signals_documents", "simhash", "TEXT");
-  ensureColumn("signals_documents", "retrieved_at", "TEXT");
-  ensureColumn("signals_documents", "published_at", "TEXT");
-  ensureColumn("signals_documents", "language", "TEXT");
-  ensureColumn("signals_documents", "category", "TEXT");
-  ensureColumn("signals_documents", "tags_json", "TEXT");
-  ensureColumn("signals_documents", "signal_tags_json", "TEXT");
-  ensureColumn("signals_documents", "tickers_json", "TEXT");
-  ensureColumn("signals_documents", "entities_json", "TEXT");
-  ensureColumn("signals_documents", "freshness_score", "REAL");
-  ensureColumn("signals_documents", "reliability_score", "REAL");
-  ensureColumn("signals_documents", "stale", "INTEGER");
-  ensureColumn("signals_documents", "expired", "INTEGER");
-  ensureColumn("signals_documents", "stale_reason", "TEXT");
-  ensureColumn("signals_documents", "summary_json", "TEXT");
-  ensureColumn("signals_documents", "meeting_id", "TEXT");
-  ensureColumn("signals_documents", "cluster_id", "TEXT");
-  ensureColumn("signals_documents", "cluster_label", "TEXT");
-  ensureColumn("signals_documents", "created_at", "TEXT");
-  ensureColumn("signals_documents", "updated_at", "TEXT");
-  ensureIndex("signals_documents", "stale", "idx_signals_docs_stale");
-  ensureIndex("signals_documents", "expired", "idx_signals_docs_expired");
-  ensureColumn("signals_runs", "status", "TEXT");
-  ensureColumn("signals_runs", "started_at", "TEXT");
-  ensureColumn("signals_runs", "finished_at", "TEXT");
-  ensureColumn("signals_runs", "source_count", "INTEGER");
-  ensureColumn("signals_runs", "ingested_count", "INTEGER");
-  ensureColumn("signals_runs", "skipped_count", "INTEGER");
-  ensureColumn("signals_runs", "expired_count", "INTEGER");
-  ensureColumn("signals_runs", "error_count", "INTEGER");
-  ensureColumn("signals_runs", "errors_json", "TEXT");
-  ensureColumn("signals_runs", "sources_json", "TEXT");
-  ensureColumn("signals_runs", "report_path", "TEXT");
-  ensureColumn("signals_runs", "created_at", "TEXT");
-  ensureColumn("signals_trends", "run_id", "TEXT");
-  ensureColumn("signals_trends", "cluster_id", "TEXT");
-  ensureColumn("signals_trends", "label", "TEXT");
-  ensureColumn("signals_trends", "representative_doc_id", "TEXT");
-  ensureColumn("signals_trends", "top_entities_json", "TEXT");
-  ensureColumn("signals_trends", "top_tickers_json", "TEXT");
-  ensureColumn("signals_trends", "signal_tags_json", "TEXT");
-  ensureColumn("signals_trends", "note", "TEXT");
-  ensureColumn("signals_trends", "doc_count", "INTEGER");
-  ensureColumn("signals_trends", "created_at", "TEXT");
-  ensureColumn("knowledge_documents", "stale", "INTEGER");
-  ensureColumn("knowledge_documents", "expired", "INTEGER");
-  ensureColumn("knowledge_documents", "stale_reason", "TEXT");
-  ensureColumn("knowledge_documents", "reviewed_at", "TEXT");
-  ensureIndex("knowledge_documents", "reviewed_at", "idx_knowledge_docs_reviewed");
-  migrateTradingSourcesSchema();
-  migrateTradingRssSourcesSchema();
-  migrateTradingRssItemsSchema();
+function ensureMigrations(store) {
+  ensureColumn(store, "meeting_summaries", "decisions_json", "TEXT");
+  ensureColumn(store, "meeting_summaries", "tasks_json", "TEXT");
+  ensureColumn(store, "meeting_summaries", "risks_json", "TEXT");
+  ensureColumn(store, "meeting_summaries", "next_steps_json", "TEXT");
+  ensureColumn(store, "meeting_summaries", "updated_at", "TEXT");
+  ensureColumn(store, "meeting_emails", "error", "TEXT");
+  ensureColumn(store, "meetings", "source_group", "TEXT");
+  ensureColumn(store, "trading_sources", "collection_id", "TEXT");
+  ensureColumn(store, "trading_rss_sources", "collection_id", "TEXT");
+  ensureColumn(store, "trading_rss_sources", "tags_json", "TEXT");
+  ensureColumn(store, "trading_rss_sources", "include_foreign", "INTEGER");
+  ensureColumn(store, "trading_rss_sources", "updated_at", "TEXT");
+  ensureColumn(store, "trading_rss_sources", "last_crawled_at", "TEXT");
+  ensureColumn(store, "trading_rss_sources", "last_status", "TEXT");
+  ensureColumn(store, "trading_rss_sources", "last_error", "TEXT");
+  ensureColumn(store, "trading_rss_items", "published_at", "TEXT");
+  ensureColumn(store, "trading_rss_items", "decision", "TEXT");
+  ensureColumn(store, "trading_rss_items", "reason", "TEXT");
+  ensureColumn(store, "trading_rss_items", "content_hash", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "collection_id", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "channel_id", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "handle", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "title", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "description", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "url", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "tags_json", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "enabled", "INTEGER");
+  ensureColumn(store, "trading_youtube_sources", "subscriber_count", "INTEGER");
+  ensureColumn(store, "trading_youtube_sources", "video_count", "INTEGER");
+  ensureColumn(store, "trading_youtube_sources", "view_count", "INTEGER");
+  ensureColumn(store, "trading_youtube_sources", "max_videos", "INTEGER");
+  ensureColumn(store, "trading_youtube_sources", "created_at", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "updated_at", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "last_crawled_at", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "last_status", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "last_error", "TEXT");
+  ensureColumn(store, "trading_youtube_sources", "last_published_at", "TEXT");
+  ensureColumn(store, "trading_youtube_items", "source_id", "INTEGER");
+  ensureColumn(store, "trading_youtube_items", "video_id", "TEXT");
+  ensureColumn(store, "trading_youtube_items", "url", "TEXT");
+  ensureColumn(store, "trading_youtube_items", "title", "TEXT");
+  ensureColumn(store, "trading_youtube_items", "published_at", "TEXT");
+  ensureColumn(store, "trading_youtube_items", "ingested_at", "TEXT");
+  ensureColumn(store, "trading_youtube_items", "transcript_hash", "TEXT");
+  ensureColumn(store, "trading_youtube_items", "description_hash", "TEXT");
+  migrateSignalsDocumentsSchema(store);
+  migrateSignalsRunsSchema(store);
+  migrateSignalsTrendsSchema(store);
+  ensureColumn(store, "signals_documents", "source_title", "TEXT");
+  ensureColumn(store, "signals_documents", "source_url", "TEXT");
+  ensureColumn(store, "signals_documents", "canonical_url", "TEXT");
+  ensureColumn(store, "signals_documents", "title", "TEXT");
+  ensureColumn(store, "signals_documents", "summary", "TEXT");
+  ensureColumn(store, "signals_documents", "raw_text", "TEXT");
+  ensureColumn(store, "signals_documents", "cleaned_text", "TEXT");
+  ensureColumn(store, "signals_documents", "content_hash", "TEXT");
+  ensureColumn(store, "signals_documents", "simhash", "TEXT");
+  ensureColumn(store, "signals_documents", "retrieved_at", "TEXT");
+  ensureColumn(store, "signals_documents", "published_at", "TEXT");
+  ensureColumn(store, "signals_documents", "language", "TEXT");
+  ensureColumn(store, "signals_documents", "category", "TEXT");
+  ensureColumn(store, "signals_documents", "tags_json", "TEXT");
+  ensureColumn(store, "signals_documents", "signal_tags_json", "TEXT");
+  ensureColumn(store, "signals_documents", "tickers_json", "TEXT");
+  ensureColumn(store, "signals_documents", "entities_json", "TEXT");
+  ensureColumn(store, "signals_documents", "freshness_score", "REAL");
+  ensureColumn(store, "signals_documents", "reliability_score", "REAL");
+  ensureColumn(store, "signals_documents", "stale", "INTEGER");
+  ensureColumn(store, "signals_documents", "expired", "INTEGER");
+  ensureColumn(store, "signals_documents", "stale_reason", "TEXT");
+  ensureColumn(store, "signals_documents", "summary_json", "TEXT");
+  ensureColumn(store, "signals_documents", "meeting_id", "TEXT");
+  ensureColumn(store, "signals_documents", "cluster_id", "TEXT");
+  ensureColumn(store, "signals_documents", "cluster_label", "TEXT");
+  ensureColumn(store, "signals_documents", "created_at", "TEXT");
+  ensureColumn(store, "signals_documents", "updated_at", "TEXT");
+  ensureIndex(store, "signals_documents", "stale", "idx_signals_docs_stale");
+  ensureIndex(store, "signals_documents", "expired", "idx_signals_docs_expired");
+  ensureColumn(store, "signals_runs", "status", "TEXT");
+  ensureColumn(store, "signals_runs", "started_at", "TEXT");
+  ensureColumn(store, "signals_runs", "finished_at", "TEXT");
+  ensureColumn(store, "signals_runs", "source_count", "INTEGER");
+  ensureColumn(store, "signals_runs", "ingested_count", "INTEGER");
+  ensureColumn(store, "signals_runs", "skipped_count", "INTEGER");
+  ensureColumn(store, "signals_runs", "expired_count", "INTEGER");
+  ensureColumn(store, "signals_runs", "error_count", "INTEGER");
+  ensureColumn(store, "signals_runs", "errors_json", "TEXT");
+  ensureColumn(store, "signals_runs", "sources_json", "TEXT");
+  ensureColumn(store, "signals_runs", "report_path", "TEXT");
+  ensureColumn(store, "signals_runs", "created_at", "TEXT");
+  ensureColumn(store, "signals_trends", "run_id", "TEXT");
+  ensureColumn(store, "signals_trends", "cluster_id", "TEXT");
+  ensureColumn(store, "signals_trends", "label", "TEXT");
+  ensureColumn(store, "signals_trends", "representative_doc_id", "TEXT");
+  ensureColumn(store, "signals_trends", "top_entities_json", "TEXT");
+  ensureColumn(store, "signals_trends", "top_tickers_json", "TEXT");
+  ensureColumn(store, "signals_trends", "signal_tags_json", "TEXT");
+  ensureColumn(store, "signals_trends", "note", "TEXT");
+  ensureColumn(store, "signals_trends", "doc_count", "INTEGER");
+  ensureColumn(store, "signals_trends", "created_at", "TEXT");
+  ensureColumn(store, "knowledge_documents", "stale", "INTEGER");
+  ensureColumn(store, "knowledge_documents", "expired", "INTEGER");
+  ensureColumn(store, "knowledge_documents", "stale_reason", "TEXT");
+  ensureColumn(store, "knowledge_documents", "reviewed_at", "TEXT");
+  ensureIndex(store, "knowledge_documents", "reviewed_at", "idx_knowledge_docs_reviewed");
+  migrateTradingSourcesSchema(store);
+  migrateTradingRssSourcesSchema(store);
+  migrateTradingRssItemsSchema(store);
 }
 
-function hasUniqueIndex(table, columns = []) {
+function hasUniqueIndex(store, table, columns = []) {
+  const db = store.db;
   const indexes = db.prepare(`PRAGMA index_list(${table})`).all();
   for (const idx of indexes) {
     if (!idx.unique) continue;
@@ -564,11 +637,12 @@ function hasUniqueIndex(table, columns = []) {
   return false;
 }
 
-function migrateTradingSourcesSchema() {
+function migrateTradingSourcesSchema(store) {
+  const db = store.db;
   const cols = db.prepare("PRAGMA table_info(trading_sources)").all();
   if (!cols.length) return;
-  const hasComposite = hasUniqueIndex("trading_sources", ["collection_id", "url"]);
-  const hasLegacy = hasUniqueIndex("trading_sources", ["url"]);
+  const hasComposite = hasUniqueIndex(store, "trading_sources", ["collection_id", "url"]);
+  const hasLegacy = hasUniqueIndex(store, "trading_sources", ["url"]);
   if (hasComposite || !hasLegacy) return;
   db.exec("PRAGMA foreign_keys = OFF");
   db.exec("BEGIN");
@@ -605,11 +679,12 @@ function migrateTradingSourcesSchema() {
   db.exec("PRAGMA foreign_keys = ON");
 }
 
-function migrateTradingRssSourcesSchema() {
+function migrateTradingRssSourcesSchema(store) {
+  const db = store.db;
   const cols = db.prepare("PRAGMA table_info(trading_rss_sources)").all();
   if (!cols.length) return;
-  const hasComposite = hasUniqueIndex("trading_rss_sources", ["collection_id", "url"]);
-  const hasLegacy = hasUniqueIndex("trading_rss_sources", ["url"]);
+  const hasComposite = hasUniqueIndex(store, "trading_rss_sources", ["collection_id", "url"]);
+  const hasLegacy = hasUniqueIndex(store, "trading_rss_sources", ["url"]);
   if (hasComposite || !hasLegacy) return;
   db.exec("PRAGMA foreign_keys = OFF");
   db.exec("BEGIN");
@@ -648,7 +723,8 @@ function migrateTradingRssSourcesSchema() {
   db.exec("PRAGMA foreign_keys = ON");
 }
 
-function migrateTradingRssItemsSchema() {
+function migrateTradingRssItemsSchema(store) {
+  const db = store.db;
   const cols = db.prepare("PRAGMA table_info(trading_rss_items)").all();
   if (!cols.length) return;
   const foreign = db.prepare("PRAGMA foreign_key_list(trading_rss_items)").all();
@@ -690,7 +766,8 @@ function migrateTradingRssItemsSchema() {
   db.exec("PRAGMA foreign_keys = ON");
 }
 
-function migrateSignalsDocumentsSchema() {
+function migrateSignalsDocumentsSchema(store) {
+  const db = store.db;
   const cols = db.prepare("PRAGMA table_info(signals_documents)").all();
   if (!cols.length) return;
   const hasDocId = cols.some(col => col.name === "doc_id");
@@ -790,7 +867,8 @@ function migrateSignalsDocumentsSchema() {
   db.exec("PRAGMA foreign_keys = ON");
 }
 
-function migrateSignalsRunsSchema() {
+function migrateSignalsRunsSchema(store) {
+  const db = store.db;
   const cols = db.prepare("PRAGMA table_info(signals_runs)").all();
   if (!cols.length) return;
   const hasRunId = cols.some(col => col.name === "run_id");
@@ -849,7 +927,8 @@ function migrateSignalsRunsSchema() {
   db.exec("PRAGMA foreign_keys = ON");
 }
 
-function migrateSignalsTrendsSchema() {
+function migrateSignalsTrendsSchema(store) {
+  const db = store.db;
   const cols = db.prepare("PRAGMA table_info(signals_trends)").all();
   if (!cols.length) return;
   const hasTrendId = cols.some(col => col.name === "trend_id");
@@ -904,73 +983,75 @@ function migrateSignalsTrendsSchema() {
   db.exec("PRAGMA foreign_keys = ON");
 }
 
-function getMeta(key) {
-  const row = db.prepare("SELECT value FROM rag_meta WHERE key = ?").get(key);
+function getMeta(store, key) {
+  const row = store.db.prepare("SELECT value FROM rag_meta WHERE key = ?").get(key);
   return row?.value || null;
 }
 
-function setMeta(key, value) {
-  db.prepare("INSERT INTO rag_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+function setMeta(store, key, value) {
+  store.db.prepare("INSERT INTO rag_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
     .run(key, value);
 }
 
 export function getRagMeta(key) {
-  initRagStore();
-  return getMeta(key);
+  const store = initRagStore();
+  return getMeta(store, key);
 }
 
 export function setRagMeta(key, value) {
-  initRagStore();
-  setMeta(key, value);
+  const store = initRagStore();
+  setMeta(store, key, value);
 }
 
-function ensureVecTable(dim) {
-  if (!vecEnabled) return;
-  const stored = getMeta("embedding_dim");
+function ensureVecTable(store, dim) {
+  if (!store.vecEnabled) return;
+  const stored = getMeta(store, "embedding_dim");
   if (stored && Number(stored) !== dim) {
     throw new Error(`embedding_dim_mismatch_${stored}_${dim}`);
   }
-  if (!stored) setMeta("embedding_dim", String(dim));
-  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(
+  if (!stored) setMeta(store, "embedding_dim", String(dim));
+  store.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(
     chunk_id TEXT PRIMARY KEY,
     embedding float[${dim}]
   );`);
 }
 
-export function initRagStore() {
-  if (db) return { db, vecEnabled };
-  ensureDir(dataDir);
-  db = new Database(dbPath);
+export function initRagStore({ userId } = {}) {
+  const store = getStore(userId);
+  if (store.initialized && store.db) return store;
+  if (store.dataDir) ensureDir(store.dataDir);
+  store.db = new Database(store.dbPath);
   const busyTimeoutMs = Number(process.env.RAG_BUSY_TIMEOUT_MS || 20000);
-  db.pragma(`busy_timeout = ${Number.isFinite(busyTimeoutMs) ? busyTimeoutMs : 20000}`);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  ensureSchema();
-  ensureMigrations();
-  ensureFts();
+  store.db.pragma(`busy_timeout = ${Number.isFinite(busyTimeoutMs) ? busyTimeoutMs : 20000}`);
+  store.db.pragma("journal_mode = WAL");
+  store.db.pragma("foreign_keys = ON");
+  ensureSchema(store);
+  ensureMigrations(store);
+  ensureFts(store);
   if (String(process.env.RAG_FTS_REBUILD_ON_STARTUP || "1") === "1") {
-    maybeRebuildChunksFts();
+    maybeRebuildChunksFts(store);
   }
   try {
-    sqliteVec.load(db);
-    vecEnabled = true;
+    sqliteVec.load(store.db);
+    store.vecEnabled = true;
   } catch (err) {
-    vecEnabled = false;
+    store.vecEnabled = false;
     console.warn("sqlite-vec load failed, using HNSW fallback:", err?.message || err);
   }
-  return { db, vecEnabled };
+  store.initialized = true;
+  return store;
 }
 
 export function getVectorStoreStatus() {
-  initRagStore();
-  const totalChunks = countRows("chunks");
-  const indexedChunks = ftsEnabled ? countRows("chunks_fts") : 0;
-  const storedDim = getMeta("embedding_dim");
+  const store = initRagStore();
+  const totalChunks = countRows(store, "chunks");
+  const indexedChunks = store.ftsEnabled ? countRows(store, "chunks_fts") : 0;
+  const storedDim = getMeta(store, "embedding_dim");
   const embedding = getEmbeddingConfig();
   return {
-    vecEnabled,
-    ftsEnabled,
-    dbPath,
+    vecEnabled: store.vecEnabled,
+    ftsEnabled: store.ftsEnabled,
+    dbPath: store.dbPath,
     embedding: {
       ...embedding,
       storedDim: storedDim ? Number(storedDim) : null,
@@ -979,34 +1060,37 @@ export function getVectorStoreStatus() {
     chunks: {
       total: totalChunks,
       ftsIndexed: indexedChunks,
-      ftsLastRebuild: getMeta("fts_last_rebuild") || ""
+      ftsLastRebuild: getMeta(store, "fts_last_rebuild") || ""
     }
   };
 }
 
 export function getFtsStatus() {
-  initRagStore();
+  const store = initRagStore();
   return {
-    enabled: ftsEnabled,
-    totalChunks: countRows("chunks"),
-    indexedChunks: ftsEnabled ? countRows("chunks_fts") : 0,
-    lastRebuild: getMeta("fts_last_rebuild") || ""
+    enabled: store.ftsEnabled,
+    totalChunks: countRows(store, "chunks"),
+    indexedChunks: store.ftsEnabled ? countRows(store, "chunks_fts") : 0,
+    lastRebuild: getMeta(store, "fts_last_rebuild") || ""
   };
 }
 
 export function getMeeting(meetingId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   return db.prepare("SELECT * FROM meetings WHERE id = ?").get(meetingId) || null;
 }
 
 export function countChunksForMeeting(meetingId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT COUNT(*) AS count FROM chunks WHERE meeting_id = ?").get(meetingId);
   return row?.count || 0;
 }
 
 export function upsertMeeting(meeting) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT INTO meetings (id, title, occurred_at, participants_json, source_group, source_url, raw_transcript, created_at)
@@ -1031,23 +1115,25 @@ export function upsertMeeting(meeting) {
 }
 
 export function deleteMeetingChunks(meetingId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const chunkIds = db.prepare("SELECT chunk_id FROM chunks WHERE meeting_id = ?").all(meetingId).map(r => r.chunk_id);
   if (!chunkIds.length) return 0;
   const placeholders = chunkIds.map(() => "?").join(",");
   db.prepare("DELETE FROM chunks WHERE meeting_id = ?").run(meetingId);
-  if (vecEnabled) {
+  if (store.vecEnabled) {
     db.prepare(`DELETE FROM chunk_vectors WHERE chunk_id IN (${placeholders})`).run(...chunkIds);
   } else {
     db.prepare(`DELETE FROM chunk_embeddings WHERE chunk_id IN (${placeholders})`).run(...chunkIds);
-    hnswDirty = true;
+    store.hnswDirty = true;
   }
-  deleteChunksFts(chunkIds);
+  deleteChunksFts(store, chunkIds);
   return chunkIds.length;
 }
 
 export function deleteMeetingById(meetingId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   deleteMeetingChunks(meetingId);
   db.prepare("DELETE FROM meeting_summaries WHERE meeting_id = ?").run(meetingId);
   db.prepare("DELETE FROM meeting_emails WHERE meeting_id = ?").run(meetingId);
@@ -1056,7 +1142,8 @@ export function deleteMeetingById(meetingId) {
 }
 
 export function deleteMeetingsBySourceGroup(sourceGroup) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const ids = db.prepare("SELECT id FROM meetings WHERE source_group = ?").all(sourceGroup).map(r => r.id);
   ids.forEach(id => deleteMeetingById(id));
   return ids.length;
@@ -1079,7 +1166,8 @@ function normalizeTradingSourceRow(row) {
 }
 
 export function listTradingSources({ limit = 100, offset = 0, search = "", includeDisabled = true, collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   if (collectionId) {
@@ -1109,13 +1197,15 @@ export function listTradingSources({ limit = 100, offset = 0, search = "", inclu
 }
 
 export function getTradingSource(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM trading_sources WHERE id = ?").get(id);
   return normalizeTradingSourceRow(row);
 }
 
 export function getTradingSourceByUrl(url, { collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   let row = null;
   if (collectionId === "trading") {
     row = db.prepare("SELECT * FROM trading_sources WHERE url = ? AND (collection_id = ? OR collection_id IS NULL)").get(url, collectionId);
@@ -1126,7 +1216,8 @@ export function getTradingSourceByUrl(url, { collectionId = "trading" } = {}) {
 }
 
 export function upsertTradingSource({ url, tags = [], enabled = true, collectionId = "trading" }) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT INTO trading_sources (collection_id, url, tags_json, enabled, created_at, updated_at)
@@ -1148,7 +1239,8 @@ export function upsertTradingSource({ url, tags = [], enabled = true, collection
 }
 
 export function updateTradingSource(id, { tags, enabled } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const existing = getTradingSource(id);
   if (!existing) return null;
   const nextTags = tags ? JSON.stringify(tags) : JSON.stringify(existing.tags || []);
@@ -1163,12 +1255,14 @@ export function updateTradingSource(id, { tags, enabled } = {}) {
 }
 
 export function deleteTradingSource(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   db.prepare("DELETE FROM trading_sources WHERE id = ?").run(id);
 }
 
 export function markTradingSourceCrawl({ id, status = "ok", error = "", crawledAt } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = crawledAt || nowIso();
   db.prepare(`
     UPDATE trading_sources
@@ -1196,7 +1290,8 @@ function normalizeTradingRssRow(row) {
 }
 
 export function listTradingRssSources({ limit = 100, offset = 0, search = "", includeDisabled = true, collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   if (collectionId) {
@@ -1226,13 +1321,15 @@ export function listTradingRssSources({ limit = 100, offset = 0, search = "", in
 }
 
 export function getTradingRssSource(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM trading_rss_sources WHERE id = ?").get(id);
   return normalizeTradingRssRow(row);
 }
 
 export function getTradingRssSourceByUrl(url, { collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   let row = null;
   if (collectionId === "trading") {
     row = db.prepare("SELECT * FROM trading_rss_sources WHERE url = ? AND (collection_id = ? OR collection_id IS NULL)").get(url, collectionId);
@@ -1243,7 +1340,8 @@ export function getTradingRssSourceByUrl(url, { collectionId = "trading" } = {})
 }
 
 export function upsertTradingRssSource({ url, title = "", tags = [], enabled = true, includeForeign = false, collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT INTO trading_rss_sources (collection_id, url, title, tags_json, enabled, include_foreign, created_at, updated_at)
@@ -1269,7 +1367,8 @@ export function upsertTradingRssSource({ url, title = "", tags = [], enabled = t
 }
 
 export function updateTradingRssSource(id, { title, tags, enabled, includeForeign } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const existing = getTradingRssSource(id);
   if (!existing) return null;
   const nextTags = tags ? JSON.stringify(tags) : JSON.stringify(existing.tags || []);
@@ -1285,13 +1384,15 @@ export function updateTradingRssSource(id, { title, tags, enabled, includeForeig
 }
 
 export function deleteTradingRssSource(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   db.prepare("DELETE FROM trading_rss_sources WHERE id = ?").run(id);
   db.prepare("DELETE FROM trading_rss_items WHERE source_id = ?").run(id);
 }
 
 export function markTradingRssCrawl({ id, status = "ok", error = "", crawledAt } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = crawledAt || nowIso();
   db.prepare(`
     UPDATE trading_rss_sources
@@ -1301,13 +1402,15 @@ export function markTradingRssCrawl({ id, status = "ok", error = "", crawledAt }
 }
 
 export function hasTradingRssItem({ sourceId, guid }) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT id FROM trading_rss_items WHERE source_id = ? AND guid = ?").get(sourceId, guid);
   return Boolean(row?.id);
 }
 
 export function recordTradingRssItem({ sourceId, guid, url, title, publishedAt, decision, reason, contentHash } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT OR IGNORE INTO trading_rss_items
@@ -1327,7 +1430,8 @@ export function recordTradingRssItem({ sourceId, guid, url, title, publishedAt, 
 }
 
 export function listTradingRssItems({ sourceId, limit = 50 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   if (sourceId) {
@@ -1370,7 +1474,8 @@ function normalizeTradingYoutubeSourceRow(row) {
 }
 
 export function listTradingYoutubeSources({ limit = 100, offset = 0, search = "", includeDisabled = true, collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   if (collectionId) {
@@ -1400,13 +1505,15 @@ export function listTradingYoutubeSources({ limit = 100, offset = 0, search = ""
 }
 
 export function getTradingYoutubeSource(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM trading_youtube_sources WHERE id = ?").get(id);
   return normalizeTradingYoutubeSourceRow(row);
 }
 
 export function getTradingYoutubeSourceByChannelId(channelId, { collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   let row = null;
   if (collectionId === "trading") {
     row = db.prepare("SELECT * FROM trading_youtube_sources WHERE channel_id = ? AND (collection_id = ? OR collection_id IS NULL)").get(channelId, collectionId);
@@ -1417,7 +1524,8 @@ export function getTradingYoutubeSourceByChannelId(channelId, { collectionId = "
 }
 
 export function getTradingYoutubeSourceByHandle(handle, { collectionId = "trading" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   let row = null;
   if (collectionId === "trading") {
     row = db.prepare("SELECT * FROM trading_youtube_sources WHERE handle = ? AND (collection_id = ? OR collection_id IS NULL)").get(handle, collectionId);
@@ -1441,7 +1549,8 @@ export function upsertTradingYoutubeSource({
   maxVideos = null,
   collectionId = "trading"
 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   const resolvedHandle = handle || "";
   let existing = null;
@@ -1514,7 +1623,8 @@ export function upsertTradingYoutubeSource({
 }
 
 export function updateTradingYoutubeSource(id, { tags, enabled, maxVideos } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const existing = getTradingYoutubeSource(id);
   if (!existing) return null;
   const nextTags = tags ? JSON.stringify(tags) : JSON.stringify(existing.tags || []);
@@ -1530,13 +1640,15 @@ export function updateTradingYoutubeSource(id, { tags, enabled, maxVideos } = {}
 }
 
 export function deleteTradingYoutubeSource(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   db.prepare("DELETE FROM trading_youtube_sources WHERE id = ?").run(id);
   db.prepare("DELETE FROM trading_youtube_items WHERE source_id = ?").run(id);
 }
 
 export function markTradingYoutubeCrawl({ id, status = "ok", error = "", crawledAt, lastPublishedAt } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = crawledAt || nowIso();
   db.prepare(`
     UPDATE trading_youtube_sources
@@ -1546,7 +1658,8 @@ export function markTradingYoutubeCrawl({ id, status = "ok", error = "", crawled
 }
 
 export function hasTradingYoutubeItem({ sourceId, videoId } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT id FROM trading_youtube_items WHERE source_id = ? AND video_id = ?").get(sourceId, videoId);
   return Boolean(row?.id);
 }
@@ -1562,7 +1675,8 @@ export function recordTradingYoutubeItem({
   ingestedAt
 } = {}) {
   if (!sourceId || !videoId) return;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = ingestedAt || nowIso();
   db.prepare(`
     INSERT OR IGNORE INTO trading_youtube_items
@@ -1581,7 +1695,8 @@ export function recordTradingYoutubeItem({
 }
 
 export function listTradingYoutubeItems({ sourceId, limit = 50 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   if (sourceId) {
@@ -1671,7 +1786,8 @@ function normalizeSignalTrendRow(row) {
 
 export function upsertSignalDocument(doc) {
   if (!doc?.doc_id) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT INTO signals_documents (
@@ -1745,27 +1861,31 @@ export function upsertSignalDocument(doc) {
 }
 
 export function getSignalDocument(docId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM signals_documents WHERE doc_id = ?").get(docId);
   return normalizeSignalDocRow(row);
 }
 
 export function getSignalDocumentByUrl(url) {
   if (!url) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM signals_documents WHERE canonical_url = ?").get(url);
   return normalizeSignalDocRow(row);
 }
 
 export function getSignalDocumentByHash(hash) {
   if (!hash) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM signals_documents WHERE content_hash = ?").get(hash);
   return normalizeSignalDocRow(row);
 }
 
 export function listSignalDedupCandidates({ sinceHours = 96, limit = 500 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const since = new Date(Date.now() - sinceHours * 3600000).toISOString();
   return db.prepare(`
     SELECT doc_id, canonical_url, content_hash, simhash
@@ -1778,7 +1898,8 @@ export function listSignalDedupCandidates({ sinceHours = 96, limit = 500 } = {})
 
 export function updateSignalDocument(docId, patch = {}) {
   if (!docId) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const fields = [];
   const params = [];
   const setField = (col, value) => {
@@ -1831,7 +1952,8 @@ export function listSignalDocuments({
   dateFrom,
   dateTo
 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   if (!includeExpired) {
@@ -1899,7 +2021,8 @@ function normalizeKnowledgeDocRow(row) {
 
 export function upsertKnowledgeDocument(doc) {
   if (!doc?.doc_id) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT INTO knowledge_documents (
@@ -1955,14 +2078,16 @@ export function upsertKnowledgeDocument(doc) {
 }
 
 export function getKnowledgeDocument(docId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM knowledge_documents WHERE doc_id = ?").get(docId);
   return normalizeKnowledgeDocRow(row);
 }
 
 export function getKnowledgeDocumentByHash(hash, collectionId = "") {
   if (!hash) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const params = [hash];
   let sql = "SELECT * FROM knowledge_documents WHERE content_hash = ?";
   if (collectionId) {
@@ -1974,7 +2099,8 @@ export function getKnowledgeDocumentByHash(hash, collectionId = "") {
 }
 
 export function listKnowledgeDedupCandidates({ sinceHours = 720, limit = 1000, collectionId = "" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const since = new Date(Date.now() - sinceHours * 3600000).toISOString();
   const params = [since, since];
   let sql = `
@@ -1997,7 +2123,8 @@ export function listKnowledgeDedupCandidates({ sinceHours = 720, limit = 1000, c
 }
 
 export function listKnowledgeHealthCandidates({ reviewIntervalHours = 24, limit = 500, collectionId = "" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const since = new Date(Date.now() - reviewIntervalHours * 3600000).toISOString();
   const params = [since];
   let where = "(reviewed_at IS NULL OR reviewed_at <= ?)";
@@ -2021,7 +2148,8 @@ export function listKnowledgeHealthCandidates({ reviewIntervalHours = 24, limit 
 
 export function updateKnowledgeDocument(docId, patch = {}) {
   if (!docId) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const fields = [];
   const params = [];
   const setField = (col, value) => {
@@ -2054,7 +2182,8 @@ export function updateKnowledgeDocument(docId, patch = {}) {
 }
 
 export function getKnowledgeHealthSummary({ collectionId = "" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const params = [];
   let where = "1=1";
   if (collectionId) {
@@ -2088,7 +2217,8 @@ export function getKnowledgeHealthSummary({ collectionId = "" } = {}) {
 }
 
 export function listKnowledgeSourceStats({ collectionId = "", limit = 50 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const params = [];
   let where = "1=1";
   if (collectionId) {
@@ -2136,7 +2266,8 @@ export function listKnowledgeSourceStats({ collectionId = "", limit = 50 } = {})
 
 export function recordSignalsRun({ run_id, status, started_at, source_count, report_path } = {}) {
   if (!run_id) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT INTO signals_runs (run_id, status, started_at, source_count, report_path, created_at)
@@ -2159,7 +2290,8 @@ export function recordSignalsRun({ run_id, status, started_at, source_count, rep
 
 export function updateSignalsRun(runId, patch = {}) {
   if (!runId) return null;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const fields = [];
   const params = [];
   const setField = (col, value) => {
@@ -2184,13 +2316,15 @@ export function updateSignalsRun(runId, patch = {}) {
 }
 
 export function getSignalsRun(runId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM signals_runs WHERE run_id = ?").get(runId);
   return normalizeSignalRunRow(row);
 }
 
 export function getLatestSignalsRun() {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare(`
     SELECT * FROM signals_runs
     ORDER BY started_at DESC
@@ -2200,7 +2334,8 @@ export function getLatestSignalsRun() {
 }
 
 export function listSignalsRuns({ limit = 20 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const rows = db.prepare(`
     SELECT * FROM signals_runs
     ORDER BY started_at DESC
@@ -2211,7 +2346,8 @@ export function listSignalsRuns({ limit = 20 } = {}) {
 
 export function replaceSignalsTrends(runId, trends = []) {
   if (!runId) return 0;
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   db.prepare("DELETE FROM signals_trends WHERE run_id = ?").run(runId);
   if (!trends.length) return 0;
   const stmt = db.prepare(`
@@ -2253,7 +2389,8 @@ export function replaceSignalsTrends(runId, trends = []) {
 }
 
 export function listSignalTrends({ runId, limit = 20 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const resolvedRunId = runId || getLatestSignalsRun()?.run_id;
   if (!resolvedRunId) return [];
   const rows = db.prepare(`
@@ -2266,7 +2403,8 @@ export function listSignalTrends({ runId, limit = 20 } = {}) {
 }
 
 export function getSignalsOverview() {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const total = db.prepare("SELECT COUNT(*) AS count FROM signals_documents").get()?.count || 0;
   const stale = db.prepare("SELECT COUNT(*) AS count FROM signals_documents WHERE stale = 1 AND (expired = 0 OR expired IS NULL)").get()?.count || 0;
   const expired = db.prepare("SELECT COUNT(*) AS count FROM signals_documents WHERE expired = 1").get()?.count || 0;
@@ -2280,7 +2418,8 @@ export function getSignalsOverview() {
 }
 
 export function listRagCollections({ limit = 100, offset = 0 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const rows = db.prepare(`
     SELECT * FROM rag_collections
     ORDER BY created_at DESC
@@ -2297,7 +2436,8 @@ export function listRagCollections({ limit = 100, offset = 0 } = {}) {
 }
 
 export function getRagCollection(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM rag_collections WHERE id = ?").get(id);
   if (!row) return null;
   return {
@@ -2311,7 +2451,8 @@ export function getRagCollection(id) {
 }
 
 export function upsertRagCollection({ id, title = "", description = "", kind = "custom" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   db.prepare(`
     INSERT INTO rag_collections (id, title, description, kind, created_at, updated_at)
@@ -2326,12 +2467,14 @@ export function upsertRagCollection({ id, title = "", description = "", kind = "
 }
 
 export function deleteRagCollection(id) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   db.prepare("DELETE FROM rag_collections WHERE id = ?").run(id);
 }
 
 export function upsertChunks(chunks) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   if (!chunks?.length) return 0;
   const now = nowIso();
   const stmt = db.prepare(`
@@ -2362,12 +2505,13 @@ export function upsertChunks(chunks) {
     }
   });
   tx(chunks);
-  upsertChunksFts(chunks);
+  upsertChunksFts(store, chunks);
   return chunks.length;
 }
 
 export function upsertMeetingSummary({ meetingId, summary }) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const now = nowIso();
   const decisions = summary?.decisions || summary?.summary?.decisions || [];
   const tasks = summary?.actionItems || summary?.tasks || [];
@@ -2396,7 +2540,8 @@ export function upsertMeetingSummary({ meetingId, summary }) {
 }
 
 export function getMeetingSummary(meetingId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM meeting_summaries WHERE meeting_id = ?").get(meetingId);
   if (!row) return null;
   return {
@@ -2409,7 +2554,8 @@ export function getMeetingSummary(meetingId) {
 }
 
 export function recordMeetingEmail({ meetingId, to, subject, status, error = "", sentAt }) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   db.prepare(`
     INSERT INTO meeting_emails (meeting_id, to_json, subject, sent_at, status, error)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -2430,7 +2576,8 @@ export function recordMeetingEmail({ meetingId, to, subject, status, error = "",
 }
 
 export function getMeetingEmail(meetingId) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM meeting_emails WHERE meeting_id = ?").get(meetingId);
   if (!row) return null;
   return {
@@ -2443,7 +2590,8 @@ export function getMeetingEmail(meetingId) {
 }
 
 export function recordMeetingNotification({ meetingId, channel, to, status, error = "", sentAt }) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   db.prepare(`
     INSERT INTO meeting_notifications (meeting_id, channel, to_json, sent_at, status, error)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -2463,7 +2611,8 @@ export function recordMeetingNotification({ meetingId, channel, to, status, erro
 }
 
 export function getMeetingNotification(meetingId, channel) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const row = db.prepare("SELECT * FROM meeting_notifications WHERE meeting_id = ? AND channel = ?").get(meetingId, channel);
   if (!row) return null;
   return {
@@ -2474,64 +2623,65 @@ export function getMeetingNotification(meetingId, channel) {
   };
 }
 
-async function ensureHnswIndex(dim) {
-  if (hnswInitialized) return;
+async function ensureHnswIndex(store, dim) {
+  if (store.hnswInitialized) return;
   const mod = await import("hnswlib-node");
   const HierarchicalNSW = mod.HierarchicalNSW || mod.default?.HierarchicalNSW || mod.default || mod;
-  hnswIndex = new HierarchicalNSW("cosine", dim);
-  hnswInitialized = true;
+  store.hnswIndex = new HierarchicalNSW("cosine", dim);
+  store.hnswInitialized = true;
 
-  if (fs.existsSync(hnswIndexPath) && fs.existsSync(hnswMetaPath)) {
+  if (store.hnswIndexPath && store.hnswMetaPath && fs.existsSync(store.hnswIndexPath) && fs.existsSync(store.hnswMetaPath)) {
     try {
-      const metaRaw = fs.readFileSync(hnswMetaPath, "utf-8");
-      hnswMeta = metaRaw ? JSON.parse(metaRaw) : hnswMeta;
-      hnswIndex.readIndexSync(hnswIndexPath);
-      hnswDirty = false;
+      const metaRaw = fs.readFileSync(store.hnswMetaPath, "utf-8");
+      store.hnswMeta = metaRaw ? JSON.parse(metaRaw) : store.hnswMeta;
+      store.hnswIndex.readIndexSync(store.hnswIndexPath);
+      store.hnswDirty = false;
       return;
     } catch {
-      hnswDirty = true;
+      store.hnswDirty = true;
     }
   } else {
-    hnswDirty = true;
+    store.hnswDirty = true;
   }
 
-  if (hnswDirty) {
-    await rebuildHnswIndex(dim);
+  if (store.hnswDirty) {
+    await rebuildHnswIndex(store, dim);
   }
 }
 
-async function rebuildHnswIndex(dim) {
+async function rebuildHnswIndex(store, dim) {
   const mod = await import("hnswlib-node");
   const HierarchicalNSW = mod.HierarchicalNSW || mod.default?.HierarchicalNSW || mod.default || mod;
-  hnswIndex = new HierarchicalNSW("cosine", dim);
-  const rows = db.prepare("SELECT chunk_id, embedding FROM chunk_embeddings").all();
+  store.hnswIndex = new HierarchicalNSW("cosine", dim);
+  const rows = store.db.prepare("SELECT chunk_id, embedding FROM chunk_embeddings").all();
   const maxElements = Math.max(rows.length + 100, Number(process.env.RAG_HNSW_MAX_ELEMENTS || 10000));
   const m = Number(process.env.RAG_HNSW_M || 16);
   const ef = Number(process.env.RAG_HNSW_EF_CONSTRUCTION || 200);
-  hnswIndex.initIndex(maxElements, m, ef);
+  store.hnswIndex.initIndex(maxElements, m, ef);
   const efSearch = Number(process.env.RAG_HNSW_EF_SEARCH || 64);
-  hnswIndex.setEfSearch(efSearch);
-  hnswMeta = { nextLabel: 0, chunkIdToLabel: {}, labelToChunkId: {} };
+  store.hnswIndex.setEfSearch(efSearch);
+  store.hnswMeta = { nextLabel: 0, chunkIdToLabel: {}, labelToChunkId: {} };
   for (const row of rows) {
-    const label = hnswMeta.nextLabel++;
-    hnswMeta.chunkIdToLabel[row.chunk_id] = label;
-    hnswMeta.labelToChunkId[label] = row.chunk_id;
+    const label = store.hnswMeta.nextLabel++;
+    store.hnswMeta.chunkIdToLabel[row.chunk_id] = label;
+    store.hnswMeta.labelToChunkId[label] = row.chunk_id;
     const vec = bufferToFloat32(row.embedding);
-    hnswIndex.addPoint(toHnswVector(vec), label);
+    store.hnswIndex.addPoint(toHnswVector(vec), label);
   }
-  ensureDir(hnswDir);
-  hnswIndex.writeIndexSync(hnswIndexPath);
-  fs.writeFileSync(hnswMetaPath, JSON.stringify(hnswMeta, null, 2));
-  hnswDirty = false;
+  if (store.hnswDir) ensureDir(store.hnswDir);
+  if (store.hnswIndexPath) store.hnswIndex.writeIndexSync(store.hnswIndexPath);
+  if (store.hnswMetaPath) fs.writeFileSync(store.hnswMetaPath, JSON.stringify(store.hnswMeta, null, 2));
+  store.hnswDirty = false;
 }
 
 export async function upsertVectors(chunks, embeddings) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   if (!chunks?.length || !embeddings?.length) return 0;
   const dim = embeddings[0]?.length || 0;
-  cachedDim = cachedDim || dim;
-  if (vecEnabled) ensureVecTable(dim);
-  const stmt = vecEnabled
+  store.cachedDim = store.cachedDim || dim;
+  if (store.vecEnabled) ensureVecTable(store, dim);
+  const stmt = store.vecEnabled
     ? db.prepare("INSERT OR REPLACE INTO chunk_vectors (chunk_id, embedding) VALUES (?, ?)")
     : db.prepare("INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding) VALUES (?, ?)");
 
@@ -2543,16 +2693,16 @@ export async function upsertVectors(chunks, embeddings) {
   const items = chunks.map((chunk, idx) => ({ chunk_id: chunk.chunk_id, embedding: embeddings[idx] }));
   tx(items);
 
-  if (!vecEnabled) {
-    await ensureHnswIndex(dim);
+  if (!store.vecEnabled) {
+    await ensureHnswIndex(store, dim);
     for (const item of items) {
-      if (hnswMeta.chunkIdToLabel[item.chunk_id] !== undefined) continue;
-      const label = hnswMeta.nextLabel++;
-      hnswMeta.chunkIdToLabel[item.chunk_id] = label;
-      hnswMeta.labelToChunkId[label] = item.chunk_id;
+      if (store.hnswMeta.chunkIdToLabel[item.chunk_id] !== undefined) continue;
+      const label = store.hnswMeta.nextLabel++;
+      store.hnswMeta.chunkIdToLabel[item.chunk_id] = label;
+      store.hnswMeta.labelToChunkId[label] = item.chunk_id;
       const vec = item.embedding instanceof Float32Array ? item.embedding : Float32Array.from(item.embedding);
-      hnswIndex.addPoint(toHnswVector(vec), label);
-      hnswDirty = true;
+      store.hnswIndex.addPoint(toHnswVector(vec), label);
+      store.hnswDirty = true;
     }
   }
 
@@ -2560,16 +2710,18 @@ export async function upsertVectors(chunks, embeddings) {
 }
 
 export async function persistHnsw() {
-  if (!hnswDirty || !hnswIndex) return;
-  ensureDir(hnswDir);
-  hnswIndex.writeIndexSync(hnswIndexPath);
-  fs.writeFileSync(hnswMetaPath, JSON.stringify(hnswMeta, null, 2));
-  hnswDirty = false;
+  const store = initRagStore();
+  if (!store.hnswDirty || !store.hnswIndex) return;
+  if (store.hnswDir) ensureDir(store.hnswDir);
+  if (store.hnswIndexPath) store.hnswIndex.writeIndexSync(store.hnswIndexPath);
+  if (store.hnswMetaPath) fs.writeFileSync(store.hnswMetaPath, JSON.stringify(store.hnswMeta, null, 2));
+  store.hnswDirty = false;
 }
 
 export function searchChunkIdsLexical(query, topK = 20) {
-  initRagStore();
-  if (!ftsEnabled) return [];
+  const store = initRagStore();
+  const db = store.db;
+  if (!store.ftsEnabled) return [];
   const q = String(query || "").trim();
   if (!q) return [];
   try {
@@ -2588,33 +2740,35 @@ export function searchChunkIdsLexical(query, topK = 20) {
 }
 
 export function rebuildChunksFts({ batchSize = 500 } = {}) {
-  initRagStore();
-  return rebuildChunksFtsCore({ batchSize });
+  const store = initRagStore();
+  return rebuildChunksFtsCore(store, { batchSize });
 }
 
 export async function searchChunkIds(embedding, topK = 8) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const vec = embedding instanceof Float32Array ? embedding : Float32Array.from(embedding || []);
   if (!vec.length) return [];
-  if (vecEnabled) {
-    ensureVecTable(vec.length);
+  if (store.vecEnabled) {
+    ensureVecTable(store, vec.length);
     const stmt = db.prepare("SELECT chunk_id, distance FROM chunk_vectors WHERE embedding MATCH ? ORDER BY distance LIMIT ?");
     return stmt.all(toBlob(vec), topK);
   }
 
-  await ensureHnswIndex(vec.length);
-  if (!hnswIndex) return [];
-  const result = hnswIndex.searchKnn(toHnswVector(vec), topK);
+  await ensureHnswIndex(store, vec.length);
+  if (!store.hnswIndex) return [];
+  const result = store.hnswIndex.searchKnn(toHnswVector(vec), topK);
   const labels = result?.neighbors || [];
   const distances = result?.distances || [];
   return labels.map((label, idx) => ({
-    chunk_id: hnswMeta.labelToChunkId[label],
+    chunk_id: store.hnswMeta.labelToChunkId[label],
     distance: distances[idx]
   })).filter(item => item.chunk_id);
 }
 
 export function getChunksByIds(chunkIds = [], filters = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   if (!chunkIds.length) return [];
   const where = [];
   const params = [];
@@ -2676,7 +2830,8 @@ export function getChunksByIds(chunkIds = [], filters = {}) {
 }
 
 export function listMeetingSummaries({ dateFrom, dateTo, limit = 20, meetingType = "", meetingIdPrefix = "" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   if (dateFrom) {
@@ -2728,7 +2883,8 @@ export function listMeetingSummaries({ dateFrom, dateTo, limit = 20, meetingType
 }
 
 export function listMeetings({ type = "all", limit = 20, offset = 0, search = "", participant = "", meetingIdPrefix = "" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   const normalizedType = String(type || "all").toLowerCase();
@@ -2778,7 +2934,8 @@ export function listMeetings({ type = "all", limit = 20, offset = 0, search = ""
 }
 
 export function listMeetingsRaw({ type = "all", limit = 200, offset = 0, search = "", meetingIdPrefix = "" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   const normalizedType = String(type || "all").toLowerCase();
@@ -2822,7 +2979,8 @@ export function listMeetingsRaw({ type = "all", limit = 200, offset = 0, search 
 }
 
 export function getSnippetsForMeetings(meetingIds = [], { term = "", limit = 6 } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   if (!meetingIds.length) return [];
   const placeholders = meetingIds.map(() => "?").join(",");
   const where = [`c.meeting_id IN (${placeholders})`];
@@ -2962,7 +3120,8 @@ export function getFirefliesNodeDetails(nodeId, { limitMeetings = 8, limitSnippe
 }
 
 export function getRagCounts() {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const totalMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings").get()?.count || 0;
   const totalChunks = db.prepare("SELECT COUNT(*) AS count FROM chunks").get()?.count || 0;
   const memoryMeetings = db.prepare("SELECT COUNT(*) AS count FROM meetings WHERE id LIKE 'memory:%'").get()?.count || 0;
@@ -2984,7 +3143,8 @@ export function getRagCounts() {
 }
 
 export function getMeetingStats({ type = "all", meetingIdPrefix = "" } = {}) {
-  initRagStore();
+  const store = initRagStore();
+  const db = store.db;
   const where = [];
   const params = [];
   const normalizedType = String(type || "all").toLowerCase();
