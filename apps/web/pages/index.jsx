@@ -709,6 +709,7 @@ export default function Home() {
   const [workEmail, setWorkEmail] = useState("");
   const [personalEmail, setPersonalEmail] = useState("");
   const [authChecked, setAuthChecked] = useState(false);
+  const [authRequired, setAuthRequired] = useState(REQUIRE_GOOGLE_AUTH);
   const [assistantProfile, setAssistantProfile] = useState(null);
   const [assistantProfileError, setAssistantProfileError] = useState("");
   const [assistantProfileLoaded, setAssistantProfileLoaded] = useState(false);
@@ -2029,12 +2030,12 @@ export default function Home() {
   useEffect(() => {
     if (!audioUnlocked) return;
     if (!autoSpeak || textOnly) return;
-    if (REQUIRE_GOOGLE_AUTH && !currentUser) return;
+    if (authRequired && !currentUser) return;
     if (lastAssistantText) return;
     const greeting = buildGreeting(currentUser);
     setLastAssistantText(greeting);
     speakChunks(greeting, { use_raw_text: true });
-  }, [audioUnlocked, autoSpeak, textOnly, lastAssistantText, currentUser]);
+  }, [audioUnlocked, autoSpeak, textOnly, lastAssistantText, currentUser, authRequired]);
 
   useEffect(() => {
     if (!voiceMode || !micEnabled || micState !== "idle") return;
@@ -2639,6 +2640,9 @@ export default function Home() {
         const resp = await fetch(`${SERVER_URL}/api/auth/me`, { credentials: "include" });
         const data = await resp.json();
         if (!mounted) return;
+        if (data?.authRequired !== undefined) {
+          setAuthRequired(Boolean(data.authRequired));
+        }
         if (data?.authenticated) {
           setCurrentUser(data.user || null);
           const greeting = buildGreeting(data.user || null);
@@ -2661,13 +2665,13 @@ export default function Home() {
     };
   }, []);
 
-  const showAuthGate = REQUIRE_GOOGLE_AUTH && authChecked && !currentUser;
+  const showAuthGate = authRequired && authChecked && !currentUser;
   const uiBase = typeof window !== "undefined" ? window.location.origin : "";
   const googleLoginUrl = SERVER_URL
     ? `${SERVER_URL}/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`
     : `/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`;
 
-  if (REQUIRE_GOOGLE_AUTH && !authChecked) {
+  if (authRequired && !authChecked) {
     return (
       <div style={{
         minHeight: "100vh",
