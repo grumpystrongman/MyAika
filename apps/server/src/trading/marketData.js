@@ -1,4 +1,6 @@
-const MARKET_DATA_TIMEOUT_MS = Number(process.env.TRADING_MARKET_DATA_FETCH_TIMEOUT_MS || 15000);
+const MARKET_DATA_TIMEOUT_MS = Number(process.env.TRADING_MARKET_DATA_FETCH_TIMEOUT_MS || 10000);
+const MARKET_DATA_CACHE_TTL_MS = Number(process.env.TRADING_MARKET_DATA_CACHE_TTL_MS || 15000);
+const marketDataCache = new Map();
 
 function fetchWithTimeout(url, options = {}, timeoutMs = MARKET_DATA_TIMEOUT_MS) {
   if (!timeoutMs || timeoutMs <= 0) return fetch(url, options);
@@ -6,6 +8,56 @@ function fetchWithTimeout(url, options = {}, timeoutMs = MARKET_DATA_TIMEOUT_MS)
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal })
     .finally(() => clearTimeout(timer));
+}
+
+function cacheKey({ symbol, assetClass, interval, limit, feed }) {
+  return [
+    String(symbol || "").toUpperCase(),
+    String(assetClass || "stock").toLowerCase(),
+    String(interval || ""),
+    String(limit || ""),
+    String(feed || "")
+  ].join("|");
+}
+
+function getCachedResult(key) {
+  if (!MARKET_DATA_CACHE_TTL_MS || MARKET_DATA_CACHE_TTL_MS <= 0) return null;
+  const entry = marketDataCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > MARKET_DATA_CACHE_TTL_MS) {
+    marketDataCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCachedResult(key, value) {
+  if (!MARKET_DATA_CACHE_TTL_MS || MARKET_DATA_CACHE_TTL_MS <= 0) return;
+  marketDataCache.set(key, { fetchedAt: Date.now(), value });
+}
+
+function firstFulfilled(promises = []) {
+  return new Promise((resolve, reject) => {
+    let pending = promises.length;
+    if (!pending) {
+      reject(new Error("no_candidates"));
+      return;
+    }
+    const errors = [];
+    promises.forEach(promise => {
+      Promise.resolve(promise).then(resolve).catch(err => {
+        errors.push(err);
+        pending -= 1;
+        if (pending <= 0) {
+          reject(errors[0] || new Error("all_failed"));
+        }
+      });
+    });
+  });
+}
+
+export function resetMarketDataCache() {
+  marketDataCache.clear();
 }
 
 function normalizeInterval(value) {
@@ -167,13 +219,18 @@ export async function fetchMarketCandles({
 } = {}) {
   const normalizedInterval = normalizeInterval(interval);
   const asset = String(assetClass || "stock").toLowerCase();
-  const targetSymbol = String(symbol || "").trim();
+  const targetSymbol = String(symbol || "").trim().toUpperCase();
   if (!targetSymbol) return { candles: [], source: "unavailable", interval: normalizedInterval, error: "symbol_required" };
+  const key = cacheKey({ symbol: targetSymbol, assetClass: asset, interval: normalizedInterval, limit, feed });
+  const cached = getCachedResult(key);
+  if (cached) return cached;
 
   if (asset === "crypto") {
     try {
       const candles = await fetchCoinbaseCandles(targetSymbol, normalizedInterval, limit);
-      return { candles, source: "coinbase", interval: normalizedInterval };
+      const result = { candles, source: "coinbase", interval: normalizedInterval };
+      if (candles.length) setCachedResult(key, result);
+      return result;
     } catch (err) {
       return {
         candles: [],
@@ -187,34 +244,28 @@ export async function fetchMarketCandles({
   try {
     const result = await fetchAlpacaBars(targetSymbol, normalizedInterval, limit, feed);
     if (result.candles.length) {
-      return { candles: result.candles, source: result.source, interval: normalizedInterval };
+      const payload = { candles: result.candles, source: result.source, interval: normalizedInterval };
+      setCachedResult(key, payload);
+      return payload;
     }
   } catch (err) {
     const warning = normalizedInterval === "1d"
       ? ""
       : "Intraday stock candles need Alpaca keys. Showing daily bars.";
     try {
-      const stooq = await fetchStooqDaily(targetSymbol);
-      if (stooq.length) {
-        return {
-          candles: stooq,
-          source: "stooq",
-          interval: "1d",
-          warning
-        };
-      }
-    } catch {
-      // fall through
-    }
-    try {
-      const yahoo = await fetchYahooDaily(targetSymbol, 365);
-      if (yahoo.length) {
-        return {
-          candles: yahoo,
-          source: "yahoo",
-          interval: "1d",
-          warning
-        };
+      const fallback = await firstFulfilled([
+        fetchStooqDaily(targetSymbol).then(candles => {
+          if (!candles.length) throw new Error("stooq_empty");
+          return { candles, source: "stooq", interval: "1d", warning };
+        }),
+        fetchYahooDaily(targetSymbol, 365).then(candles => {
+          if (!candles.length) throw new Error("yahoo_empty");
+          return { candles, source: "yahoo", interval: "1d", warning };
+        })
+      ]);
+      if (fallback?.candles?.length) {
+        setCachedResult(key, fallback);
+        return fallback;
       }
     } catch {
       // ignore

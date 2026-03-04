@@ -265,6 +265,7 @@ import { searchSymbols } from "./src/trading/symbolSearch.js";
 import { buildRecommendationDetail } from "./src/trading/recommendationDetail.js";
 import { buildLongTermSignal } from "./src/trading/signalEngine.js";
 import { fetchMarketCandles } from "./src/trading/marketData.js";
+import { buildDiscoveryUniverse, filterSymbolsByClass, normalizeSymbols } from "./src/trading/discovery.js";
 import {
   marketSnapshot as toolMarketSnapshot,
   strategyEvaluate as toolStrategyEvaluate,
@@ -1366,13 +1367,51 @@ function withTimeout(promise, timeoutMs, label = "timeout") {
   });
 }
 
+function parseList(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  return raw.split(/[;,\n]/).map(item => item.trim()).filter(Boolean);
+}
+
+function inferAssetClass(symbol) {
+  const value = String(symbol || "");
+  return value.includes("-") || value.endsWith("-USD") ? "crypto" : "stock";
+}
+
+function collectSignalTickers({ trendLimit = 12, docLimit = 40 } = {}) {
+  const tickers = [];
+  try {
+    const trends = listSignalsTrends({ limit: trendLimit }) || [];
+    trends.forEach(trend => {
+      const list = Array.isArray(trend?.top_tickers) ? trend.top_tickers : [];
+      list.forEach(item => tickers.push(item));
+    });
+  } catch {
+    // ignore signals errors
+  }
+  if (tickers.length < trendLimit * 2) {
+    try {
+      const docs = listSignals({ limit: docLimit }) || [];
+      docs.forEach(doc => {
+        const list = Array.isArray(doc?.tickers) ? doc.tickers : [];
+        list.forEach(item => tickers.push(item));
+      });
+    } catch {
+      // ignore signals errors
+    }
+  }
+  return normalizeSymbols(tickers);
+}
+
 async function computeTradingRecommendations({
   assetClass = "all",
   topN = 12,
   symbols,
   horizonDays,
   includeSignals = true,
-  userId = "local"
+  userId = "local",
+  discover,
+  discoveryMax
 } = {}) {
   const resolvedHorizon = horizonDays || Number(process.env.TRADING_RECOMMENDATION_WINDOW_DAYS || 180);
   const emailSettings = getTradingEmailSettings(userId);
@@ -1388,6 +1427,16 @@ async function computeTradingRecommendations({
   else watchlist = [...stockList, ...cryptoList];
 
   let warnings = [];
+  const discoveryEnabled = typeof discover === "boolean"
+    ? discover
+    : String(process.env.TRADING_RECOMMENDATIONS_DISCOVERY || "0") === "1";
+  const discoveryMaxSymbols = Number.isFinite(discoveryMax)
+    ? Math.max(10, Math.floor(discoveryMax))
+    : Number(process.env.TRADING_RECOMMENDATIONS_DISCOVERY_MAX || 60);
+  const discoverySignalsLimit = Number(process.env.TRADING_RECOMMENDATIONS_DISCOVERY_SIGNALS_LIMIT || 12);
+  const discoveryDocsLimit = Number(process.env.TRADING_RECOMMENDATIONS_DISCOVERY_DOCS_LIMIT || 40);
+  const discoveryStocks = parseList(process.env.TRADING_DISCOVERY_STOCKS || "");
+  const discoveryCryptos = parseList(process.env.TRADING_DISCOVERY_CRYPTOS || "");
   const knowledgeTimeoutMs = Number(process.env.TRADING_RECOMMENDATIONS_KNOWLEDGE_TIMEOUT_MS || 8000);
   const llmTimeoutMs = Number(process.env.TRADING_RECOMMENDATIONS_LLM_TIMEOUT_MS || 20000);
   const signalTimeoutMs = Number(process.env.TRADING_RECOMMENDATIONS_SIGNAL_TIMEOUT_MS || 20000);
@@ -1402,15 +1451,57 @@ async function computeTradingRecommendations({
       warnings.push("Watchlist was empty; using default universe. Add tickers to personalize.");
     }
   }
+  if (discoveryEnabled) {
+    const signals = collectSignalTickers({
+      trendLimit: discoverySignalsLimit,
+      docLimit: discoveryDocsLimit
+    });
+    const fallbackUniverse = getDefaultTradingUniverse();
+    const discovered = normalizeSymbols([
+      ...signals,
+      ...discoveryStocks,
+      ...discoveryCryptos,
+      ...(fallbackUniverse?.stocks || []),
+      ...(fallbackUniverse?.cryptos || [])
+    ]);
+    if (discovered.length) {
+      const expanded = buildDiscoveryUniverse({
+        watchlist,
+        discovered,
+        assetClass,
+        max: discoveryMaxSymbols
+      });
+      if (expanded.length) {
+        if (expanded.length > watchlist.length) {
+          warnings.push(`Expanded universe to ${expanded.length} symbols for discovery.`);
+        } else {
+          warnings.push("Discovery enabled; no new symbols found beyond your watchlist.");
+        }
+        watchlist = expanded;
+      }
+    }
+  }
   if (!watchlist.length) throw new Error("watchlist_empty");
+
+  const expandedStocks = filterSymbolsByClass(watchlist, "stock");
+  const expandedCryptos = filterSymbolsByClass(watchlist, "crypto");
+  const expandedStockSet = new Set(expandedStocks);
+  const expandedCryptoSet = new Set(expandedCryptos);
+  const llmUniverseMax = Number(process.env.TRADING_RECOMMENDATIONS_UNIVERSE_MAX || 60);
+  const llmUniverse = watchlist.slice(0, Math.max(1, llmUniverseMax));
+  if (watchlist.length > llmUniverse.length) {
+    warnings.push(`Universe trimmed to ${llmUniverse.length} symbols for LLM prompt size.`);
+  }
 
   let picks = [];
   let source = "daily_picks";
   if (process.env.OPENAI_API_KEY) {
     const preferenceBlock = buildTradingPreferenceBlock(training);
     let knowledgeContext = "";
+    const scopeLabel = discoveryEnabled ? "Universe" : "Watchlist";
+    const scopeList = llmUniverse;
     try {
-      const knowledgeQuery = `Trading knowledge, risk considerations, and recent trade lessons for: ${watchlist.join(", ")}`;
+      const knowledgeQuery = `Trading knowledge, risk considerations, and recent trade lessons for: ${scopeList.join(", ")}`;
       const knowledge = await withTimeout(
         queryTradingKnowledge(knowledgeQuery, { topK: 6 }),
         knowledgeTimeoutMs,
@@ -1424,7 +1515,7 @@ async function computeTradingRecommendations({
       knowledgeContext = "";
     }
     const systemPrompt = `
-You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided watchlist.
+You are Aika's trading analyst. Return ranked trade recommendations using ONLY the provided ${scopeLabel.toLowerCase()}.
 Do not invent news. Use general market reasoning (trend, momentum, volatility, macro risk).
 If uncertain, set bias to WATCH. Keep rationale concise (1-3 sentences).
 Return ONLY a JSON array like:
@@ -1437,7 +1528,7 @@ Valid bias values: BUY, SELL, WATCH. Confidence is 0-1.
     const userPrompt = `
 Asset focus: ${assetClass}
 Requested picks: ${topN}
-Watchlist: ${watchlist.join(", ")}
+${scopeLabel}: ${scopeList.join(", ")}
 ${knowledgeContext ? `Trading knowledge context:\n${knowledgeContext}` : "Trading knowledge context: (none)"}
 ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferences: (none)"}
 `.trim();
@@ -1468,14 +1559,21 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
         const rawList = Array.isArray(parsedJson) ? parsedJson : Array.isArray(parsedJson?.picks) ? parsedJson.picks : null;
         if (rawList) {
           picks = rawList
-            .map(item => ({
-              symbol: String(item?.symbol || "").trim(),
-              assetClass: String(item?.assetClass || item?.asset_class || "").trim()
-                || (stockList.includes(item?.symbol) ? "stock" : "crypto"),
-              bias: String(item?.bias || "WATCH").toUpperCase(),
-              confidence: Number(item?.confidence || 0),
-              rationale: String(item?.rationale || item?.abstract || "").trim()
-            }))
+            .map(item => {
+              const rawSymbol = String(item?.symbol || "").trim();
+              const normalizedSymbol = rawSymbol.toUpperCase();
+              const declaredClass = String(item?.assetClass || item?.asset_class || "").trim().toLowerCase();
+              const inferred = inferAssetClass(normalizedSymbol);
+              const resolvedClass = declaredClass
+                || (expandedStockSet.has(normalizedSymbol) ? "stock" : expandedCryptoSet.has(normalizedSymbol) ? "crypto" : inferred);
+              return {
+                symbol: normalizedSymbol,
+                assetClass: resolvedClass,
+                bias: String(item?.bias || "WATCH").toUpperCase(),
+                confidence: Number(item?.confidence || 0),
+                rationale: String(item?.rationale || item?.abstract || "").trim()
+              };
+            })
             .filter(item => item.symbol)
             .slice(0, topN);
           source = knowledgeContext ? "llm+rag" : "llm";
@@ -1493,8 +1591,8 @@ ${preferenceBlock ? `Trader preferences:\n${preferenceBlock}` : "Trader preferen
     const daily = await generateDailyPicks({
       emailSettings: {
         ...emailSettings,
-        stocks: stockList,
-        cryptos: cryptoList
+        stocks: expandedStocks,
+        cryptos: expandedCryptos
       }
     });
     picks = (daily || []).slice(0, topN).map(item => ({
@@ -4705,7 +4803,9 @@ const tradingRecommendationsSchema = z.object({
   topN: z.number().int().min(1).max(20).optional(),
   symbols: z.array(z.string()).optional(),
   horizonDays: z.number().int().min(30).max(365).optional(),
-  includeSignals: z.boolean().optional()
+  includeSignals: z.boolean().optional(),
+  discover: z.boolean().optional(),
+  discoveryMax: z.number().int().min(10).max(200).optional()
 });
 
 const tradingKnowledgeIngestSchema = z.object({
@@ -5255,6 +5355,8 @@ app.post("/api/trading/recommendations", rateLimit, async (req, res) => {
       symbols: parsed.symbols,
       horizonDays: parsed.horizonDays,
       includeSignals: parsed.includeSignals !== false,
+      discover: parsed.discover,
+      discoveryMax: parsed.discoveryMax,
       userId: getUserId(req)
     });
     res.json(result);
