@@ -505,7 +505,7 @@ Key functions
 - `Manual Trade Tracker`: Log manual trades with entry/exit and PnL tracking.
 - `Loss Lessons (RAG)`: Query past trade outcomes.
 - `Watchlists`: Track stocks/crypto for scenarios and recommendations.
-- `Recommendations`: Ranked picks with rationale and analysis.
+- `Recommendations`: Ranked picks with rationale and analysis. Toggle "Discover beyond watchlist" to widen the candidate universe.
 - `Aika Trader`: Chat panel for trading questions.
 
 When to use

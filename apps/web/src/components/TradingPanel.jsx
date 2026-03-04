@@ -1185,6 +1185,16 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [recommendationsError, setRecommendationsError] = useState("");
   const [recommendationsSource, setRecommendationsSource] = useState("llm");
   const [recommendationsWarnings, setRecommendationsWarnings] = useState([]);
+  const [recommendationsDiscover, setRecommendationsDiscover] = useState(() => {
+    try {
+      const raw = localStorage.getItem("aika_trading_recs_discover");
+      if (raw === "0") return false;
+      if (raw === "1") return true;
+    } catch {
+      // ignore
+    }
+    return true;
+  });
   const [recommendationDetail, setRecommendationDetail] = useState(null);
   const [recommendationDetailStatus, setRecommendationDetailStatus] = useState("");
   const [watchlistQuery, setWatchlistQuery] = useState("");
@@ -1633,7 +1643,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       const resp = await fetch(`${serverUrl}/api/trading/recommendations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetClass: "all", topN: 12, horizonDays: 180, includeSignals: true }),
+        body: JSON.stringify({
+          assetClass: "all",
+          topN: 12,
+          horizonDays: 180,
+          includeSignals: true,
+          discover: recommendationsDiscover
+        }),
         signal: controller.signal
       });
       const data = await resp.json();
@@ -1935,6 +1951,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
       // ignore
     }
   }, [activeRagModel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("aika_trading_recs_discover", recommendationsDiscover ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [recommendationsDiscover]);
 
   useEffect(() => {
     if (!serverUrl || !knowledgePrefsLoaded) return;
@@ -4102,10 +4126,22 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
                   Refresh
                 </button>
               </div>
-            </div>
+              </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                 Ranked picks with rationale (LLM + trading knowledge).
               </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={recommendationsDiscover}
+                  onChange={(event) => {
+                    const next = event.target.checked;
+                    setRecommendationsDiscover(next);
+                    loadRecommendations();
+                  }}
+                />
+                Discover beyond watchlist
+              </label>
             {recommendationsWarnings.length > 0 && (
               <div style={{ fontSize: 11, color: "#b45309", marginTop: 6 }}>
                 {recommendationsWarnings.join(" ")}
