@@ -692,6 +692,14 @@ export default function Home() {
   const [avatarModels, setAvatarModels] = useState([]);
   const [avatarModelId, setAvatarModelId] = useState("miku");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [avatarHidden, setAvatarHidden] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("aika_avatar_hidden") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [avatarImporting, setAvatarImporting] = useState(false);
   const [avatarImportError, setAvatarImportError] = useState("");
   const [avatarImportNotice, setAvatarImportNotice] = useState("");
@@ -1093,6 +1101,11 @@ export default function Home() {
       window.localStorage.setItem("aika_default_rag_model", defaultRagModel);
     }
   }, [themeId, appBackground, avatarBackground, avatarModelId, defaultRagModel]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("aika_avatar_hidden", avatarHidden ? "1" : "0");
+  }, [avatarHidden]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3670,59 +3683,85 @@ export default function Home() {
       <div
         className="app-shell"
         style={{
-          display: "grid",
-          gridTemplateColumns: "1.15fr 0.85fr",
-          height: "100vh",
+          minHeight: "100vh",
           background: "var(--app-gradient)",
           color: "var(--text-primary)"
         }}
       >
-        <div className="avatar-stage" style={{ position: "relative" }}>
-          {skillToasts.length > 0 && (
-            <div style={{
-              position: "absolute",
-              top: 12,
-              left: 12,
-              right: 12,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              zIndex: 5
-            }}>
-              {skillToasts.map(t => (
-                <div key={t.id} style={{
-                  border: "1px solid var(--panel-border-strong)",
-                  background: "#fefce8",
-                  color: "#92400e",
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  fontSize: 12,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center"
-                }}>
-                  <span>{t.text}</span>
-                  <button
-                    onClick={() => setSkillToasts(prev => prev.filter(x => x.id !== t.id))}
-                    style={{ padding: "2px 8px", borderRadius: 8 }}
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              ))}
+        {skillToasts.length > 0 && (
+          <div style={{
+            position: "fixed",
+            top: 12,
+            left: 12,
+            right: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            zIndex: 70
+          }}>
+            {skillToasts.map(t => (
+              <div key={t.id} style={{
+                border: "1px solid var(--panel-border-strong)",
+                background: "#fefce8",
+                color: "#92400e",
+                padding: "8px 10px",
+                borderRadius: 10,
+                fontSize: 12,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center"
+              }}>
+                <span>{t.text}</span>
+                <button
+                  onClick={() => setSkillToasts(prev => prev.filter(x => x.id !== t.id))}
+                  style={{ padding: "2px 8px", borderRadius: 8 }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {!avatarHidden && (
+          <div
+            className="avatar-float"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setAvatarHidden(true);
+            }}
+            onDoubleClick={() => {
+              if (micState !== "listening") toggleMic();
+            }}
+            title={micState === "listening"
+              ? "Aika is listening. Right-click to hide."
+              : "Double-click to start listening. Right-click to hide."}
+          >
+            <div className="avatar-float-shell">
+              <AikaAvatar
+                mood={behavior?.emotion || Emotion.NEUTRAL}
+                isTalking={ttsStatus === "playing" || behavior?.speaking}
+                talkIntensity={ttsStatus === "playing" ? Math.max(0.12, ttsLevel) : (behavior?.intensity ?? 0.35)}
+                isListening={micState === "listening"}
+                modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
+                fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
+                pngSet={avatarModels.find(m => m.id === avatarModelId)?.pngSet}
+                backgroundSrc={AVATAR_BACKGROUNDS.find(bg => bg.id === avatarBackground)?.src}
+              />
             </div>
-          )}
-          <AikaAvatar
-            mood={behavior?.emotion || Emotion.NEUTRAL}
-            isTalking={ttsStatus === "playing" || behavior?.speaking}
-            talkIntensity={ttsStatus === "playing" ? Math.max(0.12, ttsLevel) : (behavior?.intensity ?? 0.35)}
-            isListening={micState === "listening"}
-            modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
-            fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
-            pngSet={avatarModels.find(m => m.id === avatarModelId)?.pngSet}
-            backgroundSrc={AVATAR_BACKGROUNDS.find(bg => bg.id === avatarBackground)?.src}
-          />
-      </div>
+            <div className="avatar-float-hint">
+              {micState === "listening" ? "Listening · Right-click to hide" : "Double-click to listen · Right-click to hide"}
+            </div>
+          </div>
+        )}
+        {avatarHidden && (
+          <button
+            className="avatar-show-button"
+            type="button"
+            onClick={() => setAvatarHidden(false)}
+          >
+            Show Aika
+          </button>
+        )}
 
       <div
         className="side-panel"
@@ -6435,13 +6474,59 @@ export default function Home() {
           z-index: 1;
         }
 
-        .avatar-stage::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background: radial-gradient(500px 300px at 30% 10%, rgba(138, 180, 255, 0.12), transparent 60%),
-            radial-gradient(600px 400px at 80% 20%, rgba(240, 179, 255, 0.12), transparent 60%);
-          pointer-events: none;
+        .avatar-float {
+          position: fixed;
+          right: 22px;
+          bottom: 22px;
+          width: min(240px, 40vw);
+          z-index: 60;
+          display: grid;
+          gap: 6px;
+          justify-items: center;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .avatar-float-shell {
+          width: 100%;
+          filter: drop-shadow(0 18px 32px rgba(15, 23, 42, 0.25));
+          animation: avatarBob 5.6s ease-in-out infinite;
+        }
+
+        .avatar-float-hint {
+          font-size: 10px;
+          color: var(--text-muted);
+          background: rgba(15, 23, 42, 0.6);
+          padding: 4px 8px;
+          border-radius: 999px;
+          border: 1px solid rgba(148, 163, 184, 0.4);
+          backdrop-filter: blur(8px);
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+
+        .avatar-show-button {
+          position: fixed;
+          right: 24px;
+          bottom: 24px;
+          z-index: 60;
+          padding: 6px 10px;
+          border-radius: 999px;
+          background: rgba(15, 23, 42, 0.75);
+          color: #f8fafc;
+          border: 1px solid rgba(148, 163, 184, 0.4);
+          font-size: 11px;
+          letter-spacing: 0.03em;
+        }
+
+        @keyframes avatarBob {
+          0%,
+          100% {
+            transform: translateY(0);
+          }
+          50% {
+            transform: translateY(-8px);
+          }
         }
 
         .side-panel {
