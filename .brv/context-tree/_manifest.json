@@ -3,13 +3,13 @@
     {
       "order": 3,
       "path": "_index.md",
-      "tokens": 660,
+      "tokens": 654,
       "type": "summary"
     },
     {
       "order": 2,
       "path": "infrastructure/_index.md",
-      "tokens": 672,
+      "tokens": 768,
       "type": "summary"
     },
     {
@@ -19,21 +19,15 @@
       "type": "summary"
     },
     {
-      "order": 1,
-      "path": "infrastructure/myaika_integrations/_index.md",
-      "tokens": 180,
-      "type": "summary"
-    },
-    {
-      "importance": 60,
+      "importance": 65,
       "path": "infrastructure/myaika_architecture/rollout_verification/rollout_verification_procedures.md",
-      "tokens": 164,
+      "tokens": 288,
       "type": "context"
     },
     {
-      "importance": 60,
+      "importance": 65,
       "path": "infrastructure/myaika_architecture/wizard_chess_ui_config/wizard_chess_ui_configuration.md",
-      "tokens": 161,
+      "tokens": 378,
       "type": "context"
     },
     {
@@ -92,24 +86,18 @@
     },
     {
       "importance": 50,
-      "path": "infrastructure/myaika_architecture/phase_21_24_wizard_chess/wizard_chess_phases_21_24.md",
-      "tokens": 333,
-      "type": "context"
-    },
-    {
-      "importance": 50,
       "path": "infrastructure/myaika_baseline/myaika_startup_baseline.md",
       "tokens": 324,
       "type": "context"
     }
   ],
-  "generated_at": "2026-03-28T20:03:04.945Z",
+  "generated_at": "2026-03-28T20:25:25.345Z",
   "lane_tokens": {
-    "contexts": 3985,
+    "contexts": 3993,
     "stubs": 0,
-    "summaries": 1946
+    "summaries": 1856
   },
-  "source_fingerprint": "054d1a61c504dff2bd64864a79fd73718f4a7c5c54d533cbd15e45a54f800f74",
-  "total_tokens": 5931,
+  "source_fingerprint": "54b05a70631795251b0e9b43fbb3dba142eb46b83d172ef9628bafa38d1e8874",
+  "total_tokens": 5849,
   "version": 1
 }

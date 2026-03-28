@@ -1,34 +1,34 @@
 ---
-children_hash: 36402334e39a44f2feccfe9fa4d8a1e386c7fcf0a7f3bbe4cf5fe82e00405ab2
-compression_ratio: 0.5164319248826291
+children_hash: 3f0dce1c1ffe76b4c39e8be71a77d4999cb66d7481eb43cc77658da17f92a21f
+compression_ratio: 0.4759825327510917
 condensation_order: 3
 covers: [infrastructure/_index.md, structure/_index.md]
-covers_token_total: 1278
+covers_token_total: 1374
 summary_level: d3
-token_count: 660
+token_count: 654
 type: summary
 ---
-# Infrastructure and Structure Domain Summary
+# Structural Overview: MyAika Infrastructure and Operational Framework
 
-This structural summary integrates the Infrastructure (architecture, lifecycle, systems) and Structure (operator profile, web interface) domains, providing a consolidated view of the MyAika system.
+This summary integrates the architectural, operational, and structural components of the MyAika platform at the system (Infrastructure) and interface (Structure) levels.
 
-### 1. System Architecture & Lifecycle (Infrastructure)
-The MyAika system utilizes a Docker-first deployment strategy and an 8-step execution protocol (Goal → Capability Map → Plan → Tool Routing → Execution → Evidence → Risks → Next Step).
-*   **Architecture Rollout:** Evolved through 31 phases, currently featuring the Wizard Chess engine (Phases 17-31) and a 9-cohort verification framework (Phases 15-16).
-*   **Baseline Operations:** Orchestrated via `scripts/daily_up_verify.ps1`, managing environment integrity, health checks (180s timeout), and automated recovery.
-*   **Safety & Governance:** Enforces a deny-by-default approval policy for high-risk actions (installs, deletions, git) and isolates execution using browser profiles (low/work/high_trust).
-*   **Testing:** Validates core workflows (Approve/Deny) using Playwright-based smoke tests (`npm run ui:smoke:approval`) with a 45,000ms timeout.
+## Infrastructure and System Architecture
+The MyAika platform utilizes a split-architecture model, isolating the server-side "mind" (API, RAG, orchestration) from the web-based "body" (React UI). 
 
-### 2. Aika Operator & Web Interface (Structure)
-The Aika assistant functions as a digital twin, balancing proactive execution with strict security boundaries.
-*   **Operational Profile:** Operates under a "proactive ownership" model; secrets must be sourced via vault references rather than raw inclusion. Detailed behavioral constraints are documented in [Aika Operator Profile](aika_operator_profile.md).
-*   **Web Interface Configuration:** Centrally managed via `apps/web/pages/index.jsx`, coordinating state through React hooks and server URL resolution (`NEXT_PUBLIC_SERVER_URL`).
-*   **Interaction & TTS Constraints:**
-    *   **Text-to-Speech:** Enforces 180-character segment limits via `splitSpeechText`.
-    *   **Audio Tuning:** Dynamically adjusts Piper TTS parameters (Happy mode: +0.08 rate, +0.6 pitch) using the Web Audio API.
-    *   **Persistence:** Preference updates are governed by a 500ms debounce interval.
-    *   **Sync:** Integrates with `/api/approvals` and `/api/assistant/profile` for real-time synchronization.
+*   **Deployment and Control:** Orchestrated via `docker-compose.aika-stack.yml` with profiles (e.g., `daily`, `test`). The MCP-lite control plane manages a 38-module registry, with execution governed by the 8-step protocol (Goal → Capability Map → Plan → Tool Routing → Execution → Evidence → Risks → Next Step).
+*   **Wizard Chess Module (Phases 17-31):** Personality-driven engine using server-side UCI orchestration (`apps/server/src/chess/stockfishEngine.js`), featuring visual integration via Three.js/GSAP.
+*   **Safety and Governance:** Deny-by-default execution policy with mandatory approval for high-risk actions. Audit logs are hash-chained, and environments are isolated via specific browser trust profiles.
+*   **Verification:** Rollout and system health are validated through `scripts/verify_rollout_completion.ps1`. UI interactions are deterministicly tested using Playwright-based smoke tests (`ui_chat_approval_smoke_test.md`).
 
-### Key Drill-Down References
-*   **Infrastructure:** [myaika_architecture_baseline.md](myaika_architecture_baseline.md), [aika_operating_model.md](aika_operating_model.md), [daily_stack_bring_up_script.md](daily_stack_bring_up_script.md), [ui_chat_approval_smoke_test.md](ui_chat_approval_smoke_test.md).
-*   **Structure:** [Aika Operator Profile](aika_operator_profile.md), [Web Interface Configuration](web_interface_configuration.md).
+For deep dives into architectural baselines, rollout phases, and system startup, refer to `myaika_architecture/_index.md` and `myaika_baseline/_index.md`.
+
+## Aika Operator and Frontend Interface
+The structural layer defines the Aika digital twin's operational persona and the technical implementation of the web interface.
+
+*   **Operator Profile:** Functions as a strategic partner under a "proactive ownership" model. Operates with strict security boundaries, requiring vault references instead of raw secrets and explicit user confirmation for high-risk operations. Detailed behavioral structures are documented in `aika_operator_profile.md`.
+*   **Web Interface Configuration:** Centered in `apps/web/pages/index.jsx`, the interface manages state synchronization and real-time polling for approval updates.
+    *   **Processing Constraints:** Implements `splitSpeechText` (180-char limit) and a 500ms debounce for preference persistence.
+    *   **Audio/TTS:** Employs Web Audio API modifiers for emotion-based tuning (e.g., pitch/rate adjustments).
+    *   **API Integration:** Synchronizes via `/api/approvals` and `/api/assistant/profile`.
+
+For specific implementation details, refer to `web_interface_configuration.md`.
