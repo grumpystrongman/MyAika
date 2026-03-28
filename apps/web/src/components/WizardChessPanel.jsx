@@ -71,6 +71,33 @@ function resolveServerUrl() {
   return "http://127.0.0.1:8790";
 }
 
+function buildEngineServerCandidates(primary = "") {
+  const values = [];
+  const add = (value) => {
+    const normalized = String(value || "").trim().replace(/\/$/, "");
+    if (!normalized) return;
+    if (!values.includes(normalized)) values.push(normalized);
+  };
+  add(primary);
+  if (typeof window !== "undefined" && window.location?.origin) {
+    add(window.location.origin);
+  }
+  const localHints = [primary, typeof window !== "undefined" ? window.location?.origin : ""]
+    .join(" ")
+    .toLowerCase();
+  if (localHints.includes("localhost") || localHints.includes("127.0.0.1")) {
+    [
+      "http://127.0.0.1:8791",
+      "http://localhost:8791",
+      "http://127.0.0.1:8790",
+      "http://localhost:8790",
+      "http://127.0.0.1:8787",
+      "http://localhost:8787"
+    ].forEach(add);
+  }
+  return values;
+}
+
 function loadUiPrefs() {
   if (typeof window === "undefined") return DEFAULT_UI_PREFS;
   try {
@@ -300,7 +327,7 @@ function buildBattleUnit(themeId, universePackId, color, piece) {
 }
 
 export default function WizardChessPanel() {
-  const serverUrl = useMemo(() => resolveServerUrl(), []);
+  const [engineApiBase, setEngineApiBase] = useState(() => resolveServerUrl());
   const boardRef = useRef(null);
   const boardFrameRef = useRef(null);
   const boardApiRef = useRef(null);
@@ -525,17 +552,47 @@ export default function WizardChessPanel() {
   }, [pushReaction]);
 
   const postEngineRequest = useCallback(async (payload) => {
-    const response = await fetch(`${serverUrl}/api/chess/engine-move`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data?.error || "wizard_chess_engine_failed");
+    const candidates = buildEngineServerCandidates(engineApiBase);
+    let lastError = null;
+    for (const base of candidates) {
+      const endpoint = `${base}/api/chess/engine-move`;
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const raw = await response.text();
+        let data = null;
+        if (raw) {
+          try {
+            data = JSON.parse(raw);
+          } catch {
+            const htmlLike = /^\s*</.test(raw);
+            throw new Error(
+              htmlLike
+                ? `Engine endpoint at ${base} returned HTML (status ${response.status}).`
+                : `Engine endpoint at ${base} returned invalid JSON (status ${response.status}).`
+            );
+          }
+        }
+        if (!response.ok) {
+          const errMsg = data?.error || `Engine request failed at ${base} (status ${response.status}).`;
+          throw new Error(errMsg);
+        }
+        if (!data || typeof data !== "object") {
+          throw new Error(`Engine endpoint at ${base} returned an empty payload.`);
+        }
+        if (base !== engineApiBase) {
+          setEngineApiBase(base);
+        }
+        return data;
+      } catch (err) {
+        lastError = err;
+      }
     }
-    return data;
-  }, [serverUrl]);
+    throw lastError || new Error("Engine service unavailable. Start the AIKA server and retry.");
+  }, [engineApiBase]);
 
   const concludeGame = useCallback((resultText = "") => {
     const chess = chessRef.current;
@@ -1526,13 +1583,18 @@ export default function WizardChessPanel() {
           flex-direction: column;
           gap: 10px;
           min-height: 0;
-          overflow: hidden;
-          align-items: center;
+          overflow-y: auto;
+          overflow-x: hidden;
+          scrollbar-gutter: stable;
+          overscroll-behavior: contain;
+          align-items: stretch;
+          padding-right: 4px;
         }
         .wizard-board-shell {
           position: relative;
           flex: 0 0 auto;
-          width: min(100%, min(78vh, 900px));
+          width: min(100%, min(70vh, 860px));
+          margin: 0 auto;
           aspect-ratio: 1 / 1;
           min-height: 0;
           border-radius: 18px;
@@ -1808,11 +1870,14 @@ export default function WizardChessPanel() {
           100% { opacity: 0; }
         }
         .wizard-controls {
-          width: min(100%, min(78vh, 900px));
+          position: sticky;
+          bottom: 0;
+          z-index: 7;
+          width: min(100%, min(70vh, 860px));
           margin: 0 auto;
           border: 1px solid rgba(130, 148, 220, 0.26);
           border-radius: 12px;
-          background: rgba(11, 16, 28, 0.8);
+          background: linear-gradient(180deg, rgba(11, 16, 28, 0.9), rgba(11, 16, 28, 0.96));
           padding: 10px;
           display: grid;
           grid-template-columns: repeat(4, minmax(120px, 1fr));

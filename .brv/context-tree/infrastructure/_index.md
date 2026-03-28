@@ -1,34 +1,37 @@
 ---
-children_hash: d197f3dbe9ee7274c4fbaaa82d2dfb5e08779c06d0766d92fc8e1951540766f8
-compression_ratio: 0.21859649122807018
+children_hash: 20fd0962bfadcb754d72f7bcf6a905be6f1e958380bbee04935f3c0a20f54af2
+compression_ratio: 0.24222529371112647
 condensation_order: 2
 covers: [context.md, myaika_architecture/_index.md, myaika_baseline/_index.md, myaika_integrations/_index.md, myaika_operating_model/_index.md, myaika_system/_index.md, testing/_index.md]
-covers_token_total: 2850
+covers_token_total: 2894
 summary_level: d2
-token_count: 623
+token_count: 701
 type: summary
 ---
-# Infrastructure Domain Summary
+# MyAika Infrastructure and Operational Framework Summary
 
-The Infrastructure domain governs the MyAika architecture, operational lifecycle, and governance frameworks.
+The MyAika platform utilizes a containerized, split-stack architecture (Server/Mind and Web-UI/Body) managed via Docker Compose. The system is governed by an intent-based operating model and rigorous safety policies.
 
-## MyAika Architecture and Rollout
-- **System Baseline**: A containerized split architecture (API: port 8787, Web UI: port 3000) managed by `docker-compose.aika-stack.yml`. Core components include `aika-shell`, `mcp-worker`, and `agent-browser`.
-- **Wizard Chess Rollout (Phases 17-31)**: An evolution from basic UCI engine integration to a cinematic, voice-first combat arena. Key implementations include a Three.js/GSAP rendering engine, Web Speech API integration, and an automated SVG pipeline (`generate_wizard_piece_svgs.mjs`).
-- **Rollout Verification**: Centralized gatekeeping via `scripts/verify_rollout_completion.ps1`, enforcing Tier-2 payload structures and strict compliance gates for all deployments.
-- **Drill-down**: See `myaika_architecture/_index.md`.
+## System Architecture and Rollout
+*   **Core Infrastructure:** Standardized on `docker-compose.aika-stack.yml` (e.g., `aika-shell`, `mcp-worker`, `web-ui`). Baseline readiness is maintained via `scripts/daily_up_verify.ps1`, which orchestrates stack lifecycle and integrity verification.
+*   **Operating Model:** Execution follows an 8-step protocol (Goal → Capability Map → Plan → Tool Routing → Execution → Evidence → Risks → Next Step).
+*   **Safety & Governance:** Employs a deny-by-default policy with manual approval gating for high-risk operations (e.g., system modification, secret handling). Audit logs use hash-chaining for integrity.
+*   **Rollout Strategy:** Infrastructure is deployed in operational lanes with isolated trust profiles (low_trust, work_trust, high_trust). Deployment verification is centralized in `scripts/verify_rollout_completion.ps1`.
 
-## Lifecycle and System Configuration
-- **Environment Baseline**: Requires Docker 28.1.1 and Docker Compose 2.35.1. The environment is managed by `scripts/daily_up_verify.ps1`, which orchestrates service bring-up with a 180s timeout and integrity verification.
-- **Operating Model**: Follows an 8-step execution protocol (Goal → Tool Routing → Evidence → Next Step) with an MCP-lite control plane. Safety is enforced via deny-by-default policies and manual approval gating for high-risk actions.
-- **System Tuning**: TTS engine (Piper) adapts parameters like rate and pitch based on detected system moods (default intensity 0.35).
-- **Drill-down**: See `myaika_baseline/_index.md`, `myaika_operating_model/_index.md`, and `myaika_system/_index.md`.
+## Wizard Chess Module (Phases 17-31)
+The Wizard Chess module serves as a primary integration example, demonstrating voice-first, cinematic interactions.
+*   **Engine & Rendering:** UCI communication via `stockfishEngine.js` (ports 8790, 8791, 8787). UI rendering uses React (`WizardChessPanel.jsx`) and Three.js (`WizardArenaScene`) with GSAP animations.
+*   **Operational Constraints:**
+    *   **TTS:** Parameters are strictly gated (Rate: 0.85–1.2, Pitch: 0.85–1.35) with a 1000ms inter-utterance pause.
+    *   **Cinematics:** Battle FX intensity (0.4–1.35) and animation timelines (e.g., strike at 0.22s) are precisely defined.
+*   **Reference:** See `myaika_architecture/_index.md` and related phase documentation.
 
-## Integrations and Testing
-- **Integrations**: Extensible via MCP-lite patterns (`apps/server/integrations`). Supports Google OAuth, Fireflies, Telegram, and Amazon Research. Persistence for Telegram threads is managed via SQLite.
-- **Testing Framework**: Deterministic validation of chat-based approval workflows using Playwright. Smoke tests simulate user-driven interactions against mocked endpoints (`/chat`, `/api/approvals`).
-- **Drill-down**: See `myaika_integrations/_index.md` and `testing/_index.md`.
+## Integrations and System Configuration
+*   **Integrations:** Uses MCP-lite patterns to connect services (Google Drive, Telegram, Fireflies). Telegram memory is managed via thread-based SQLite storage.
+*   **System Tuning:** Interaction state is controlled via `apps/server/index.js` and `memory.js`. TTS output is emotion-tuned, with default intensity 0.35 and mood-based parameter shifts applied to voice synthesis.
+*   **Reference:** See `myaika_integrations/_index.md` and `myaika_system/_index.md`.
 
-## Governance and Security
-- **Trust Boundaries**: Execution environments are isolated using separated browser profiles (low_trust, work_trust, high_trust).
-- **Approval Logic**: High-risk actions (email, system delete, git operations) require manual approval contracts, ensuring audit trails via hash-chained logs.
+## Lifecycle and Testing
+*   **Startup Baseline:** Requires Docker 28.1.1 and Compose 2.35.1. The system uses a Playwright-based action runner for UI automation.
+*   **Testing:** UI Chat Approval Smoke Testing ensures deterministic approval/deny flows. Tests are executed via `npm run ui:smoke:approval` using Playwright and mocked backend endpoints.
+*   **Reference:** See `myaika_baseline/_index.md` and `testing/_index.md`.

@@ -2,44 +2,46 @@
 title: Wizard Chess UI Configuration
 tags: []
 keywords: []
-importance: 65
+importance: 70
 recency: 1
 maturity: validated
-updateCount: 3
+updateCount: 4
 createdAt: '2026-03-27T21:21:35.212Z'
-updatedAt: '2026-03-28T20:24:05.235Z'
+updatedAt: '2026-03-28T20:46:54.041Z'
 ---
 ## Raw Concept
 **Task:**
-Resolve Wizard Chess white-screen and infinite load issues
+Wizard Chess runtime reliability and UI configuration
 
 **Changes:**
-- Isolated Next.js dist directories per dev instance using NEXT_DIST_DIR
-- Updated next.config.mjs to use environment-based distDir
-- Updated scripts/start_wizard_chess_dev.ps1 to use .next-wizard-<port>
-- Updated scripts/verify_rollout_completion.ps1 UI cohorts to use .next-rollout-<port>
+- Implemented robust engine fallback across AIKA server endpoints
+- Added non-JSON response handling in postEngineRequest
+- Configured UI persistence with localStorage v2
+- Optimized speech synthesis parameters and debounce logic
 
-**Files:**
-- apps/web/next.config.mjs
-- scripts/start_wizard_chess_dev.ps1
-- scripts/verify_rollout_completion.ps1
+**Flow:**
+buildEngineServerCandidates -> resolveServerUrl -> postEngineRequest -> validate Response -> process chess move
 
 **Timestamp:** 2026-03-28
 
 ## Narrative
 ### Structure
-Next.js build artifacts are now isolated by port to prevent cross-instance cache corruption on Windows/OneDrive environments.
+Wizard Chess UI integrates with local AIKA servers via engine fallback logic. Engine fallback iterates through ports 8790, 8791, 8787. Response parsing handles invalid JSON/HTML to prevent crashes.
+
+### Dependencies
+Chessground for board rendering, GSAP for battle FX, ResizeObserver for responsiveness.
 
 ### Highlights
-Webpack filesystem cache is disabled in dev mode to avoid intermittent restore warnings.
+Speech synthesis uses rate (0.85-1.2), pitch (0.85-1.35), volume (0.95). Battle FX triggered by piece captures with intensity 0.4-1.35.
 
 ### Rules
-Rule 1: Always use NEXT_DIST_DIR environment variable for isolated dev/test instances.
-Rule 2: Use .next-wizard-<port> for development and .next-rollout-<port> for verification cohorts.
+Rule 1: Engine requests must validate response (parse raw text) before JSON.parse()
+Rule 2: Chess moves must match regex /^[a-h][1-8][a-h][1-8][qrbn]?$/
+Rule 3: Speech debouncing set to 1200ms
 
 ### Examples
-Example distDir configuration in next.config.mjs: `const configuredDistDir = (process.env.NEXT_DIST_DIR || "").trim();`
+Engine fallback candidates: http://127.0.0.1:8791, http://localhost:8791, http://127.0.0.1:8790, http://localhost:8790, http://127.0.0.1:8787, http://localhost:8787
 
 ## Facts
-- **nextjs_dist_isolation**: Next.js dist directories are now isolated by port. [project]
-- **webpack_cache**: Webpack filesystem cache is disabled in dev mode. [preference]
+- **engine_ports**: Engine fallback ports include 8790, 8791, 8787 [project]
+- **speech_debounce**: Speech synthesis debounce is 1200ms [project]

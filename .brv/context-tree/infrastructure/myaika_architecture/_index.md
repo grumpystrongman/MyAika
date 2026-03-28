@@ -1,46 +1,38 @@
 ---
-children_hash: a15201c0b644e28f9a02955dbe65d2babe36b42a57fcf50ace80e09f6d39b373
-compression_ratio: 0.14823190789473684
+children_hash: 4e5b0d14e312f778e8ffab56d544f7520f6d03bcace3d5e3584a54a33c0cee83
+compression_ratio: 0.15482695810564662
 condensation_order: 1
 covers: [aika_architecture_rollout_phases_6_10.md, myaika_architecture_baseline.md, myaika_system_architecture.md, phase_17_wizard_chess/_index.md, phase_18_wizard_chess/_index.md, phase_19_20_wizard_chess/_index.md, phase_21_24_wizard_chess/_index.md, phase_25_28_wizard_chess/_index.md, phase_29_31_wizard_chess/_index.md, rollout_verification/_index.md, wizard_chess_ui_config/_index.md, wizard_chess_visual_overhaul/_index.md]
-covers_token_total: 4864
+covers_token_total: 4941
 summary_level: d1
-token_count: 721
+token_count: 765
 type: summary
 ---
 # MyAika Architecture and Wizard Chess Rollout Summary
 
-This summary outlines the MyAika architectural baseline and the phased rollout of the Wizard Chess module.
+The MyAika system serves as the foundational architecture, utilizing a split-stack design (Server/Mind and Web-UI/Body) orchestrated by Docker. The rollout of features, specifically the Wizard Chess module (Phases 17-31), demonstrates the system's integration of high-fidelity visual rendering, automated verification, and robust safety guardrails.
 
-## MyAika Architecture Baseline
-The system utilizes a split architecture where the "mind" (Server/API) and "body" (Web UI/Renderer) interact via Docker-orchestrated containers. 
-- **Core Components**: `aika-shell` (API, port 8787), `web-ui` (port 3000), `mcp-worker`, and `agent-browser`.
-- **Infrastructure**: Managed via `docker-compose.aika-stack.yml` with profiles (daily, test, experimental).
-- **Safety**: Deny-by-default policy with approval-gated high-risk actions (email, system delete) and hash-chained audit logs.
-- **Verification**: Automated stack bring-up and health checks via `scripts/daily_up_verify.ps1`.
-- **Key References**: `myaika_architecture_baseline.md`, `myaika_system_architecture.md`, `aika_architecture_rollout_phases_6_10.md`.
+## System Architecture and Rollout Baseline
+*   **Infrastructure:** The core stack (aika-shell, mcp-worker, web-ui) is deployed via `docker-compose.aika-stack.yml`. Build contexts have been optimized (e.g., reducing Docker context from 3.88GB to 96KB).
+*   **Safety & Governance:** The system employs a deny-by-default safety policy with approval-gated high-risk actions (email, system modification). Audit logs are hash-chained for verifiability.
+*   **Rollout Phases 6-10:** Established automated stack initialization (`daily_up_verify.ps1`) and service monitoring, ensuring readiness for complex module rollouts.
+*   **Verification Framework:** Centralized via `scripts/verify_rollout_completion.ps1`. Cohorts are validated against strict contracts; failures result in non-zero exit codes to block deployment. Phase 16 expanded these to include skill-first workflow dispatch and Tier-2 approval payload enforcement.
 
-## Wizard Chess Rollout (Phases 17-31)
-The Wizard Chess module evolved from a basic UCI-compliant engine integration into a cinematic, voice-first combat arena.
+## Wizard Chess Module (Phases 17-31)
+The Wizard Chess rollout transitioned from basic UCI integration to a cinematic, voice-first interaction model.
 
-### Architectural Framework
-- **Engine/State**: UCI-based Stockfish integration (port 8790) with React-based UI (`WizardChessPanel.jsx`).
-- **Cinematic Engine**: Three.js/GSAP-based rendering with battle sequences for combat (e.g., thrust, slash, cast).
-- **Voice Integration**: Web Speech API integration with constrained parameters (Rate: 0.85–1.2, Pitch: 0.85–1.35).
-- **Content Pipeline**: Universe packs (e.g., "mythic_realms") and faction-specific asset generation via `generate_wizard_piece_svgs.mjs`.
+### Architectural Components
+*   **Engine & Logic:** UCI communication is handled by `stockfishEngine.js` with a robust fallback strategy (ports 8790, 8791, 8787).
+*   **UI & Rendering:** Utilizes React (`WizardChessPanel.jsx`), Three.js (`WizardArenaScene`), and GSAP for animations (battle sequences/duels).
+*   **Content Pipeline:** A manifest-driven system supports dynamic themes, army profiles, and encounter packs (e.g., "mythic_realms"). Assets are generated via specialized scripts (`generate_wizard_piece_svgs.mjs`).
 
-### Key Technical Decisions
-- **Build Isolation**: Resolved UI cache corruption by dynamically assigning `NEXT_DIST_DIR` per instance/port (documented in `wizard_chess_ui_config`).
-- **Verification**: Standardized smoke testing via Playwright and `scripts/ui_wizard_chess_smoke.js`.
-- **Process Flow**: `engine-move` → `battle FX` → `UI Update` → `State Logging`.
+### Technical Specifications & Constraints
+*   **Voice Synthesis:** Strictly gated parameters (Rate: 0.85–1.2, Pitch: 0.85–1.35) with specific voice support (e.g., Aria, Zira). A 1000ms gate between utterances is enforced.
+*   **Cinematics:** Battle FX intensity is constrained (0.4–1.35). Animation timelines are precise (attack strike at 0.22s, recoil at 0.26s).
+*   **Reliability:** Engine responses must be validated as raw text before JSON parsing to prevent runtime crashes.
 
 ### Drill-Down References
-- **Phases 17-20**: Initial engine/UI integration and Encounter Registry (`phase_17_wizard_chess`, `phase_18_wizard_chess`, `phase_19_20_wizard_chess`).
-- **Phases 21-28**: Cinematic polish, responsiveness, and engine-UI clock parity updates (`phase_21_24_wizard_chess`, `phase_25_28_wizard_chess`).
-- **Phases 29-31**: Final battle scene integration and SVG pipeline automation (`phase_29_31_wizard_chess`).
-
-## Rollout Verification Framework
-The `scripts/verify_rollout_completion.ps1` script acts as the centralized gatekeeper for all cohorts.
-- **Approval Contracts**: Enforces Tier-2 payload structures (Action/Why/Tool/Boundary/Risk/Rollback).
-- **Compliance**: Non-zero exit codes block deployment; all verification requires `-ExecutionPolicy Bypass`.
-- **Referenced Procedures**: `rollout_verification_procedures.md`, `phase_15_rollout_verification.md`, `phase_16_rollout_verification.md`.
+*   **Architecture & Rollout:** `aika_architecture_rollout_phases_6_10.md`, `myaika_architecture_baseline.md`, `myaika_system_architecture.md`.
+*   **Verification Procedures:** `rollout_verification/_index.md`, `rollout_verification_procedures.md`.
+*   **Chess Visuals & UI:** `wizard_chess_visual_overhaul/_index.md`, `wizard_chess_ui_config/_index.md`.
+*   **Phase-Specific Logic:** `phase_17_wizard_chess`, `phase_18_wizard_chess`, `phase_19_20_wizard_chess`, `phase_21_24_wizard_chess`, `phase_25_28_wizard_chess`, `phase_29_31_wizard_chess`.
