@@ -1178,6 +1178,7 @@ export default function WizardChessPanel() {
   const battleDefender = battleFx ? buildBattleUnit(armyTheme, universePackId, battleFx.defender.color, battleFx.defender.piece) : null;
   const duelAttacker = duelCutscene ? buildBattleUnit(armyTheme, universePackId, duelCutscene.attacker.color, duelCutscene.attacker.piece) : null;
   const duelDefender = duelCutscene ? buildBattleUnit(armyTheme, universePackId, duelCutscene.defender.color, duelCutscene.defender.piece) : null;
+  const activeBattleCue = duelCutscene || battleFx || null;
 
   return (
     <div className="wizard-page" style={{ ...pageStyleVars, ...pieceSpriteVars }}>
@@ -1223,6 +1224,9 @@ export default function WizardChessPanel() {
               pulse={pulse}
               palette={activeBoardTheme.scenePalette}
               cinematicIntensity={cinematicIntensity}
+              battleCue={activeBattleCue}
+              accent={activeBattleProfile.accent}
+              impact={activeBattleProfile.impact}
             />
             <div className="wizard-board-overlay" />
             <div className="wizard-board" ref={boardRef} />
@@ -1556,16 +1560,16 @@ export default function WizardChessPanel() {
         .wizard-board :global(square.light) { background: var(--wizard-square-light) !important; }
         .wizard-board :global(square.dark) { background: var(--wizard-square-dark) !important; }
         .wizard-board :global(piece.white) {
-          filter: none;
+          filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35)) drop-shadow(0 8px 10px rgba(0, 0, 0, 0.45)) saturate(1.06) contrast(1.08) brightness(1.04);
           transition: filter .25s ease;
-          background-size: cover !important;
+          background-size: 95% 95% !important;
           background-position: center center !important;
           background-repeat: no-repeat !important;
         }
         .wizard-board :global(piece.black) {
-          filter: none;
+          filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.46)) drop-shadow(0 9px 12px rgba(0, 0, 0, 0.6)) saturate(0.88) contrast(1.2) brightness(0.86);
           transition: filter .25s ease;
-          background-size: cover !important;
+          background-size: 95% 95% !important;
           background-position: center center !important;
           background-repeat: no-repeat !important;
         }

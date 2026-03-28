@@ -32,52 +32,55 @@ function adjustHex(hex, amount = 0) {
 function pieceMarkup(piece) {
   if (piece === "p") {
     return `
-      <circle cx="64" cy="38" r="13" />
-      <path d="M48 64 Q64 51 80 64 L76 100 H52 Z" />
-      <rect x="44" y="100" width="40" height="8" rx="3" />
+      <circle cx="64" cy="33" r="11" />
+      <path d="M51 51 Q64 45 77 51 L82 78 Q64 84 46 78 Z" />
+      <path d="M52 77 L76 77 L79 97 Q64 104 49 97 Z" />
+      <path d="M49 63 H79" stroke-width="2.2" stroke-linecap="round" fill="none" />
     `;
   }
   if (piece === "n") {
     return `
-      <path d="M44 102 L44 75 Q45 56 64 46 L80 37 L90 50 L80 62 L86 73 L88 102 Z" />
-      <circle cx="72" cy="54" r="3.4" />
-      <rect x="41" y="102" width="48" height="8" rx="3" />
+      <path d="M46 100 L46 74 Q47 57 61 48 L80 34 L90 47 L82 60 L88 70 L89 98 Q68 104 46 100 Z" />
+      <path d="M63 50 L78 42 L80 51 L67 58 Z" />
+      <circle cx="72" cy="53" r="2.8" />
+      <path d="M52 82 Q64 74 78 82" stroke-width="2.2" stroke-linecap="round" fill="none" />
     `;
   }
   if (piece === "b") {
     return `
-      <ellipse cx="64" cy="37" rx="10" ry="12" />
-      <path d="M64 49 L72 64 L64 78 L56 64 Z" />
-      <ellipse cx="64" cy="82" rx="18" ry="20" />
-      <rect x="46" y="100" width="36" height="8" rx="3" />
+      <path d="M64 22 L73 38 L64 56 L55 38 Z" />
+      <ellipse cx="64" cy="38" rx="10" ry="12" />
+      <path d="M64 48 Q76 58 74 74 Q64 82 54 74 Q52 58 64 48 Z" />
+      <path d="M58 66 L70 66" stroke-width="2.2" stroke-linecap="round" fill="none" />
+      <path d="M64 56 L64 93" stroke-width="2.2" stroke-linecap="round" fill="none" />
     `;
   }
   if (piece === "r") {
     return `
-      <rect x="44" y="28" width="40" height="12" rx="2" />
-      <rect x="48" y="22" width="8" height="8" rx="1" />
-      <rect x="60" y="20" width="8" height="10" rx="1" />
-      <rect x="72" y="22" width="8" height="8" rx="1" />
-      <rect x="50" y="42" width="28" height="56" rx="4" />
-      <rect x="42" y="100" width="44" height="8" rx="3" />
+      <rect x="46" y="24" width="36" height="12" rx="2" />
+      <rect x="48" y="18" width="7" height="8" rx="1" />
+      <rect x="60" y="16" width="8" height="10" rx="1" />
+      <rect x="73" y="18" width="7" height="8" rx="1" />
+      <path d="M50 38 H78 L74 90 H54 Z" />
+      <path d="M57 48 V85 M64 46 V88 M71 48 V85" stroke-width="2.1" stroke-linecap="round" fill="none" />
     `;
   }
   if (piece === "q") {
     return `
-      <circle cx="44" cy="30" r="5" />
-      <circle cx="64" cy="24" r="5" />
-      <circle cx="84" cy="30" r="5" />
-      <path d="M42 40 L52 68 L76 68 L86 40 Z" />
-      <ellipse cx="64" cy="80" rx="20" ry="19" />
-      <rect x="42" y="100" width="44" height="8" rx="3" />
+      <circle cx="44" cy="30" r="4.2" />
+      <circle cx="64" cy="22" r="4.8" />
+      <circle cx="84" cy="30" r="4.2" />
+      <path d="M42 39 L50 66 L64 56 L78 66 L86 39 Z" />
+      <path d="M50 67 H78 L75 92 Q64 98 53 92 Z" />
+      <path d="M56 74 H72 M58 82 H70" stroke-width="2.1" stroke-linecap="round" fill="none" />
     `;
   }
   return `
-    <rect x="60" y="20" width="8" height="24" rx="2" />
-    <rect x="52" y="28" width="24" height="8" rx="2" />
-    <path d="M48 48 H80 L74 80 H54 Z" />
-    <ellipse cx="64" cy="84" rx="18" ry="16" />
-    <rect x="44" y="100" width="40" height="8" rx="3" />
+    <rect x="60" y="19" width="8" height="24" rx="2" />
+    <rect x="52" y="27" width="24" height="8" rx="2" />
+    <path d="M49 45 H79 L74 66 H54 Z" />
+    <path d="M53 66 H75 L73 92 Q64 98 55 92 Z" />
+    <path d="M58 74 H70 M60 82 H68" stroke-width="2.1" stroke-linecap="round" fill="none" />
   `;
 }
 
@@ -91,9 +94,17 @@ function renderSvg({ skinId, piece, color }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs>
+    <linearGradient id="pedestal" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="${adjustHex(accent, 24)}" />
+      <stop offset="100%" stop-color="${adjustHex(accent, -18)}" />
+    </linearGradient>
     <linearGradient id="mainFill" x1="0" x2="0" y1="0" y2="1">
       <stop offset="0%" stop-color="${glow}" />
       <stop offset="100%" stop-color="${fill}" />
+    </linearGradient>
+    <linearGradient id="armorEdge" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="${adjustHex(glow, 24)}" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="${adjustHex(fill, -18)}" stop-opacity="0.05" />
     </linearGradient>
     <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur stdDeviation="1.8" result="blur" />
@@ -103,12 +114,15 @@ function renderSvg({ skinId, piece, color }) {
       </feMerge>
     </filter>
   </defs>
-  <circle cx="64" cy="74" r="48" fill="rgba(0,0,0,0.06)" />
+  <ellipse cx="64" cy="104" rx="34" ry="11" fill="rgba(0,0,0,0.28)" />
+  <path d="M32 101 H96 L90 112 H38 Z" fill="url(#pedestal)" stroke="${outline}" stroke-width="2.4" />
+  <path d="M36 96 H92 L88 102 H40 Z" fill="${adjustHex(accent, 18)}" stroke="${outline}" stroke-width="1.8" />
   <g fill="url(#mainFill)" stroke="${outline}" stroke-width="3">
     ${pieceMarkup(piece)}
   </g>
-  <rect x="40" y="108" width="48" height="6" rx="3" fill="${accent}" />
-  <text x="64" y="121" text-anchor="middle" font-size="11" font-family="Verdana,Segoe UI,sans-serif" fill="${outline}" opacity="0.86">${skin.icon}</text>
+  <path d="M44 32 Q64 14 84 32" stroke="url(#armorEdge)" stroke-width="2.3" fill="none" />
+  <path d="M50 56 Q64 46 78 56" stroke="url(#armorEdge)" stroke-width="2.1" fill="none" />
+  <text x="64" y="121" text-anchor="middle" font-size="11" font-family="Verdana,Segoe UI,sans-serif" fill="${outline}" opacity="0.92">${skin.icon}</text>
   <circle cx="64" cy="15" r="5" fill="${glow}" filter="url(#glow)" />
 </svg>`;
 }
@@ -130,4 +144,3 @@ function writePieceSvgs() {
 
 writePieceSvgs();
 console.log(`Generated wizard piece SVGs in ${OUT_ROOT}`);
-

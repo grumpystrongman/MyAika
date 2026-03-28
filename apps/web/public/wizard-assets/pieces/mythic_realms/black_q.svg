@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs>
+    <linearGradient id="pedestal" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#79553a" />
+      <stop offset="100%" stop-color="#4f2b10" />
+    </linearGradient>
     <linearGradient id="mainFill" x1="0" x2="0" y1="0" y2="1">
       <stop offset="0%" stop-color="#f2cc94" />
       <stop offset="100%" stop-color="#bc9762" />
+    </linearGradient>
+    <linearGradient id="armorEdge" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#ffe4ac" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#aa8550" stop-opacity="0.05" />
     </linearGradient>
     <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur stdDeviation="1.8" result="blur" />
@@ -13,18 +21,21 @@
       </feMerge>
     </filter>
   </defs>
-  <circle cx="64" cy="74" r="48" fill="rgba(0,0,0,0.06)" />
+  <ellipse cx="64" cy="104" rx="34" ry="11" fill="rgba(0,0,0,0.28)" />
+  <path d="M32 101 H96 L90 112 H38 Z" fill="url(#pedestal)" stroke="#e7f0ff" stroke-width="2.4" />
+  <path d="M36 96 H92 L88 102 H40 Z" fill="#734f34" stroke="#e7f0ff" stroke-width="1.8" />
   <g fill="url(#mainFill)" stroke="#e7f0ff" stroke-width="3">
     
-      <circle cx="44" cy="30" r="5" />
-      <circle cx="64" cy="24" r="5" />
-      <circle cx="84" cy="30" r="5" />
-      <path d="M42 40 L52 68 L76 68 L86 40 Z" />
-      <ellipse cx="64" cy="80" rx="20" ry="19" />
-      <rect x="42" y="100" width="44" height="8" rx="3" />
+      <circle cx="44" cy="30" r="4.2" />
+      <circle cx="64" cy="22" r="4.8" />
+      <circle cx="84" cy="30" r="4.2" />
+      <path d="M42 39 L50 66 L64 56 L78 66 L86 39 Z" />
+      <path d="M50 67 H78 L75 92 Q64 98 53 92 Z" />
+      <path d="M56 74 H72 M58 82 H70" stroke-width="2.1" stroke-linecap="round" fill="none" />
     
   </g>
-  <rect x="40" y="108" width="48" height="6" rx="3" fill="#613d22" />
-  <text x="64" y="121" text-anchor="middle" font-size="11" font-family="Verdana,Segoe UI,sans-serif" fill="#e7f0ff" opacity="0.86">MR</text>
+  <path d="M44 32 Q64 14 84 32" stroke="url(#armorEdge)" stroke-width="2.3" fill="none" />
+  <path d="M50 56 Q64 46 78 56" stroke="url(#armorEdge)" stroke-width="2.1" fill="none" />
+  <text x="64" y="121" text-anchor="middle" font-size="11" font-family="Verdana,Segoe UI,sans-serif" fill="#e7f0ff" opacity="0.92">MR</text>
   <circle cx="64" cy="15" r="5" fill="#f2cc94" filter="url(#glow)" />
 </svg>

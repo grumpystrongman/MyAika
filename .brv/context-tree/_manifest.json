@@ -3,19 +3,25 @@
     {
       "order": 3,
       "path": "_index.md",
-      "tokens": 654,
+      "tokens": 686,
       "type": "summary"
     },
     {
       "order": 2,
       "path": "infrastructure/_index.md",
-      "tokens": 768,
+      "tokens": 623,
       "type": "summary"
     },
     {
       "order": 2,
       "path": "structure/_index.md",
       "tokens": 434,
+      "type": "summary"
+    },
+    {
+      "order": 1,
+      "path": "infrastructure/myaika_integrations/_index.md",
+      "tokens": 180,
       "type": "summary"
     },
     {
@@ -91,13 +97,13 @@
       "type": "context"
     }
   ],
-  "generated_at": "2026-03-28T20:25:25.345Z",
+  "generated_at": "2026-03-28T20:36:02.782Z",
   "lane_tokens": {
     "contexts": 3993,
     "stubs": 0,
-    "summaries": 1856
+    "summaries": 1923
   },
-  "source_fingerprint": "54b05a70631795251b0e9b43fbb3dba142eb46b83d172ef9628bafa38d1e8874",
-  "total_tokens": 5849,
+  "source_fingerprint": "330c100f8d9df94ed75e7ca04d1602ace4cca7a9e199973df044821ea4d2785a",
+  "total_tokens": 5916,
   "version": 1
 }
