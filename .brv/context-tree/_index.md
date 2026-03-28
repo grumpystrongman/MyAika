@@ -1,30 +1,34 @@
 ---
-children_hash: 38cb1c5db5d4ab9620230c06a1fb2c382dad077546f32ceb228ebcd29b792980
-compression_ratio: 0.48859934853420195
+children_hash: 36402334e39a44f2feccfe9fa4d8a1e386c7fcf0a7f3bbe4cf5fe82e00405ab2
+compression_ratio: 0.5164319248826291
 condensation_order: 3
 covers: [infrastructure/_index.md, structure/_index.md]
-covers_token_total: 1228
+covers_token_total: 1278
 summary_level: d3
-token_count: 600
+token_count: 660
 type: summary
 ---
-# Structural Summary: MyAika Infrastructure and Operational Framework
+# Infrastructure and Structure Domain Summary
 
-This summary provides a level d3 structural overview of the MyAika platform, integrating foundational infrastructure governance with operator-specific behavioral and interface configurations.
+This structural summary integrates the Infrastructure (architecture, lifecycle, systems) and Structure (operator profile, web interface) domains, providing a consolidated view of the MyAika system.
 
-## Infrastructure Domain (Drill-down: infrastructure/_index.md)
-The infrastructure domain comprises the system's foundational architecture, operational lifecycle, and quality assurance protocols.
+### 1. System Architecture & Lifecycle (Infrastructure)
+The MyAika system utilizes a Docker-first deployment strategy and an 8-step execution protocol (Goal → Capability Map → Plan → Tool Routing → Execution → Evidence → Risks → Next Step).
+*   **Architecture Rollout:** Evolved through 31 phases, currently featuring the Wizard Chess engine (Phases 17-31) and a 9-cohort verification framework (Phases 15-16).
+*   **Baseline Operations:** Orchestrated via `scripts/daily_up_verify.ps1`, managing environment integrity, health checks (180s timeout), and automated recovery.
+*   **Safety & Governance:** Enforces a deny-by-default approval policy for high-risk actions (installs, deletions, git) and isolates execution using browser profiles (low/work/high_trust).
+*   **Testing:** Validates core workflows (Approve/Deny) using Playwright-based smoke tests (`npm run ui:smoke:approval`) with a 45,000ms timeout.
 
-*   **System Architecture:** Utilizes a split-stack Docker framework (Server API: 8787/8790; Web Body: 3000/3105). Key developments include the voice-first Wizard Chess module (Phases 17-31) and automated rollout verification via `npm run verify:rollout`.
-*   **Operational Baseline:** Orchestrated by `scripts/daily_up_verify.ps1`, which manages Docker compose profiles and system readiness checks. Execution follows an 8-step `laneExecutor` loop gated by a manual authorization policy for high-risk operations.
-*   **Integrations & TTS:** Extensibility relies on MCP-lite patterns (`apps/server/integrations`). TTS processing uses Piper with emotion-tuned parameters (intensity default 0.35).
-*   **Quality Assurance:** Employs deterministic Playwright-based smoke testing for chat-based approval workflows (`npm run ui:smoke:approval`).
+### 2. Aika Operator & Web Interface (Structure)
+The Aika assistant functions as a digital twin, balancing proactive execution with strict security boundaries.
+*   **Operational Profile:** Operates under a "proactive ownership" model; secrets must be sourced via vault references rather than raw inclusion. Detailed behavioral constraints are documented in [Aika Operator Profile](aika_operator_profile.md).
+*   **Web Interface Configuration:** Centrally managed via `apps/web/pages/index.jsx`, coordinating state through React hooks and server URL resolution (`NEXT_PUBLIC_SERVER_URL`).
+*   **Interaction & TTS Constraints:**
+    *   **Text-to-Speech:** Enforces 180-character segment limits via `splitSpeechText`.
+    *   **Audio Tuning:** Dynamically adjusts Piper TTS parameters (Happy mode: +0.08 rate, +0.6 pitch) using the Web Audio API.
+    *   **Persistence:** Preference updates are governed by a 500ms debounce interval.
+    *   **Sync:** Integrates with `/api/approvals` and `/api/assistant/profile` for real-time synchronization.
 
-## Structural/Operational Domain (Drill-down: structure/_index.md)
-This domain defines the Aika operator's behavioral profile and the technical configuration of the web interface.
-
-*   **Aika Operator Profile:** Operates under a "proactive ownership" model with strict security boundaries, requiring explicit confirmation for high-risk actions. Behavioral expectations and preferences are documented in [Aika Operator Profile](aika_operator_profile.md).
-*   **Frontend Interface:** Centered on `apps/web/pages/index.jsx`, the interface manages state synchronization via React hooks with polling for approval updates.
-    *   **Processing Constraints:** Enforces a 180-character limit per TTS segment and utilizes a 500ms debounce interval for preference updates.
-    *   **Audio Tuning:** The Web Audio API applies emotion-specific modifiers (e.g., "Happy" mode: +0.08 rate, +0.6 pitch).
-    *   **API Integration:** Facilitates synchronization through `/api/approvals` and `/api/assistant/profile`. Refer to [Web Interface Configuration](web_interface_configuration.md) for implementation details.
+### Key Drill-Down References
+*   **Infrastructure:** [myaika_architecture_baseline.md](myaika_architecture_baseline.md), [aika_operating_model.md](aika_operating_model.md), [daily_stack_bring_up_script.md](daily_stack_bring_up_script.md), [ui_chat_approval_smoke_test.md](ui_chat_approval_smoke_test.md).
+*   **Structure:** [Aika Operator Profile](aika_operator_profile.md), [Web Interface Configuration](web_interface_configuration.md).

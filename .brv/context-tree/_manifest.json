@@ -3,13 +3,13 @@
     {
       "order": 3,
       "path": "_index.md",
-      "tokens": 600,
+      "tokens": 660,
       "type": "summary"
     },
     {
       "order": 2,
       "path": "infrastructure/_index.md",
-      "tokens": 623,
+      "tokens": 672,
       "type": "summary"
     },
     {
@@ -25,21 +25,21 @@
       "type": "summary"
     },
     {
+      "importance": 60,
+      "path": "infrastructure/myaika_architecture/rollout_verification/rollout_verification_procedures.md",
+      "tokens": 164,
+      "type": "context"
+    },
+    {
+      "importance": 60,
+      "path": "infrastructure/myaika_architecture/wizard_chess_ui_config/wizard_chess_ui_configuration.md",
+      "tokens": 161,
+      "type": "context"
+    },
+    {
       "importance": 55,
       "path": "infrastructure/myaika_architecture/rollout_verification/phase_16_rollout_verification.md",
       "tokens": 372,
-      "type": "context"
-    },
-    {
-      "importance": 55,
-      "path": "infrastructure/myaika_architecture/rollout_verification/rollout_verification_procedures.md",
-      "tokens": 358,
-      "type": "context"
-    },
-    {
-      "importance": 55,
-      "path": "infrastructure/myaika_architecture/wizard_chess_ui_config/wizard_chess_ui_configuration.md",
-      "tokens": 403,
       "type": "context"
     },
     {
@@ -92,18 +92,24 @@
     },
     {
       "importance": 50,
-      "path": "infrastructure/myaika_integrations/myaika_integrations.md",
-      "tokens": 223,
+      "path": "infrastructure/myaika_architecture/phase_21_24_wizard_chess/wizard_chess_phases_21_24.md",
+      "tokens": 333,
+      "type": "context"
+    },
+    {
+      "importance": 50,
+      "path": "infrastructure/myaika_baseline/myaika_startup_baseline.md",
+      "tokens": 324,
       "type": "context"
     }
   ],
-  "generated_at": "2026-03-28T19:54:08.576Z",
+  "generated_at": "2026-03-28T20:03:04.945Z",
   "lane_tokens": {
-    "contexts": 3987,
+    "contexts": 3985,
     "stubs": 0,
-    "summaries": 1837
+    "summaries": 1946
   },
-  "source_fingerprint": "30434bd65cc6dee9f86c06c0f09ebf147225a47498602a9b68d0792eb4a9728d",
-  "total_tokens": 5824,
+  "source_fingerprint": "054d1a61c504dff2bd64864a79fd73718f4a7c5c54d533cbd15e45a54f800f74",
+  "total_tokens": 5931,
   "version": 1
 }

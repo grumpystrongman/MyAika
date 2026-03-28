@@ -1,40 +1,30 @@
 ---
-children_hash: 10b0aeac740115eaac7f9ec765989f759464dcf5a24115e6dd6c4b38168a2465
-compression_ratio: 0.4254185692541857
+children_hash: b8a63e7c47210b360b84567c8dc88ce4f061cf9f44a6b569d1d02daeb17a0747
+compression_ratio: 0.4473214285714286
 condensation_order: 0
 covers: [phase_15_rollout_verification.md, phase_16_rollout_verification.md, rollout_verification_procedures.md]
-covers_token_total: 1314
+covers_token_total: 1120
 summary_level: d0
-token_count: 559
+token_count: 501
 type: summary
 ---
-# AIKA Architecture Rollout Verification Summary
+# Rollout Verification Structural Summary
 
-This structural summary covers the rollout verification procedures and recent phases (15-16) for the AIKA architecture as of March 2026.
+This domain tracks the stability and verification of the AIKA Architecture rollout, covering phases 1 through 16. The verification process has transitioned from manual cohort checks to an automated framework designed to ensure runtime, workflow, and UI reliability.
 
-## Verification Procedures (rollout_verification_procedures.md)
-The verification framework ensures system integrity across 10 defined cohorts using `scripts/verify_rollout_completion.ps1` or `npm run verify:rollout`. The pipeline validates:
-*   **Runtime & Infrastructure:** Daily runtime, write-path verifier, and Docker Compose configurations (test/experimental).
-*   **Logic & Protocol:** Command grammar, lane execution, and digest/approval policy tests.
-*   **System & UI:** Module registry (38 modules), web build, UI navigation, and UI chat approval smoke tests.
-*   **Enforcement:** Any failure in the cohort sequence triggers an immediate exit (code 1).
+## Key Verification Phases
+- **Phase 15 Rollout Verification**: Validated Phases 1-14 (JEF-60 to JEF-72), confirming all 8 initial runtime, grammar, and UI smoke test cohorts. Focused on core stack integrity, intent protocols, and digest/approval policy tests.
+- **Phase 16 Rollout Verification**: Expanded coverage to include workflow skill cohorts (11/11 passed). Introduced critical architectural updates including skill-first workflow dispatch, Tier-2 approval payload contracts (Action/Why/Tool/Boundary/Risk/Rollback), and UI approval card persistence. JEF-74 closed.
 
-## Recent Rollout Phases
+## Automated Procedures
+All verification is consolidated under **Rollout Verification Procedures**, utilizing `scripts/verify_rollout_completion.ps1`. This automation orchestrates 9 distinct cohorts:
+1. **Runtime**: Daily stack bring-up (`npm run stack:daily:nobuild`).
+2. **Core**: Write-path and local workspace checks.
+3. **Workflow**: Deterministic skills testing and command router validation.
+4. **Protocol**: Intent/grammar tests and safety/digest approval tests.
+5. **UI/Web**: Build integrity and automated smoke tests (Chat, Recordings, Tools, Action Runner).
 
-### Phase 15: Baseline Verification (phase_15_rollout_verification.md)
-*   **Status:** Phases 1-14 (JEF-60 to JEF-72) marked "Done" in Linear.
-*   **Verification:** All 8 initial cohorts passed.
-*   **Key Tests:** Standardized UI smoke tests (`scripts/ui_smoke.js`) and chat approval smoke tests (`scripts/ui_chat_approval_smoke.js`) using `UI_BASE_URL=http://127.0.0.1:3105`.
-
-### Phase 16: Workflow & Approval Expansion (phase_16_rollout_verification.md)
-*   **Status:** Phase 16 (JEF-74) completed and verified.
-*   **Technical Enhancements:** 
-    *   Implemented skill-first workflow dispatch (6 handlers).
-    *   Introduced Tier-2 approval payload contract (Action, Why, Tool, Boundary, Risk, Rollback).
-    *   Enabled UI approval card rendering and persistence.
-*   **Verification:** 11/11 workflow skill cohorts passed.
-*   **Core Files:** `apps/server/src/aika/workflowSkills.js`, `apps/server/mcp/approvals.js`, and `apps/web/pages/index.jsx`.
-
-## Key Relationships & Architectural Decisions
-*   **Integration:** Rollout verification is tightly coupled with `docs/ROLLOUT_TRANCHE_COHORT_VERIFICATION_2026-03-27.md` for evidence tracking.
-*   **Contract-Based Approval:** Moving beyond simple policy checks, Phase 16 enforces a strict contract for workflow approvals, ensuring UI and persistence layers are synchronized with backend skill dispatch.
+## Architectural Decisions & Dependencies
+- **Approval System**: The Tier-2 contract requires structured metadata for all workflow-dispatched actions, enabling granular risk assessment and rollback capabilities.
+- **Environment Requirements**: Playwright is required for UI smoke testing; Docker Compose profiles (test/experimental) are mandatory for runtime cohort validation.
+- **Verification Flow**: All phases utilize a standard dispatch sequence: workflow dispatch -> approval contract -> UI rendering -> persistence -> deterministic testing.
