@@ -8,6 +8,8 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $webDir = Join-Path $repoRoot "apps/web"
+$distDirName = ".next-wizard-$Port"
+$distDir = Join-Path $webDir $distDirName
 $outDir = Join-Path $repoRoot "output"
 $outLog = Join-Path $outDir "wizard_next_$Port.out.log"
 $errLog = Join-Path $outDir "wizard_next_$Port.err.log"
@@ -16,6 +18,7 @@ Write-Host "== Wizard Chess Dev Reset ==" -ForegroundColor Green
 Write-Host "Repo: $repoRoot"
 Write-Host "Web:  $webDir"
 Write-Host "Port: $Port"
+Write-Host "Dist: $distDirName"
 
 try {
   $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -34,12 +37,12 @@ try {
   Write-Warning "Port cleanup warning: $($_.Exception.Message)"
 }
 
-$nextDir = Join-Path $webDir ".next"
-if (Test-Path $nextDir) {
+$targetDistDir = $distDir
+if (Test-Path $targetDistDir) {
   $cleared = $false
   for ($attempt = 1; $attempt -le 8; $attempt += 1) {
     try {
-      Remove-Item -LiteralPath $nextDir -Recurse -Force -ErrorAction Stop
+      Remove-Item -LiteralPath $targetDistDir -Recurse -Force -ErrorAction Stop
       $cleared = $true
       break
     } catch {
@@ -47,9 +50,9 @@ if (Test-Path $nextDir) {
     }
   }
   if ($cleared) {
-    Write-Host "Cleared $nextDir" -ForegroundColor Yellow
+    Write-Host "Cleared $targetDistDir" -ForegroundColor Yellow
   } else {
-    Write-Warning "Could not fully clear $nextDir (possibly locked). Continuing with startup."
+    Write-Warning "Could not fully clear $targetDistDir (possibly locked). Continuing with startup."
   }
 }
 
@@ -58,16 +61,24 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 if ($Foreground.IsPresent) {
   Write-Host "Starting Next dev in foreground at http://127.0.0.1:$Port/wizard-chess" -ForegroundColor Cyan
   Push-Location $webDir
+  $previousDistDir = $env:NEXT_DIST_DIR
+  $env:NEXT_DIST_DIR = $distDirName
   try {
     & npx.cmd next dev -H 127.0.0.1 -p $Port
   } finally {
+    if ([string]::IsNullOrWhiteSpace($previousDistDir)) {
+      Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue
+    } else {
+      $env:NEXT_DIST_DIR = $previousDistDir
+    }
     Pop-Location
   }
   exit $LASTEXITCODE
 }
 
-$proc = Start-Process -FilePath "npx.cmd" `
-  -ArgumentList @("next", "dev", "-H", "127.0.0.1", "-p", "$Port") `
+$childCommand = "`$env:NEXT_DIST_DIR = '$distDirName'; & npx.cmd next dev -H 127.0.0.1 -p $Port"
+$proc = Start-Process -FilePath "powershell" `
+  -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $childCommand) `
   -WorkingDirectory $webDir `
   -RedirectStandardOutput $outLog `
   -RedirectStandardError $errLog `

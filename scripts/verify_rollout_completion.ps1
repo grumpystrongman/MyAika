@@ -137,11 +137,13 @@ try {
 
   if (-not $SkipUiCohorts.IsPresent) {
     Write-Host "==> UI cohorts (isolated web instance on :$UiPort)" -ForegroundColor Cyan
-    $nextBuildDir = Join-Path $webDir ".next"
-    if (Test-Path $nextBuildDir) {
-      Remove-Item -LiteralPath $nextBuildDir -Recurse -Force
+    $uiDistDirName = ".next-rollout-$UiPort"
+    $uiDistDir = Join-Path $webDir $uiDistDirName
+    if (Test-Path $uiDistDir) {
+      Remove-Item -LiteralPath $uiDistDir -Recurse -Force
     }
-    $webProc = Start-Process -FilePath "npx.cmd" -ArgumentList @("next", "dev", "-p", "$UiPort") -WorkingDirectory $webDir -PassThru
+    $uiWebCommand = "`$env:NEXT_DIST_DIR = '$uiDistDirName'; & npx.cmd next dev -p $UiPort"
+    $webProc = Start-Process -FilePath "powershell" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $uiWebCommand) -WorkingDirectory $webDir -PassThru
     try {
       if (-not (Wait-HttpReady -Url $uiBaseUrl -TimeoutSec 360)) {
         throw "UI instance did not become ready at $uiBaseUrl"
