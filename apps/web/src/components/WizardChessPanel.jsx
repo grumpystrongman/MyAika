@@ -348,6 +348,7 @@ export default function WizardChessPanel() {
   const speechLastAtRef = useRef(0);
   const finisherTimeoutRef = useRef(null);
   const duelTimeoutRef = useRef(null);
+  const engineBusyRef = useRef(false);
 
   const chessRef = useRef(new Chess());
   const lastMoveRef = useRef(null);
@@ -689,9 +690,10 @@ export default function WizardChessPanel() {
   }, [activeUniversePack, animatePulse, armyTheme, lastOpening, playEventSound, playerColor, pushReaction, universePackId]);
 
   const runEngineTurn = useCallback(async () => {
-    if (engineThinking || gameOver) return;
+    if (engineBusyRef.current || engineThinking || gameOver) return;
     const chess = chessRef.current;
     if (toTurnColor(chess.turn()) === playerColor) return;
+    engineBusyRef.current = true;
     setEngineThinking(true);
     try {
       const preset = resolveDifficultyPreset(difficulty);
@@ -727,6 +729,7 @@ export default function WizardChessPanel() {
     } catch (err) {
       setStatusText(`Engine error: ${err?.message || "wizard_chess_engine_failed"}`);
     } finally {
+      engineBusyRef.current = false;
       setEngineThinking(false);
     }
   }, [
@@ -785,10 +788,6 @@ export default function WizardChessPanel() {
       concludeGame(chooseResultText(chess, playerColor));
       return true;
     }
-
-    setTimeout(() => {
-      runEngineTurn();
-    }, 260);
     return true;
   }, [
     concludeGame,
@@ -797,7 +796,6 @@ export default function WizardChessPanel() {
     playerColor,
     processMoveEvents,
     pushReaction,
-    runEngineTurn,
     syncBoardState
   ]);
 
@@ -819,6 +817,7 @@ export default function WizardChessPanel() {
     setClocks({ whiteMs: 5 * 60 * 1000, blackMs: 5 * 60 * 1000 });
     setGameOver(false);
     setEngineThinking(false);
+    engineBusyRef.current = false;
     setMood("focused");
     runningRef.current = true;
     gameSummaryRef.current = {
@@ -831,10 +830,7 @@ export default function WizardChessPanel() {
     playEventSound("game_start");
     pushReaction("game_start");
     syncBoardState();
-    if (color === "black") {
-      setTimeout(() => runEngineTurn(), 360);
-    }
-  }, [playEventSound, playerColor, pushReaction, runEngineTurn, syncBoardState]);
+  }, [playEventSound, playerColor, pushReaction, syncBoardState]);
 
   const requestHint = useCallback(async () => {
     if (gameOver) return;
@@ -1071,10 +1067,13 @@ export default function WizardChessPanel() {
   }, [gameOver]);
 
   useEffect(() => {
-    if (!gameOver && toTurnColor(chessRef.current.turn()) !== playerColor) {
+    if (gameOver) return undefined;
+    if (toTurnColor(chessRef.current.turn()) === playerColor) return undefined;
+    const timer = setTimeout(() => {
       runEngineTurn();
-    }
-  }, [gameOver, playerColor, runEngineTurn]);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [fen, gameOver, playerColor, runEngineTurn]);
 
   useEffect(() => {
     const chatStream = chatStreamRef.current;
