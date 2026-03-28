@@ -1,0 +1,161 @@
+{
+  "version": "2026-03-27",
+  "commandGrammar": [
+    "EXECUTE",
+    "PREPARE",
+    "ANALYZE",
+    "CONTROL",
+    "BUILD",
+    "MONITOR",
+    "OPTIMIZE",
+    "SIMULATE",
+    "STAGE",
+    "AUTOPILOT"
+  ],
+  "laneRouting": {
+    "code": {
+      "system": "Codex + MCP",
+      "useFor": [
+        "code",
+        "repo",
+        "scripts",
+        "tests",
+        "patch"
+      ]
+    },
+    "deterministic_web": {
+      "system": "agent-browser",
+      "useFor": [
+        "browser navigation",
+        "click/type/extract",
+        "repeatable DOM flows"
+      ]
+    },
+    "workflow_web": {
+      "system": "Skyvern",
+      "useFor": [
+        "long multi-step web workflows",
+        "workflow style browser automation"
+      ]
+    },
+    "desktop": {
+      "system": "CUA",
+      "useFor": [
+        "desktop control",
+        "GUI automation",
+        "sandboxed computer use"
+      ]
+    },
+    "orchestration": {
+      "system": "OpenClaw",
+      "useFor": [
+        "conversation shell",
+        "skills",
+        "delegation",
+        "memory"
+      ]
+    },
+    "observability": {
+      "system": "Opik",
+      "useFor": [
+        "traces",
+        "evaluations",
+        "cost and performance monitoring"
+      ]
+    }
+  },
+  "approvalModel": {
+    "auto": [
+      "read",
+      "search",
+      "inspect",
+      "draft",
+      "safe tests",
+      "sandbox work"
+    ],
+    "approvalRequired": [
+      "install",
+      "delete",
+      "overwrite",
+      "login",
+      "secret",
+      "send",
+      "publish",
+      "git push",
+      "deploy",
+      "system change",
+      "docker change",
+      "trust boundary crossing"
+    ],
+    "never": [
+      "stealth",
+      "bypass safeguards",
+      "hidden persistence",
+      "secret extraction"
+    ]
+  },
+  "agentTeam": [
+    {
+      "name": "Researcher",
+      "responsibility": "Gather evidence"
+    },
+    {
+      "name": "Security Reviewer",
+      "responsibility": "Block unsafe operations"
+    },
+    {
+      "name": "Operator",
+      "responsibility": "Execute tasks"
+    },
+    {
+      "name": "QA",
+      "responsibility": "Verify outputs"
+    }
+  ],
+  "skills": {
+    "core": [
+      "ENVIRONMENT_BOOTSTRAP",
+      "REPO_INTELLIGENCE_SCAN",
+      "PATCH_AND_VERIFY",
+      "SAFE_DEPENDENCY_UPGRADE",
+      "MULTI_SOURCE_RESEARCH_BRIEF",
+      "BROWSER_TASK_EXECUTION",
+      "WORKFLOW_AUTOMATION_BUILDER",
+      "SANDBOX_EXPERIMENT_RUNNER",
+      "DATA_PIPELINE_VALIDATOR",
+      "DASHBOARD_HEALTH_CHECK",
+      "FILE_SYSTEM_ORGANIZER",
+      "MEETING_TO_ACTION_ENGINE",
+      "EMAIL_DRAFT_AND_STAGE",
+      "INCIDENT_TRIAGE",
+      "LOG_ANALYSIS_ENGINE",
+      "API_INTEGRATION_BUILDER",
+      "TEST_SUITE_GENERATOR",
+      "PERFORMANCE_PROFILER",
+      "COST_OPTIMIZER",
+      "SECURITY_RISK_SCAN",
+      "DOC_GENERATOR",
+      "CHANGE_IMPACT_ANALYZER",
+      "TASK_BATCH_EXECUTOR",
+      "KNOWLEDGE_BASE_BUILDER",
+      "BROWSER_SESSION_MANAGER",
+      "DOCKER_ENV_MANAGER",
+      "MCP_TOOL_DISCOVERY",
+      "WORKSPACE_STATE_RECOVERY",
+      "QA_VALIDATION_SUITE",
+      "RESULT_SUMMARIZER"
+    ],
+    "advanced": [
+      "DIGITAL_TWIN_WORKDAY",
+      "FULL_STACK_AUTOPILOT",
+      "CROSS_SYSTEM_ORCHESTRATOR",
+      "SELF_IMPROVING_WORKFLOWS",
+      "REAL_TIME_OPERATOR_MODE",
+      "DECISION_SIMULATION_ENGINE",
+      "CONTEXT_PERSISTENT_MEMORY",
+      "MULTI_AGENT_SWARM_EXECUTION",
+      "ZERO_TO_SYSTEM_BUILDER",
+      "STRATEGIC_EXECUTION_ADVISOR"
+    ]
+  }
+}

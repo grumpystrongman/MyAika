@@ -222,6 +222,7 @@ import {
   listSignalsTrends,
   getSignalDoc
 } from "./src/signals/index.js";
+import { computeWizardChessEngineMove, listWizardChessPresets } from "./src/chess/stockfishEngine.js";
 import {
   startNotionSyncLoop,
   startSlackSyncLoop,
@@ -3301,14 +3302,18 @@ app.post("/chat", async (req, res) => {
         recordingId,
         userId: getUserId(req),
         sessionId: req.aikaSessionId
-      }
+      },
+      deps: { toolExecutor: executor }
     });
     if (aikaOutcome?.handled) {
       const mood = aikaOutcome.status === "error" ? Emotion.SAD : Emotion.NEUTRAL;
       return sendAssistantReply(
         aikaOutcome.reply || "Done.",
         makeBehavior({ emotion: mood, intensity: 0.4 }),
-        { aika: aikaOutcome.data || null }
+        {
+          aika: aikaOutcome.data || null,
+          approval: aikaOutcome.approval || null
+        }
       );
     }
 
@@ -4795,6 +4800,11 @@ const tradingSettingsSchema = z.object({
   engine: z.object({
     tradeApiUrl: z.string().optional(),
     alpacaFeed: z.string().optional()
+  }).optional(),
+  ui: z.object({
+    defaultAssetClass: z.enum(["stock", "crypto"]).optional(),
+    defaultStockSymbol: z.string().optional(),
+    defaultCryptoSymbol: z.string().optional()
   }).optional()
 });
 
@@ -5307,6 +5317,39 @@ app.get("/api/market/candles", rateLimit, async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err?.message || "market_candles_failed" });
+  }
+});
+
+app.get("/api/chess/presets", rateLimit, (_req, res) => {
+  try {
+    res.json({ presets: listWizardChessPresets() });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || "wizard_chess_presets_failed" });
+  }
+});
+
+app.post("/api/chess/engine-move", rateLimit, async (req, res) => {
+  try {
+    const fen = String(req.body?.fen || "").trim();
+    const preset = String(req.body?.preset || "clever");
+    const moveTimeMs = Number(req.body?.moveTimeMs || 0);
+    const purpose = String(req.body?.purpose || "move").toLowerCase() === "hint" ? "hint" : "move";
+    if (!fen) {
+      return res.status(400).json({ error: "fen_required" });
+    }
+    const result = await computeWizardChessEngineMove({
+      fen,
+      preset,
+      moveTimeMs,
+      purpose
+    });
+    res.json(result);
+  } catch (err) {
+    const status = Number(err?.status || 500);
+    res.status(status).json({
+      error: err?.message || "wizard_chess_engine_failed",
+      detail: err?.detail || null
+    });
   }
 });
 
@@ -7488,7 +7531,7 @@ app.post("/api/tools/call", rateLimit, async (req, res) => {
 });
 
 app.post("/api/approvals", rateLimit, async (req, res) => {
-  const { toolName, params, humanSummary, riskLevel, correlationId } = req.body || {};
+  const { toolName, params, humanSummary, riskLevel, correlationId, approvalContext } = req.body || {};
   if (!toolName) return res.status(400).json({ error: "tool_name_required" });
   try {
     const redactedParams = JSON.parse(redactPhi(JSON.stringify(params || {})) || "{}");
@@ -7499,7 +7542,8 @@ app.post("/api/approvals", rateLimit, async (req, res) => {
       humanSummary: humanSummary || `Request to run ${toolName}`,
       riskLevel: riskLevel || "medium",
       createdBy: getUserId(req),
-      correlationId: correlationId || req.headers["x-correlation-id"] || ""
+      correlationId: correlationId || req.headers["x-correlation-id"] || "",
+      approvalContext: approvalContext || null
     };
     const { createApproval } = await import("./mcp/approvals.js");
     const approval = createApproval(request);

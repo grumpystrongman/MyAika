@@ -797,6 +797,12 @@ const migrations = [
     CREATE INDEX IF NOT EXISTS chat_threads_lookup_user
       ON chat_threads (user_id, channel, sender_id, chat_id, status, updated_at);
     `
+  },
+  {
+    id: 18,
+    sql: `
+    ALTER TABLE trading_settings ADD COLUMN ui_json TEXT;
+    `
   }
 ];
 

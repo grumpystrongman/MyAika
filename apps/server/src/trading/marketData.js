@@ -241,6 +241,7 @@ export async function fetchMarketCandles({
     }
   }
 
+  let alpacaError = null;
   try {
     const result = await fetchAlpacaBars(targetSymbol, normalizedInterval, limit, feed);
     if (result.candles.length) {
@@ -248,35 +249,40 @@ export async function fetchMarketCandles({
       setCachedResult(key, payload);
       return payload;
     }
+    alpacaError = new Error("alpaca_no_candles");
   } catch (err) {
-    const warning = normalizedInterval === "1d"
-      ? ""
-      : "Intraday stock candles need Alpaca keys. Showing daily bars.";
-    try {
-      const fallback = await firstFulfilled([
-        fetchStooqDaily(targetSymbol).then(candles => {
-          if (!candles.length) throw new Error("stooq_empty");
-          return { candles, source: "stooq", interval: "1d", warning };
-        }),
-        fetchYahooDaily(targetSymbol, 365).then(candles => {
-          if (!candles.length) throw new Error("yahoo_empty");
-          return { candles, source: "yahoo", interval: "1d", warning };
-        })
-      ]);
-      if (fallback?.candles?.length) {
-        setCachedResult(key, fallback);
-        return fallback;
-      }
-    } catch {
-      // ignore
-    }
-    return {
-      candles: [],
-      source: "alpaca",
-      interval: normalizedInterval,
-      error: err?.message || "alpaca_data_failed"
-    };
+    alpacaError = err;
   }
+
+  const warning = normalizedInterval === "1d"
+    ? ""
+    : (alpacaError?.message === "alpaca_credentials_missing"
+        ? "Intraday stock candles need Alpaca keys. Showing daily bars."
+        : "Market closed or no intraday data; showing daily bars.");
+  try {
+    const fallback = await firstFulfilled([
+      fetchStooqDaily(targetSymbol).then(candles => {
+        if (!candles.length) throw new Error("stooq_empty");
+        return { candles, source: "stooq", interval: "1d", warning };
+      }),
+      fetchYahooDaily(targetSymbol, 365).then(candles => {
+        if (!candles.length) throw new Error("yahoo_empty");
+        return { candles, source: "yahoo", interval: "1d", warning };
+      })
+    ]);
+    if (fallback?.candles?.length) {
+      setCachedResult(key, fallback);
+      return fallback;
+    }
+  } catch {
+    // ignore
+  }
+  return {
+    candles: [],
+    source: "alpaca",
+    interval: normalizedInterval,
+    error: alpacaError?.message || "alpaca_data_failed"
+  };
 
   return { candles: [], source: "alpaca", interval: normalizedInterval, error: "no_candles" };
 }

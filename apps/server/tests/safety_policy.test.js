@@ -76,3 +76,45 @@ test("policy allows autonomous self email to work address", () => {
     savePolicy(original);
   }
 });
+
+test("policy allows assistant task email when allowlisted and auto-approve enabled", () => {
+  const original = getPolicy();
+  const originalEnv = {
+    ASSISTANT_TASK_EMAIL_AUTO_APPROVE: process.env.ASSISTANT_TASK_EMAIL_AUTO_APPROVE,
+    ASSISTANT_TASK_EMAIL_AUTO_APPROVE_ALLOWLIST: process.env.ASSISTANT_TASK_EMAIL_AUTO_APPROVE_ALLOWLIST,
+    ASSISTANT_TASK_EMAIL_SUBJECT_PREFIX: process.env.ASSISTANT_TASK_EMAIL_SUBJECT_PREFIX,
+    ASSISTANT_TASK_EMAIL_AUTO_APPROVE_REQUIRE_PREFIX: process.env.ASSISTANT_TASK_EMAIL_AUTO_APPROVE_REQUIRE_PREFIX
+  };
+  try {
+    process.env.ASSISTANT_TASK_EMAIL_AUTO_APPROVE = "1";
+    process.env.ASSISTANT_TASK_EMAIL_AUTO_APPROVE_ALLOWLIST = "tasks@example.com";
+    process.env.ASSISTANT_TASK_EMAIL_SUBJECT_PREFIX = "Aika Task";
+    process.env.ASSISTANT_TASK_EMAIL_AUTO_APPROVE_REQUIRE_PREFIX = "1";
+    savePolicy({
+      ...original,
+      allow_actions: ["email.send"],
+      requires_approval: ["email.send"]
+    });
+    const result = evaluateAction({
+      actionType: "email.send",
+      params: {
+        sendTo: ["tasks@example.com"],
+        subject: "Aika Task: Daily Digest",
+        body: "Daily summary",
+        autonomy: "assistant_task"
+      },
+      context: { userId: "local", source: "assistant_task" }
+    });
+    assert.equal(result.decision, "allow");
+    assert.equal(result.reason, "autonomy_assistant_task_email");
+  } finally {
+    savePolicy(original);
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});

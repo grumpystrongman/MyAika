@@ -6,6 +6,37 @@ import { evaluateAction } from "../src/safety/evaluator.js";
 import { appendAuditEvent } from "../src/safety/auditLog.js";
 import { redactPayload } from "../src/safety/redact.js";
 
+function inferBoundary(toolName = "") {
+  const name = String(toolName || "").toLowerCase();
+  if (name === "desktop.run") return "host -> sandbox/VM desktop control lane";
+  if (name === "action.run") return "host -> external web automation lane";
+  if (name === "web.search") return "host -> external search provider";
+  return "host -> tool execution boundary";
+}
+
+function inferRollback(toolName = "") {
+  const name = String(toolName || "").toLowerCase();
+  if (name === "desktop.run") {
+    return "Deny to prevent execution. If already executed, stop the desktop run and discard generated artifacts.";
+  }
+  if (name === "action.run") {
+    return "Deny to prevent execution. If already executed, stop the action run and delete captured artifacts.";
+  }
+  return "Deny to prevent execution. If already executed, review tool history and apply compensating actions.";
+}
+
+function buildApprovalContext({ def, summary, safetyDecision }) {
+  const toolName = def?.name || "";
+  return {
+    action: summary || `Request to run ${toolName}`,
+    why: safetyDecision?.reason || "Policy requires approval for this action.",
+    tool: toolName,
+    boundary: inferBoundary(toolName),
+    risk: String(def?.riskLevel || "medium"),
+    rollback: inferRollback(toolName)
+  };
+}
+
 export class ToolExecutor {
   constructor(registry) {
     this.registry = registry;
@@ -85,14 +116,16 @@ export class ToolExecutor {
       ? def.requiresApproval(params, context)
       : def.requiresApproval;
     if (!autonomyAllowed && (policy.requiresApproval || toolRequiresApproval || safetyDecision.decision === "require_approval")) {
+      const summary = def.humanSummary?.(params) || `Request to run ${def.name}`;
       const approval = createApproval({
         toolName: def.name,
         params,
         paramsRedacted: policy.redactedParams,
-        humanSummary: def.humanSummary?.(params) || `Request to run ${def.name}`,
+        humanSummary: summary,
         riskLevel: def.riskLevel || "medium",
         createdBy: context?.userId || "user",
-        correlationId: context?.correlationId || ""
+        correlationId: context?.correlationId || "",
+        approvalContext: buildApprovalContext({ def, summary, safetyDecision })
       });
       appendAuditEvent({
         action_type: def.name,

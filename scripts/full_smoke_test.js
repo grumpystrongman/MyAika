@@ -28,6 +28,7 @@ addStep("unit tests", NPM_CMD, ["test"], false, true);
 addStep("mcp smoke", NODE_CMD, ["scripts/mcp_smoke_test.js"]);
 addStep("mcp features smoke", NODE_CMD, ["scripts/mcp_features_smoke.js"]);
 addStep("ui smoke", NODE_CMD, ["scripts/ui_smoke.js"]);
+addStep("ui chat approval smoke", NODE_CMD, ["scripts/ui_chat_approval_smoke.js"]);
 addStep("recordings smoke", NODE_CMD, ["scripts/recordings_smoke.js"]);
 addStep("voice smoke", NPM_CMD, ["run", "voice:smoke"], false, true);
 addStep("voice fulltest", NPM_CMD, ["run", "voice:test"], false, true);

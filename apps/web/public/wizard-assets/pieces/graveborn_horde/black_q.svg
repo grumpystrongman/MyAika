@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="mainFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#bbeeb2" />
+      <stop offset="100%" stop-color="#6ca564" />
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <circle cx="64" cy="74" r="48" fill="rgba(0,0,0,0.06)" />
+  <g fill="url(#mainFill)" stroke="#e7f0ff" stroke-width="3">
+    
+      <circle cx="44" cy="30" r="5" />
+      <circle cx="64" cy="24" r="5" />
+      <circle cx="84" cy="30" r="5" />
+      <path d="M42 40 L52 68 L76 68 L86 40 Z" />
+      <ellipse cx="64" cy="80" rx="20" ry="19" />
+      <rect x="42" y="100" width="44" height="8" rx="3" />
+    
+  </g>
+  <rect x="40" y="108" width="48" height="6" rx="3" fill="#243c20" />
+  <text x="64" y="121" text-anchor="middle" font-size="11" font-family="Verdana,Segoe UI,sans-serif" fill="#e7f0ff" opacity="0.86">GH</text>
+  <circle cx="64" cy="15" r="5" fill="#bbeeb2" filter="url(#glow)" />
+</svg>

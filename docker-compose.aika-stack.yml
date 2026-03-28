@@ -1,0 +1,119 @@
+x-server-env: &server-env
+  env_file:
+    - ./apps/server/.env
+
+x-server-volumes: &server-volumes
+  - aika_data:/app/data
+  - aika_server_data:/app/apps/server/data
+  - ./config:/app/config
+  - ./secrets:/app/secrets
+
+services:
+  aika-shell:
+    <<: *server-env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DEV_DEPS: "0"
+    image: myaika/api:local
+    working_dir: /app/apps/server
+    command: ["node", "index.js"]
+    ports:
+      - "${AIKA_HOST_PORT:-8790}:8787"
+    environment:
+      PORT: "8787"
+      AIKA_BASE_URL: "http://aika-shell:8787"
+      PUBLIC_BASE_URL: "http://localhost:${AIKA_HOST_PORT:-8790}"
+      WORKER_EXECUTION_MODE: "off"
+    volumes: *server-volumes
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    profiles: ["daily", "test", "experimental"]
+    networks: ["aika_net"]
+
+  mcp-worker:
+    <<: *server-env
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DEV_DEPS: "0"
+    image: myaika/api:local
+    working_dir: /app/apps/server
+    command: ["node", "worker.js"]
+    environment:
+      AIKA_SERVER_URL: "http://aika-shell:8787"
+      WORKER_EXECUTION_MODE: "worker"
+    volumes: *server-volumes
+    profiles: ["daily", "test", "experimental"]
+    networks: ["aika_net"]
+
+  web-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DEV_DEPS: "1"
+    image: myaika/web:local
+    working_dir: /app
+    command: ["npm", "run", "dev", "-w", "apps/web", "--", "--hostname", "0.0.0.0"]
+    environment:
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_SERVER_URL: "http://localhost:${AIKA_HOST_PORT:-8790}"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    profiles: ["daily", "test", "experimental"]
+    networks: ["aika_net"]
+
+  agent-browser:
+    image: mcr.microsoft.com/playwright:v1.58.0-noble
+    working_dir: /workspace
+    command: ["sh", "-lc", "echo 'agent-browser lane ready'; sleep infinity"]
+    shm_size: "1gb"
+    volumes:
+      - ./:/workspace
+      - browser_low_trust:/profiles/low_trust
+      - browser_work_trust:/profiles/work_trust
+      - browser_high_trust:/profiles/high_trust
+      - ./data/action_runs:/workspace/data/action_runs
+    profiles: ["test", "experimental", "browser"]
+    networks: ["aika_net"]
+
+  skyvern-lane:
+    image: ${SKYVERN_IMAGE:-alpine:3.20}
+    command: ["sh", "-lc", "echo 'Skyvern lane scaffold active. Set SKYVERN_IMAGE and env before use.'; sleep 3600"]
+    volumes:
+      - skyvern_data:/var/lib/skyvern
+    profiles: ["experimental", "skyvern"]
+    networks: ["aika_net"]
+
+  opik-lane:
+    image: ${OPIK_IMAGE:-alpine:3.20}
+    command: ["sh", "-lc", "echo 'Opik lane scaffold active. Set OPIK_IMAGE and env before use.'; sleep 3600"]
+    volumes:
+      - opik_data:/var/lib/opik
+    profiles: ["experimental", "observability", "opik"]
+    networks: ["aika_net"]
+
+networks:
+  aika_net:
+    driver: bridge
+
+volumes:
+  aika_data:
+  aika_server_data:
+  browser_low_trust:
+  browser_work_trust:
+  browser_high_trust:
+  skyvern_data:
+  opik_data:

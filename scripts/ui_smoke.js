@@ -42,9 +42,6 @@ async function run() {
     await page.getByRole("button", { name: "Recordings", exact: true }).click();
     await page.getByPlaceholder("Search recordings").waitFor();
 
-    await page.getByRole("button", { name: "Aika Tools", exact: true }).click();
-    await page.getByText("Aika Tools v1").waitFor();
-
     await page.getByRole("button", { name: "Tools", exact: true }).click();
     await page.getByText("MCP-lite Tools").waitFor();
 
@@ -55,13 +52,16 @@ async function run() {
     await page.getByText("MCP Features").waitFor();
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByText("Connect services for Aika's agent mode").waitFor();
+    await page.getByText("Link external services once. Aika will reuse them across chat, tools, and Telegram.").waitFor();
 
     await page.getByRole("button", { name: "Debug", exact: true }).click();
     await page.getByText("System Status").waitFor();
 
     await page.getByRole("button", { name: "Guide", exact: true }).click();
-    await page.getByText("Quickstart Guide + Demo Prompts").waitFor();
+    await page.getByText("Full User Guide").waitFor();
+
+    await page.getByRole("button", { name: "Capabilities", exact: true }).click();
+    await page.getByText("What Aika Can Do").waitFor();
 
     console.log("UI smoke passed.");
   } catch (err) {

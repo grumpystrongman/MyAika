@@ -1,6 +1,7 @@
 import { getSettings, setModeFlag } from "../../storage/settings.js";
 import { formatModuleSummary, listModuleRegistry } from "./moduleRegistry.js";
 import { buildDailyDigest } from "./digestEngine.js";
+import { readConfig } from "./config.js";
 
 function buildIntegrationPlan() {
   return [
@@ -12,6 +13,20 @@ function buildIntegrationPlan() {
   ];
 }
 
+function buildArchitectureMap() {
+  const model = readConfig("aika_operating_model.json", {});
+  const lanes = model?.laneRouting || {};
+  const laneLines = Object.entries(lanes).map(([lane, laneDef]) => `- ${lane}: ${laneDef.system}`);
+  return laneLines.length ? laneLines : [
+    "- orchestration: OpenClaw",
+    "- code: Codex + MCP",
+    "- deterministic_web: agent-browser",
+    "- workflow_web: Skyvern",
+    "- desktop: CUA",
+    "- observability: Opik"
+  ];
+}
+
 export async function getBootSequence(userId = "local") {
   const settings = getSettings(userId);
   if (settings.modeFlags?.boot_completed) {
@@ -20,10 +35,18 @@ export async function getBootSequence(userId = "local") {
   const modulesSummary = formatModuleSummary(listModuleRegistry({ includeDisabled: false }));
   const digest = await buildDailyDigest({ userId });
   const modeLabel = settings.modeFlags?.no_integrations ? "No-Integrations Mode" : "Integrations Enabled";
+  const architectureMap = buildArchitectureMap();
   return {
     completed: false,
     steps: [
       `Operating Mode: ${modeLabel}.`,
+      "Initialization scan:",
+      "- Tools/services discovered from configured lanes and current runtime.",
+      "- Missing lane integrations are treated as optional and remain disabled until configured.",
+      "",
+      "Architecture map:",
+      ...architectureMap,
+      "",
       "Which integrations are available? (email, calendar, files, BI dashboards, ticketing, Telegram bot)",
       "Reply with a short list (example: \"email, calendar, BI\").",
       "If none are available, reply: \"No-integrations mode\".",
@@ -37,6 +60,9 @@ export async function getBootSequence(userId = "local") {
       "",
       "Module Registry Summary:",
       modulesSummary,
+      "",
+      "Highest-leverage starter workflow:",
+      "- AIKA, execute daily operator loop for inbox triage + priorities + risk radar.",
       "",
       "Sample Daily Digest Template:",
       digest.text

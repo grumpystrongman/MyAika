@@ -9,6 +9,7 @@ tools/ffmpeg/
 dist
 .next
 out
+output/
 data/aika_tts_cache/
 data/
 data/skills/

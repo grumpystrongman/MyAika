@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "packs": [
+    {
+      "id": "mythic_realms",
+      "displayName": "Mythic Realms",
+      "spriteSet": { "whiteSkin": "mythic_realms", "blackSkin": "mythic_realms" },
+      "cutsceneTheme": "steel-ember"
+    },
+    {
+      "id": "starward_legions",
+      "displayName": "Starward Legions",
+      "spriteSet": { "whiteSkin": "starward_legions", "blackSkin": "starward_legions" },
+      "cutsceneTheme": "plasma-void"
+    },
+    {
+      "id": "druidic_conclave",
+      "displayName": "Druidic Conclave",
+      "spriteSet": { "whiteSkin": "druidic_conclave", "blackSkin": "druidic_conclave" },
+      "cutsceneTheme": "thorn-rune"
+    },
+    {
+      "id": "occult_wardens",
+      "displayName": "Occult Wardens",
+      "spriteSet": { "whiteSkin": "occult_wardens", "blackSkin": "occult_wardens" },
+      "cutsceneTheme": "sigil-noir"
+    },
+    {
+      "id": "frontier_fleet",
+      "displayName": "Frontier Fleet",
+      "spriteSet": { "whiteSkin": "frontier_fleet", "blackSkin": "frontier_fleet" },
+      "cutsceneTheme": "bridge-quantum"
+    },
+    {
+      "id": "iron_rebels",
+      "displayName": "Iron Rebels",
+      "spriteSet": { "whiteSkin": "iron_rebels", "blackSkin": "iron_rebels" },
+      "cutsceneTheme": "scrap-reactor"
+    },
+    {
+      "id": "medieval_vs_zombies",
+      "displayName": "Medieval vs Zombies",
+      "spriteSet": { "whiteSkin": "medieval_order", "blackSkin": "graveborn_horde" },
+      "cutsceneTheme": "cathedral-grave"
+    },
+    {
+      "id": "wasteland_war",
+      "displayName": "Wasteland War",
+      "spriteSet": { "whiteSkin": "wasteland_wardens", "blackSkin": "irradiated_raiders" },
+      "cutsceneTheme": "scrap-reactor"
+    }
+  ]
+}

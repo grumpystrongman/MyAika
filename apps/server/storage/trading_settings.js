@@ -30,6 +30,12 @@ const DEFAULT_CRYPTOS = [
   "LINK-USD"
 ];
 
+const DEFAULT_UI = {
+  defaultAssetClass: "stock",
+  defaultStockSymbol: "NVDA",
+  defaultCryptoSymbol: "BTC-USD"
+};
+
 const DEFAULT_TRAINING_QUESTIONS = [
   "What is my risk tolerance (low / medium / high)?",
   "What is my typical holding period?",
@@ -56,6 +62,12 @@ function parseBool(value, fallback = false) {
 function parseIntSafe(value, fallback) {
   const num = Number(value);
   return Number.isFinite(num) ? Math.trunc(num) : fallback;
+}
+
+function normalizeSymbol(value, fallback) {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  return raw.toUpperCase();
 }
 
 function defaultEmailSettings() {
@@ -89,6 +101,10 @@ function defaultEngineSettings() {
     tradeApiUrl: String(process.env.TRADING_API_URL || "http://localhost:8088"),
     alpacaFeed: String(process.env.ALPACA_FEED || "iex")
   };
+}
+
+function defaultUiSettings() {
+  return { ...DEFAULT_UI };
 }
 
 function applyOverrides(defaults, overrides) {
@@ -179,13 +195,36 @@ function sanitizeEngineSettings(input, fallback) {
   return base;
 }
 
+function sanitizeUiSettings(input, fallback) {
+  const base = { ...fallback };
+  if (!input || typeof input !== "object") return base;
+  const asset = String(input.defaultAssetClass || input.assetClass || input.asset_class || "").trim().toLowerCase();
+  if (asset === "stock" || asset === "crypto") {
+    base.defaultAssetClass = asset;
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "defaultStockSymbol") || input.default_stock_symbol || input.stockSymbol || input.stock_symbol) {
+    base.defaultStockSymbol = normalizeSymbol(
+      input.defaultStockSymbol || input.default_stock_symbol || input.stockSymbol || input.stock_symbol,
+      base.defaultStockSymbol
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "defaultCryptoSymbol") || input.default_crypto_symbol || input.cryptoSymbol || input.crypto_symbol) {
+    base.defaultCryptoSymbol = normalizeSymbol(
+      input.defaultCryptoSymbol || input.default_crypto_symbol || input.cryptoSymbol || input.crypto_symbol,
+      base.defaultCryptoSymbol
+    );
+  }
+  return base;
+}
+
 export function getTradingSettings(userId = "local") {
   const db = getDb();
   const row = db.prepare("SELECT * FROM trading_settings WHERE id = ?").get(userId);
   const defaults = {
     email: defaultEmailSettings(),
     training: defaultTrainingSettings(),
-    engine: defaultEngineSettings()
+    engine: defaultEngineSettings(),
+    ui: defaultUiSettings()
   };
   if (!row) {
     return {
@@ -193,6 +232,7 @@ export function getTradingSettings(userId = "local") {
       email: defaults.email,
       training: defaults.training,
       engine: defaults.engine,
+      ui: defaults.ui,
       createdAt: null,
       updatedAt: null
     };
@@ -200,11 +240,13 @@ export function getTradingSettings(userId = "local") {
   const emailStored = safeJsonParse(row.email_json, {});
   const trainingStored = safeJsonParse(row.training_json, {});
   const engineStored = safeJsonParse(row.engine_json, {});
+  const uiStored = safeJsonParse(row.ui_json, {});
   return {
     id: userId,
     email: sanitizeEmailSettings(emailStored, defaults.email),
     training: sanitizeTrainingSettings(trainingStored, defaults.training),
     engine: sanitizeEngineSettings(engineStored, defaults.engine),
+    ui: sanitizeUiSettings(uiStored, defaults.ui),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
   };
@@ -225,21 +267,27 @@ export function updateTradingSettings(userId = "local", patch = {}) {
     applyOverrides(current.engine, patch.engine),
     current.engine
   );
+  const ui = sanitizeUiSettings(
+    applyOverrides(current.ui, patch.ui),
+    current.ui
+  );
   const now = nowIso();
   const createdAt = current.createdAt || now;
   db.prepare(
-    `INSERT INTO trading_settings (id, email_json, training_json, engine_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO trading_settings (id, email_json, training_json, engine_json, ui_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        email_json = excluded.email_json,
        training_json = excluded.training_json,
        engine_json = excluded.engine_json,
+       ui_json = excluded.ui_json,
        updated_at = excluded.updated_at`
   ).run(
     userId,
     JSON.stringify(email),
     JSON.stringify(training),
     JSON.stringify(engine),
+    JSON.stringify(ui),
     createdAt,
     now
   );
@@ -248,6 +296,7 @@ export function updateTradingSettings(userId = "local", patch = {}) {
     email,
     training,
     engine,
+    ui,
     createdAt,
     updatedAt: now
   };

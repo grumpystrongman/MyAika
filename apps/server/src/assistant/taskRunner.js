@@ -159,7 +159,7 @@ async function sendTaskEmail({ task, output }) {
 
   const result = await executor.callTool({
     name: "email.send",
-    params: { to: recipients, subject, body: text },
+    params: { to: recipients, subject, body: text, autonomy: "assistant_task" },
     context: { userId: task?.ownerId || "local", source: "assistant_task" }
   });
 

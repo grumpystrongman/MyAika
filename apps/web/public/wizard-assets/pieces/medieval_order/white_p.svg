@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="mainFill" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fff6c4" />
+      <stop offset="100%" stop-color="#e1d099" />
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <circle cx="64" cy="74" r="48" fill="rgba(0,0,0,0.06)" />
+  <g fill="url(#mainFill)" stroke="#0f1628" stroke-width="3">
+    
+      <circle cx="64" cy="38" r="13" />
+      <path d="M48 64 Q64 51 80 64 L76 100 H52 Z" />
+      <rect x="44" y="100" width="40" height="8" rx="3" />
+    
+  </g>
+  <rect x="40" y="108" width="48" height="6" rx="3" fill="#5d4e3e" />
+  <text x="64" y="121" text-anchor="middle" font-size="11" font-family="Verdana,Segoe UI,sans-serif" fill="#0f1628" opacity="0.86">MO</text>
+  <circle cx="64" cy="15" r="5" fill="#fff6c4" filter="url(#glow)" />
+</svg>

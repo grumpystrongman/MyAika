@@ -5,18 +5,24 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3000",
+    "dev:wizard": "next dev -H 127.0.0.1 -p 3105",
     "dev:https": "next dev --experimental-https -p 3000",
     "build": "next build",
     "start": "next start -p 3000"
   },
   "dependencies": {
     "@myaika/shared": "0.0.1",
+    "chess.js": "^1.4.0",
+    "chessground": "^9.2.1",
     "d3-force": "^3.0.0",
+    "gsap": "^3.14.2",
     "next": "^14.2.5",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "stockfish": "^18.0.5",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/react": "19.2.9",

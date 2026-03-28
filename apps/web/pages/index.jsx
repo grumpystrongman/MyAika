@@ -373,6 +373,55 @@ function formatActionStatus(status = "") {
   return value.replace(/_/g, " ");
 }
 
+function formatApprovalStatus(status = "") {
+  const value = String(status || "").toLowerCase();
+  if (!value) return "pending";
+  if (value === "denied") return "rejected";
+  return value.replace(/_/g, " ");
+}
+
+function normalizeApprovalContext(context = {}, fallback = {}) {
+  return {
+    action: String(context?.action || fallback?.action || "").trim(),
+    why: String(context?.why || fallback?.why || "").trim(),
+    tool: String(context?.tool || fallback?.tool || "").trim(),
+    boundary: String(context?.boundary || fallback?.boundary || "").trim(),
+    risk: String(context?.risk || fallback?.risk || "").trim(),
+    rollback: String(context?.rollback || fallback?.rollback || "").trim()
+  };
+}
+
+function inferBoundaryFromLane(lane = "") {
+  const normalized = String(lane || "").toLowerCase();
+  if (normalized === "desktop") return "host -> sandbox/VM desktop control lane";
+  if (normalized === "deterministic_web" || normalized === "workflow_web") return "host -> external web automation lane";
+  return "host -> execution lane requiring approval";
+}
+
+function inferRollbackFromLane(lane = "") {
+  const normalized = String(lane || "").toLowerCase();
+  if (normalized === "desktop") {
+    return "Deny to prevent execution. If already executed, stop the desktop run and discard generated artifacts.";
+  }
+  if (normalized === "deterministic_web" || normalized === "workflow_web") {
+    return "Deny to prevent execution. If already executed, stop the run and delete captured artifacts.";
+  }
+  return "Deny to prevent execution. If already executed, revert impacted state and rerun verification.";
+}
+
+function deriveApprovalContext({ approval = null, protocol = null, laneResult = null, prompt = "" } = {}) {
+  const lane = protocol?.lane?.lane || "";
+  const fallback = {
+    action: prompt || approval?.humanSummary || "",
+    why: protocol?.risk?.reason || "High-impact action requires approval.",
+    tool: approval?.toolName || laneResult?.tool || protocol?.lane?.system || "",
+    boundary: inferBoundaryFromLane(lane),
+    risk: protocol?.risk?.level || approval?.riskLevel || "approval_required",
+    rollback: inferRollbackFromLane(lane)
+  };
+  return normalizeApprovalContext(approval?.approvalContext || {}, fallback);
+}
+
 async function readJsonResponse(response) {
   const text = await response.text();
   if (!text) return {};
@@ -643,6 +692,11 @@ export default function Home() {
     stocks: "",
     cryptos: ""
   });
+  const [tradingUiSettings, setTradingUiSettings] = useState({
+    defaultAssetClass: "stock",
+    defaultStockSymbol: "NVDA",
+    defaultCryptoSymbol: "BTC-USD"
+  });
   const [tradingQuestions, setTradingQuestions] = useState([]);
   const [tradingNotes, setTradingNotes] = useState("");
   const [tradingSettingsStatus, setTradingSettingsStatus] = useState("");
@@ -661,6 +715,7 @@ export default function Home() {
   const [toolCallResult, setToolCallResult] = useState("");
   const [toolApproval, setToolApproval] = useState(null);
   const [toolApprovalStatus, setToolApprovalStatus] = useState("");
+  const [chatApprovalStatus, setChatApprovalStatus] = useState({});
   const [toolHistory, setToolHistory] = useState([]);
   const [toolHistoryError, setToolHistoryError] = useState("");
   const [aikaModules, setAikaModules] = useState([]);
@@ -1074,6 +1129,38 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const interval = setInterval(async () => {
+      const current = logRef.current || [];
+      const tracked = current.filter(item => item.approval?.id);
+      if (!tracked.length) return;
+      let approvals = [];
+      try {
+        const response = await fetch(`${SERVER_URL}/api/approvals`);
+        if (!response.ok) return;
+        const data = await response.json();
+        approvals = Array.isArray(data?.approvals) ? data.approvals : [];
+      } catch {
+        return;
+      }
+      if (!approvals.length) return;
+      const approvalMap = new Map(approvals.map(item => [item.id, item]));
+      setLog(prev => prev.map(item => {
+        const approvalId = item.approval?.id;
+        if (!approvalId || !approvalMap.has(approvalId)) return item;
+        const latest = approvalMap.get(approvalId);
+        const currentStatus = String(item.approval?.status || "").toLowerCase();
+        const latestStatus = String(latest?.status || "").toLowerCase();
+        if (currentStatus === latestStatus && item.approval?.token === latest?.token) return item;
+        return {
+          ...item,
+          approval: { ...item.approval, ...latest }
+        };
+      }));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const theme = THEMES.find(t => t.id === themeId) || THEMES[0];
     Object.entries(theme.vars).forEach(([key, value]) => {
@@ -1261,36 +1348,46 @@ export default function Home() {
       setChatError(data.error || "empty_reply");
     }
     const b = data.behavior || behavior;
+    const messageApproval = data?.approval || null;
+    if (messageApproval?.id) {
+      setToolApproval(messageApproval);
+      setToolApprovalStatus("Approval required from recent chat response.");
+    }
 
-      setBehavior({ ...b, speaking: false });
-      const displayReply = stripEmotionTags(reply);
-      const replyMessageId = makeMessageId();
-      const replyCitations = Array.isArray(data.citations) ? data.citations : [];
-      const actionMeta = data?.action ? { ...data.action } : null;
-      const memoryNote = data?.memoryAdded
-        ? "Added to memory"
-        : data?.memoryRecall
-          ? "Memory recall"
-          : "";
-      setLog(l => [
-        ...l,
-        {
-          id: replyMessageId,
-          role: "assistant",
-          text: displayReply || "(no reply)",
-          prompt: text,
-          source: data?.source || "chat",
-          citations: replyCitations,
-          memoryNote,
-          actionMeta
-        }
-      ]);
-      setLastAssistantText(displayReply);
-
-      if (autoSpeak && !textOnly && displayReply) {
-        const spoken = displayReply;
-        if (spoken) speakChunks(spoken, { use_raw_text: true });
+    setBehavior({ ...b, speaking: false });
+    const displayReply = stripEmotionTags(reply);
+    const replyMessageId = makeMessageId();
+    const replyCitations = Array.isArray(data.citations) ? data.citations : [];
+    const actionMeta = data?.action ? { ...data.action } : null;
+    const memoryNote = data?.memoryAdded
+      ? "Added to memory"
+      : data?.memoryRecall
+        ? "Memory recall"
+        : "";
+    setLog(l => [
+      ...l,
+      {
+        id: replyMessageId,
+        role: "assistant",
+        text: displayReply || "(no reply)",
+        prompt: text,
+        source: data?.source || "chat",
+        citations: replyCitations,
+        memoryNote,
+        actionMeta,
+        approval: messageApproval,
+        protocol: data?.aika?.protocol || null,
+        laneResult: data?.aika?.laneResult || null,
+        moduleResult: data?.aika?.moduleResult || null,
+        approvalExecution: null
       }
+    ]);
+    setLastAssistantText(displayReply);
+
+    if (autoSpeak && !textOnly && displayReply) {
+      const spoken = displayReply;
+      if (spoken) speakChunks(spoken, { use_raw_text: true });
+    }
   }
 
   async function submitFeedback(message, rating) {
@@ -3077,6 +3174,7 @@ export default function Home() {
       const email = data?.email || {};
       const training = data?.training || {};
       const engine = data?.engine || {};
+      const ui = data?.ui || {};
       setTradingEmailSettings({
         enabled: Boolean(email.enabled),
         time: email.time || "08:00",
@@ -3094,6 +3192,11 @@ export default function Home() {
       setTradingEngineSettings(prev => ({
         tradeApiUrl: engine.tradeApiUrl || prev.tradeApiUrl,
         alpacaFeed: engine.alpacaFeed || prev.alpacaFeed
+      }));
+      setTradingUiSettings(prev => ({
+        defaultAssetClass: ui.defaultAssetClass || prev.defaultAssetClass,
+        defaultStockSymbol: ui.defaultStockSymbol || prev.defaultStockSymbol,
+        defaultCryptoSymbol: ui.defaultCryptoSymbol || prev.defaultCryptoSymbol
       }));
       setTradingSettingsStatus("Loaded settings.");
     } catch (err) {
@@ -3133,6 +3236,11 @@ export default function Home() {
         engine: {
           tradeApiUrl: tradingEngineSettings.tradeApiUrl,
           alpacaFeed: tradingEngineSettings.alpacaFeed
+        },
+        ui: {
+          defaultAssetClass: tradingUiSettings.defaultAssetClass,
+          defaultStockSymbol: String(tradingUiSettings.defaultStockSymbol || "").trim().toUpperCase(),
+          defaultCryptoSymbol: String(tradingUiSettings.defaultCryptoSymbol || "").trim().toUpperCase()
         }
       };
       const r = await fetch(`${SERVER_URL}/api/trading/settings`, {
@@ -3163,6 +3271,21 @@ export default function Home() {
           tradeApiUrl: data.settings.engine?.tradeApiUrl || prev.tradeApiUrl,
           alpacaFeed: data.settings.engine?.alpacaFeed || prev.alpacaFeed
         }));
+        setTradingUiSettings(prev => ({
+          defaultAssetClass: data.settings.ui?.defaultAssetClass || prev.defaultAssetClass,
+          defaultStockSymbol: data.settings.ui?.defaultStockSymbol || prev.defaultStockSymbol,
+          defaultCryptoSymbol: data.settings.ui?.defaultCryptoSymbol || prev.defaultCryptoSymbol
+        }));
+        try {
+          const savedUi = data.settings.ui || {};
+          window.localStorage.setItem("aika_trading_defaults", JSON.stringify({
+            assetClass: savedUi.defaultAssetClass || tradingUiSettings.defaultAssetClass,
+            stock: savedUi.defaultStockSymbol || tradingUiSettings.defaultStockSymbol,
+            crypto: savedUi.defaultCryptoSymbol || tradingUiSettings.defaultCryptoSymbol
+          }));
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       setTradingSettingsError(err?.message || "trading_settings_save_failed");
@@ -3516,29 +3639,99 @@ export default function Home() {
     }
   }
 
+  async function performApprovalAction(approval, action) {
+    if (!approval?.id) {
+      throw new Error("approval_not_found");
+    }
+    const endpoint = action === "approve" ? "approve" : action === "deny" ? "deny" : "execute";
+    const token = approval?.token || "";
+    const r = await fetch(`${SERVER_URL}/api/approvals/${approval.id}/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(endpoint === "execute" ? { token } : {})
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || "approval_update_failed");
+    return { endpoint, data };
+  }
+
   async function updateToolApproval(action, token) {
     if (!toolApproval?.id) return;
     setToolApprovalStatus("");
     try {
-      const endpoint = action === "approve" ? "approve" : action === "deny" ? "deny" : "execute";
-      const r = await fetch(`${SERVER_URL}/api/approvals/${toolApproval.id}/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(endpoint === "execute" ? { token } : {})
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.error || "approval_update_failed");
+      const scopedApproval = token ? { ...toolApproval, token } : toolApproval;
+      const { endpoint, data } = await performApprovalAction(scopedApproval, action);
       if (endpoint === "execute") {
         setToolApprovalStatus("Approved action executed.");
         setToolApproval(null);
         setToolCallResult(JSON.stringify(data, null, 2));
       } else {
-        setToolApproval(data.approval || null);
+        const returnedApproval = data?.approval || null;
+        const nextApproval = returnedApproval
+          ? {
+            ...scopedApproval,
+            ...returnedApproval,
+            approvalContext: returnedApproval?.approvalContext || scopedApproval?.approvalContext || null
+          }
+          : null;
+        setToolApproval(nextApproval);
         setToolApprovalStatus(endpoint === "approve" ? "Approved. Ready to execute." : "Approval denied.");
       }
       await refreshToolHistory();
     } catch (err) {
       setToolApprovalStatus(err?.message || "approval_update_failed");
+    }
+  }
+
+  async function updateChatApproval(messageId, action) {
+    if (!messageId) return;
+    const message = (logRef.current || []).find(item => item.id === messageId);
+    const approval = message?.approval || null;
+    if (!approval?.id) return;
+    setChatApprovalStatus(prev => ({ ...prev, [messageId]: "" }));
+    try {
+      const { endpoint, data } = await performApprovalAction(approval, action);
+      if (endpoint === "execute") {
+        const executedApproval = { ...approval, status: "executed" };
+        setLog(prev => prev.map(item => (
+          item.id === messageId
+            ? { ...item, approval: executedApproval, approvalExecution: data }
+            : item
+        )));
+        if (toolApproval?.id === approval.id) {
+          setToolApproval(null);
+          setToolApprovalStatus("Approved action executed.");
+        }
+        setChatApprovalStatus(prev => ({ ...prev, [messageId]: "Approved action executed." }));
+      } else {
+        const returnedApproval = data?.approval || null;
+        const nextApproval = returnedApproval
+          ? {
+            ...approval,
+            ...returnedApproval,
+            approvalContext: returnedApproval?.approvalContext || approval?.approvalContext || null
+          }
+          : {
+          ...approval,
+          status: endpoint === "approve" ? "approved" : "denied"
+        };
+        setLog(prev => prev.map(item => (
+          item.id === messageId
+            ? { ...item, approval: nextApproval }
+            : item
+        )));
+        if (toolApproval?.id === approval.id) {
+          setToolApproval(nextApproval);
+          setToolApprovalStatus(endpoint === "approve" ? "Approved. Ready to execute." : "Approval denied.");
+        }
+        setChatApprovalStatus(prev => ({
+          ...prev,
+          [messageId]: endpoint === "approve" ? "Approved. Ready to execute." : "Approval denied."
+        }));
+      }
+      await refreshToolHistory();
+    } catch (err) {
+      setChatApprovalStatus(prev => ({ ...prev, [messageId]: err?.message || "approval_update_failed" }));
     }
   }
 
@@ -4564,6 +4757,49 @@ export default function Home() {
               </label>
             </div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+              Trading Defaults
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Choose which asset class and ticker load first in the Trading terminal.
+            </div>
+            <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: "1px solid var(--panel-border)", background: "var(--panel-bg)" }}>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                Default asset class
+                <select
+                  value={tradingUiSettings.defaultAssetClass}
+                  onChange={(e) => setTradingUiSettings(prev => ({ ...prev, defaultAssetClass: e.target.value }))}
+                  style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                >
+                  <option value="stock">Stocks</option>
+                  <option value="crypto">Crypto</option>
+                </select>
+              </label>
+              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Default stock ticker
+                  <input
+                    value={tradingUiSettings.defaultStockSymbol}
+                    onChange={(e) => setTradingUiSettings(prev => ({
+                      ...prev,
+                      defaultStockSymbol: e.target.value.toUpperCase()
+                    }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+                  Default crypto ticker
+                  <input
+                    value={tradingUiSettings.defaultCryptoSymbol}
+                    onChange={(e) => setTradingUiSettings(prev => ({
+                      ...prev,
+                      defaultCryptoSymbol: e.target.value.toUpperCase()
+                    }))}
+                    style={{ padding: 6, borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                  />
+                </label>
+              </div>
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
               Trading Emails
             </div>
             <div style={{ fontSize: 12, color: "#6b7280" }}>
@@ -5510,34 +5746,45 @@ export default function Home() {
                 <div style={{ fontSize: 12, color: "#6b7280" }}>No approvals from recent tool calls.</div>
               )}
               {toolApproval && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
-                  <div><b>Tool:</b> {toolApproval.toolName}</div>
-                  <div><b>Status:</b> {toolApproval.status}</div>
-                  <div><b>Summary:</b> {toolApproval.humanSummary || "Approval required"}</div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                    {toolApproval.status === "pending" && (
-                      <>
-                        <button onClick={() => updateToolApproval("approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
-                          Approve
+                (() => {
+                  const ctx = deriveApprovalContext({ approval: toolApproval, prompt: toolApproval.humanSummary || "" });
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                      <div><b>Tool:</b> {toolApproval.toolName}</div>
+                      <div><b>Status:</b> {toolApproval.status}</div>
+                      <div><b>Summary:</b> {toolApproval.humanSummary || "Approval required"}</div>
+                      {ctx.action && <div><b>Action:</b> {ctx.action}</div>}
+                      {ctx.why && <div><b>Why:</b> {ctx.why}</div>}
+                      {ctx.tool && <div><b>Tool lane:</b> {ctx.tool}</div>}
+                      {ctx.boundary && <div><b>Boundary:</b> {ctx.boundary}</div>}
+                      {ctx.risk && <div><b>Approval Risk:</b> {ctx.risk}</div>}
+                      {ctx.rollback && <div><b>Rollback:</b> {ctx.rollback}</div>}
+                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                        {toolApproval.status === "pending" && (
+                          <>
+                            <button onClick={() => updateToolApproval("approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                              Approve
+                            </button>
+                            <button onClick={() => updateToolApproval("deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                              Deny
+                            </button>
+                          </>
+                        )}
+                        {toolApproval.status === "approved" && (
+                          <button onClick={() => updateToolApproval("execute", toolApproval.token)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                            Execute
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setActiveTab("safety")}
+                          style={{ padding: "4px 8px", borderRadius: 6 }}
+                        >
+                          Open Safety
                         </button>
-                        <button onClick={() => updateToolApproval("deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
-                          Deny
-                        </button>
-                      </>
-                    )}
-                    {toolApproval.status === "approved" && (
-                      <button onClick={() => updateToolApproval("execute", toolApproval.token)} style={{ padding: "4px 8px", borderRadius: 6 }}>
-                        Execute
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setActiveTab("safety")}
-                      style={{ padding: "4px 8px", borderRadius: 6 }}
-                    >
-                      Open Safety
-                    </button>
-                  </div>
-                </div>
+                      </div>
+                    </div>
+                  );
+                })()
               )}
               {toolApprovalStatus && <div style={{ fontSize: 12, color: "var(--accent)", marginTop: 6 }}>{toolApprovalStatus}</div>}
             </div>
@@ -6011,6 +6258,73 @@ export default function Home() {
                 <div style={{ marginTop: 4, fontSize: 12, color: m.actionMeta.status === "error" ? "#b91c1c" : "#6b7280" }}>
                   Action: {formatActionLabel(m.actionMeta.type)} - {formatActionStatus(m.actionMeta.status)}
                 </div>
+              )}
+              {m.protocol && (
+                <details style={{ marginTop: 6 }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "#6b7280" }}>
+                    Execution protocol
+                  </summary>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div><b>Intent:</b> {m.protocol.intent || "n/a"}</div>
+                    <div><b>Lane:</b> {m.protocol.lane?.system || "n/a"} ({m.protocol.lane?.lane || "n/a"})</div>
+                    <div><b>Risk:</b> {m.protocol.risk?.level || "auto"}</div>
+                    {m.laneResult?.tool && <div><b>Tool:</b> {m.laneResult.tool}</div>}
+                    {m.laneResult?.evidence && <div><b>Evidence:</b> {m.laneResult.evidence}</div>}
+                    {m.moduleResult?.run?.id && <div><b>Module Run:</b> {m.moduleResult.run.id}</div>}
+                  </div>
+                </details>
+              )}
+              {m.approval && (
+                (() => {
+                  const ctx = deriveApprovalContext({
+                    approval: m.approval,
+                    protocol: m.protocol,
+                    laneResult: m.laneResult,
+                    prompt: m.prompt || m.approval?.humanSummary || ""
+                  });
+                  return (
+                    <div style={{ marginTop: 6, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg-soft)", fontSize: 12, color: "var(--text-muted)" }}>
+                      <div><b>Approval:</b> {m.approval.id}</div>
+                      <div><b>Status:</b> {formatApprovalStatus(m.approval.status)}</div>
+                      {m.approval.toolName && <div><b>Tool:</b> {m.approval.toolName}</div>}
+                      {m.approval.humanSummary && <div style={{ marginTop: 2 }}><b>Summary:</b> {m.approval.humanSummary}</div>}
+                      {ctx.action && <div><b>Action:</b> {ctx.action}</div>}
+                      {ctx.why && <div><b>Why:</b> {ctx.why}</div>}
+                      {ctx.tool && <div><b>Tool lane:</b> {ctx.tool}</div>}
+                      {ctx.boundary && <div><b>Boundary:</b> {ctx.boundary}</div>}
+                      {ctx.risk && <div><b>Approval Risk:</b> {ctx.risk}</div>}
+                      {ctx.rollback && <div><b>Rollback:</b> {ctx.rollback}</div>}
+                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                        {String(m.approval.status || "").toLowerCase() === "pending" && (
+                          <>
+                            <button onClick={() => updateChatApproval(m.id, "approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                              Approve
+                            </button>
+                            <button onClick={() => updateChatApproval(m.id, "deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                              Deny
+                            </button>
+                          </>
+                        )}
+                        {String(m.approval.status || "").toLowerCase() === "approved" && (
+                          <button onClick={() => updateChatApproval(m.id, "execute")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                            Execute
+                          </button>
+                        )}
+                      </div>
+                      {chatApprovalStatus[m.id] && (
+                        <div style={{ marginTop: 6, color: "var(--accent)" }}>{chatApprovalStatus[m.id]}</div>
+                      )}
+                      {m.approvalExecution && (
+                        <details style={{ marginTop: 6 }}>
+                          <summary style={{ cursor: "pointer" }}>Execution result</summary>
+                          <pre style={{ marginTop: 6, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+{JSON.stringify(m.approvalExecution, null, 2)}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })()
               )}
               {Array.isArray(m.citations) && m.citations.length > 0 && (
                 <details style={{ marginTop: 6 }}>

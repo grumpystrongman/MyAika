@@ -63,6 +63,37 @@ Defaults:
 - API: `http://localhost:8787`
 - Worker shares the same `./data` and `./apps/server/data` volumes.
 
+## Docker-first rollout (staged lanes)
+Use `docker-compose.aika-stack.yml` for a lane-based layout aligned to OpenClaw/Codex/MCP/browser/observability boundaries.
+
+Profiles:
+- `daily`: `aika-shell`, `mcp-worker`, `web-ui`
+- `test`: daily + `agent-browser`
+- `experimental`: daily + optional `skyvern-lane` + `opik-lane` scaffolds
+
+Commands:
+- Daily: `docker compose -f docker-compose.aika-stack.yml --profile daily up -d --build`
+- Test: `docker compose -f docker-compose.aika-stack.yml --profile test up -d --build`
+- Experimental: `docker compose -f docker-compose.aika-stack.yml --profile experimental up -d --build`
+- Stop: `docker compose -f docker-compose.aika-stack.yml down`
+- One command (up + verify): `npm run stack:daily`
+- Fast no-build variant: `npm run stack:daily:nobuild`
+
+Host API port:
+- Uses `${AIKA_HOST_PORT:-8790}` mapped to container `8787`.
+
+Verification:
+- `npm run verify:core`
+- or `powershell -ExecutionPolicy Bypass -File scripts/verify_core_stack.ps1`
+- Compose-only verification: `powershell -ExecutionPolicy Bypass -File scripts/verify_core_stack.ps1 -SkipApi`
+- Optional stateful digest-path check: `powershell -ExecutionPolicy Bypass -File scripts/verify_core_stack.ps1 -IncludeWriteChecks`
+- Verifier now includes compose runtime state + web-ui readiness checks.
+
+Trust boundary policy:
+- `docs/TRUST_BOUNDARY_MODES.md`
+- `docs/OPERATIONS_ROLLOUT.md`
+- `docs/AIKA_OPERATING_MODEL.md`
+
 Default UI behavior:
 - Voice Mode is on by default (auto-listen + auto-speak).
 - Settings and advanced voice controls are behind the "Settings" button.
@@ -219,6 +250,9 @@ How to add a new action type:
 Approvals:
 - Pending approvals can be reviewed in the Safety tab.
 - Approvals require an authenticated session or `ADMIN_APPROVAL_TOKEN`.
+- Optional: allowlisted auto-approval for routine assistant task emails by setting
+  `ASSISTANT_TASK_EMAIL_AUTO_APPROVE=1` plus `ASSISTANT_TASK_EMAIL_AUTO_APPROVE_ALLOWLIST`
+  (or `ASSISTANT_TASK_EMAIL_TO`) and keeping the subject-prefix guard.
 
 Audit verification:
 - `GET /api/audit/verify` validates the hash chain.

@@ -3,8 +3,11 @@ import { forceSimulation, forceManyBody, forceCenter, forceLink, forceCollide } 
 
 const DEFAULTS = {
   crypto: "BTC-USD",
-  stock: "SPY"
+  stock: "NVDA",
+  assetClass: "stock"
 };
+const TRADING_DEFAULTS_KEY = "aika_trading_defaults";
+const TRADING_RECS_CACHE_KEY = "aika_trading_recs_cache";
 
 const INTERVALS = [
   { label: "1m", value: "1m" },
@@ -44,6 +47,73 @@ const VALID_TRADING_TABS = new Set([
   "knowledge",
   "scenarios"
 ]);
+
+function normalizeTradingSymbol(value, fallback) {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  return raw.toUpperCase();
+}
+
+function normalizeTradingDefaults(input = {}) {
+  const base = {
+    assetClass: DEFAULTS.assetClass,
+    stock: DEFAULTS.stock,
+    crypto: DEFAULTS.crypto
+  };
+  if (!input || typeof input !== "object") return base;
+  const asset = String(input.assetClass || input.defaultAssetClass || "").trim().toLowerCase();
+  if (asset === "stock" || asset === "crypto") base.assetClass = asset;
+  base.stock = normalizeTradingSymbol(input.stock || input.defaultStockSymbol, base.stock);
+  base.crypto = normalizeTradingSymbol(input.crypto || input.defaultCryptoSymbol, base.crypto);
+  return base;
+}
+
+function loadTradingDefaults() {
+  if (typeof window === "undefined") return normalizeTradingDefaults();
+  try {
+    const raw = window.localStorage.getItem(TRADING_DEFAULTS_KEY);
+    if (!raw) return normalizeTradingDefaults();
+    const parsed = JSON.parse(raw);
+    return normalizeTradingDefaults(parsed);
+  } catch {
+    return normalizeTradingDefaults();
+  }
+}
+
+function saveTradingDefaults(defaults) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TRADING_DEFAULTS_KEY, JSON.stringify({
+      assetClass: defaults.assetClass,
+      stock: defaults.stock,
+      crypto: defaults.crypto
+    }));
+  } catch {
+    // ignore
+  }
+}
+
+function readRecommendationsCache() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(TRADING_RECS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.picks)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeRecommendationsCache(payload) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TRADING_RECS_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+}
 
 function formatNumber(value, digits = 2) {
   if (value == null || Number.isNaN(value)) return "--";
@@ -1146,8 +1216,10 @@ function MacdPanel({
 }
 
 export default function TradingPanel({ serverUrl = "", fullPage = false }) {
-  const [assetClass, setAssetClass] = useState("crypto");
-  const [symbol, setSymbol] = useState(DEFAULTS.crypto);
+  const initialDefaults = useMemo(() => loadTradingDefaults(), []);
+  const [defaultSymbols, setDefaultSymbols] = useState(initialDefaults);
+  const [assetClass, setAssetClass] = useState(initialDefaults.assetClass);
+  const [symbol, setSymbol] = useState(initialDefaults[initialDefaults.assetClass] || DEFAULTS.stock);
   const [interval, setInterval] = useState("1h");
   const [candles, setCandles] = useState([]);
   const [dataSource, setDataSource] = useState("loading");
@@ -1155,6 +1227,7 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
   const [error, setError] = useState("");
   const [marketNote, setMarketNote] = useState("");
   const [symbolTouched, setSymbolTouched] = useState(false);
+  const [assetTouched, setAssetTouched] = useState(false);
   const [showVwap, setShowVwap] = useState(true);
   const [showRsi, setShowRsi] = useState(true);
   const [showMacd, setShowMacd] = useState(true);
@@ -1533,9 +1606,11 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   const switchAssetClass = (next) => {
     if (next === assetClass) return;
+    setAssetTouched(true);
     setAssetClass(next);
     setSymbolTouched(false);
-    setSymbol(next === "crypto" ? DEFAULTS.crypto : DEFAULTS.stock);
+    const nextSymbol = defaultSymbols?.[next] || (next === "crypto" ? DEFAULTS.crypto : DEFAULTS.stock);
+    setSymbol(nextSymbol);
     setCandles([]);
     setDataSource("loading");
     setError("");
@@ -1587,6 +1662,12 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         if (!mounted) return;
         if (!resp.ok) throw new Error(data?.error || "trading_settings_failed");
         setTradingProfile(data || { training: { questions: [], notes: "" } });
+        const uiDefaults = normalizeTradingDefaults({
+          assetClass: data?.ui?.defaultAssetClass,
+          stock: data?.ui?.defaultStockSymbol,
+          crypto: data?.ui?.defaultCryptoSymbol
+        });
+        setDefaultSymbols(uiDefaults);
         const engine = data?.engine || {};
         const engineUrl = engine.tradeApiUrl || "";
         const engineFeed = engine.alpacaFeed || "";
@@ -1637,8 +1718,14 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
     setRecommendationsLoading(true);
     setRecommendationsError("");
     setRecommendationsWarnings([]);
+    const cached = readRecommendationsCache();
+    if (!recommendations.length && cached?.picks?.length) {
+      setRecommendations(cached.picks);
+      setRecommendationsSource(cached.source || "cache");
+      setRecommendationsWarnings([...(cached.warnings || []), "Showing cached picks while updating."]);
+    }
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    const timeout = setTimeout(() => controller.abort(), 35000);
     try {
       const resp = await fetch(`${serverUrl}/api/trading/recommendations`, {
         method: "POST",
@@ -1666,12 +1753,27 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
         : [];
       setRecommendations(picks);
       setRecommendationsSource(data?.source || "llm");
-      setRecommendationsWarnings(Array.isArray(data?.warnings) ? data.warnings : []);
+      const nextWarnings = Array.isArray(data?.warnings) ? data.warnings : [];
+      setRecommendationsWarnings(nextWarnings);
+      writeRecommendationsCache({
+        picks,
+        source: data?.source || "llm",
+        warnings: nextWarnings,
+        savedAt: new Date().toISOString()
+      });
     } catch (err) {
       const message = err?.name === "AbortError"
         ? "Recommendations request timed out."
         : (err?.message || "recommendations_failed");
-      setRecommendationsError(message);
+      const fallback = readRecommendationsCache();
+      if (fallback?.picks?.length) {
+        setRecommendations(fallback.picks);
+        setRecommendationsSource(fallback.source || "cache");
+        setRecommendationsWarnings([...(fallback.warnings || []), "Showing cached picks."]);
+        setRecommendationsError(`${message} Showing cached picks.`);
+      } else {
+        setRecommendationsError(message);
+      }
     } finally {
       clearTimeout(timeout);
       setRecommendationsLoading(false);
@@ -2000,9 +2102,22 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
 
   useEffect(() => {
     if (!symbolTouched) {
-      setSymbol(assetClass === "crypto" ? DEFAULTS.crypto : DEFAULTS.stock);
+      const nextDefault = defaultSymbols?.[assetClass] || (assetClass === "crypto" ? DEFAULTS.crypto : DEFAULTS.stock);
+      setSymbol(nextDefault);
     }
-  }, [assetClass, symbolTouched]);
+  }, [assetClass, symbolTouched, defaultSymbols]);
+
+  useEffect(() => {
+    if (assetTouched) return;
+    const preferred = defaultSymbols?.assetClass || DEFAULTS.assetClass;
+    if (preferred !== assetClass) {
+      setAssetClass(preferred);
+    }
+  }, [defaultSymbols, assetTouched, assetClass]);
+
+  useEffect(() => {
+    saveTradingDefaults(defaultSymbols);
+  }, [defaultSymbols]);
 
   useEffect(() => {
     setChartView(prev => ({ ...prev, window: 120, offset: 0 }));
@@ -3492,6 +3607,13 @@ export default function TradingPanel({ serverUrl = "", fullPage = false }) {
               <input
                 value={symbol}
                 onChange={(e) => { setSymbol(e.target.value.toUpperCase()); setSymbolTouched(true); }}
+                onBlur={() => {
+                  if (!String(symbol || "").trim()) {
+                    const nextDefault = defaultSymbols?.[assetClass] || (assetClass === "crypto" ? DEFAULTS.crypto : DEFAULTS.stock);
+                    setSymbol(nextDefault);
+                    setSymbolTouched(false);
+                  }
+                }}
                 style={{ flex: 1, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", fontSize: 14 }}
               />
               <select
