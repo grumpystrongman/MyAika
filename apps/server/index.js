@@ -309,6 +309,7 @@ import { buildMemoryGraph } from "./src/knowledgeGraph/memoryGraph.js";
 import { enqueueWork, listWork, claimWork, completeWork } from "./src/workers/queue.js";
 import { startWorkerLoop } from "./src/workers/runner.js";
 import { listPlugins, getPlugin, savePlugin } from "./src/plugins/registry.js";
+import { buildWeeklyAdoptionSummary, formatWeeklyAdoptionSummary } from "./src/plugins/openaegisAdoption.js";
 import {
   getSkillsState,
   toggleSkill,
@@ -7742,6 +7743,27 @@ app.post("/api/workers/:id/complete", rateLimit, (req, res) => {
 
 app.get("/api/plugins", rateLimit, (_req, res) => {
   res.json({ plugins: listPlugins() });
+});
+
+app.get("/api/plugins/adoption/weekly", rateLimit, (req, res) => {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: "admin_required" });
+  }
+  try {
+    const pluginId = req.query?.pluginId ? String(req.query.pluginId) : "";
+    const hostId = req.query?.hostId ? String(req.query.hostId) : "";
+    const startAt = req.query?.start ? String(req.query.start) : "";
+    const endAt = req.query?.end ? String(req.query.end) : "";
+    const format = req.query?.format ? String(req.query.format).toLowerCase() : "json";
+    const summary = buildWeeklyAdoptionSummary({ pluginId, hostId, startAt, endAt });
+    if (format === "text") {
+      res.type("text/plain").send(formatWeeklyAdoptionSummary(summary));
+      return;
+    }
+    res.json(summary);
+  } catch (err) {
+    res.status(400).json({ error: err?.message || "adoption_summary_failed" });
+  }
 });
 
 app.get("/api/plugins/:id", rateLimit, (req, res) => {

@@ -1,0 +1,30 @@
+{
+  "name": "@openaegis/langflow-plugin",
+  "version": "0.1.0",
+  "description": "OpenAegis custom component package for Langflow pipelines.",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "src",
+    "index.js",
+    "README.md",
+    ".env.example",
+    "openaegis.plugin.json",
+    "langflow/OpenAegisComponent.schema.json",
+    "langflow/OpenAegisComponent.py"
+  ],
+  "scripts": {
+    "self-check": "node ./src/index.js --self-check"
+  },
+  "keywords": [
+    "openaegis",
+    "plugin",
+    "langflow",
+    "component"
+  ],
+  "license": "MIT",
+  "langflow": {
+    "schema": "langflow/OpenAegisComponent.schema.json",
+    "component": "langflow/OpenAegisComponent.py"
+  }
+}

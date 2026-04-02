@@ -1,0 +1,23 @@
+{
+  "name": "@openaegis/anythingllm-plugin",
+  "version": "0.1.0",
+  "description": "OpenAegis workspace plugin for AnythingLLM tools/actions.",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "src",
+    "index.js",
+    "README.md",
+    ".env.example",
+    "openaegis.plugin.json"
+  ],
+  "scripts": {
+    "self-check": "node ./src/index.js --self-check"
+  },
+  "keywords": [
+    "openaegis",
+    "plugin",
+    "anythingllm"
+  ],
+  "license": "MIT"
+}

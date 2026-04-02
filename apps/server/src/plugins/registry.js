@@ -45,6 +45,9 @@ export function listPlugins() {
         description: manifest.description || "",
         permissions: manifest.permissions || [],
         capabilities: manifest.capabilities || [],
+        partnerHost: manifest.partnerHost || null,
+        distribution: manifest.distribution || null,
+        adoption: manifest.adoption || null,
         updatedAt: manifest.updatedAt || null
       };
     })
@@ -63,14 +66,18 @@ export function savePlugin({ id, manifest = {} } = {}) {
   const dir = path.join(pluginsDir, id);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const existing = readManifest(id) || {};
+  const merged = { ...existing, ...manifest };
   const record = {
     id,
-    name: manifest.name || existing.name || id,
-    version: manifest.version || existing.version || "0.0.1",
-    description: manifest.description || existing.description || "",
-    permissions: manifest.permissions || existing.permissions || [],
-    capabilities: manifest.capabilities || existing.capabilities || [],
-    entrypoint: manifest.entrypoint || existing.entrypoint || "index.js",
+    name: merged.name || id,
+    version: merged.version || "0.0.1",
+    description: merged.description || "",
+    permissions: merged.permissions || [],
+    capabilities: merged.capabilities || [],
+    entrypoint: merged.entrypoint || "index.js",
+    partnerHost: merged.partnerHost || null,
+    distribution: merged.distribution || null,
+    adoption: merged.adoption || null,
     updatedAt: nowIso(),
     createdAt: existing.createdAt || nowIso()
   };

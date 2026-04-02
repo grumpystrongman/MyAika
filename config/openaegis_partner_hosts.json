@@ -1,0 +1,79 @@
+{
+  "defaults": {
+    "version": "0.1.0",
+    "entrypoint": "index.js",
+    "permissions": [
+      "network:openaegis-api",
+      "storage:plugin-cache"
+    ],
+    "capabilities": [
+      "chat",
+      "module-execution",
+      "runbooks",
+      "watchtower"
+    ],
+    "targets": {
+      "weeklyInstalls": 10,
+      "weeklyActivations": 5,
+      "weeklyRetention": 3
+    },
+    "installCallToAction": "Configure OPENAEGIS_BASE_URL and OPENAEGIS_API_KEY in the host plugin settings."
+  },
+  "hosts": [
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "pluginId": "openaegis-openclaw",
+      "packageName": "@openaegis/openclaw-plugin",
+      "status": "prototype",
+      "description": "OpenAegis assistant plugin for OpenClaw orchestration workflows.",
+      "integrationType": "manifest-http-bridge",
+      "marketplace": "OpenClaw Community Registry",
+      "targets": {
+        "weeklyInstalls": 25,
+        "weeklyActivations": 12,
+        "weeklyRetention": 8
+      },
+      "permissions": [
+        "network:openaegis-chat-endpoint",
+        "network:openaegis-modules-endpoint"
+      ]
+    },
+    {
+      "id": "flowise",
+      "name": "Flowise",
+      "pluginId": "openaegis-flowise",
+      "packageName": "@openaegis/flowise-plugin",
+      "status": "planned",
+      "description": "OpenAegis node/plugin package for Flowise agent chains.",
+      "integrationType": "tool-node-bridge"
+    },
+    {
+      "id": "langflow",
+      "name": "Langflow",
+      "pluginId": "openaegis-langflow",
+      "packageName": "@openaegis/langflow-plugin",
+      "status": "planned",
+      "description": "OpenAegis custom component package for Langflow pipelines.",
+      "integrationType": "component-bridge"
+    },
+    {
+      "id": "n8n",
+      "name": "n8n",
+      "pluginId": "openaegis-n8n",
+      "packageName": "@openaegis/n8n-plugin",
+      "status": "planned",
+      "description": "OpenAegis community node for n8n workflow automation.",
+      "integrationType": "community-node"
+    },
+    {
+      "id": "anythingllm",
+      "name": "AnythingLLM",
+      "pluginId": "openaegis-anythingllm",
+      "packageName": "@openaegis/anythingllm-plugin",
+      "status": "planned",
+      "description": "OpenAegis workspace plugin for AnythingLLM tools/actions.",
+      "integrationType": "workspace-plugin"
+    }
+  ]
+}

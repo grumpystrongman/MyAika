@@ -42,6 +42,12 @@
     "ui:smoke:approval": "node scripts/ui_chat_approval_smoke.js",
     "ui:smoke:wizard": "node scripts/ui_wizard_chess_smoke.js",
     "wizard:assets:generate": "node scripts/generate_wizard_piece_svgs.mjs",
+    "plugins:openaegis:seed": "node apps/server/scripts/openaegis_partner_plugins.js",
+    "plugins:openaegis:seed:openclaw": "node apps/server/scripts/openaegis_partner_plugins.js --host openclaw",
+    "plugins:openaegis:pack": "node apps/server/scripts/openaegis_partner_pack.js",
+    "plugins:openaegis:pack:openclaw": "node apps/server/scripts/openaegis_partner_pack.js --host openclaw",
+    "plugins:openaegis:adoption:record": "node apps/server/scripts/openaegis_partner_adoption.js record",
+    "plugins:openaegis:adoption:weekly": "node apps/server/scripts/openaegis_partner_adoption.js weekly-summary",
     "gptsovits": "node apps/server/scripts/start_gptsovits.js",
     "piper:voices": "powershell -ExecutionPolicy Bypass -File scripts/install_piper_voices.ps1",
     "live2d:import": "powershell -ExecutionPolicy Bypass -File scripts/import_live2d_samples.ps1"

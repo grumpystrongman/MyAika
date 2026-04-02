@@ -1,0 +1,31 @@
+{
+  "id": "openaegis-langflow",
+  "name": "OpenAegis for Langflow",
+  "host": "langflow",
+  "version": "0.1.0",
+  "description": "OpenAegis custom component package for Langflow pipelines.",
+  "entrypoint": "index.js",
+  "config": [
+    {
+      "key": "OPENAEGIS_BASE_URL",
+      "required": true,
+      "description": "OpenAegis API base URL"
+    },
+    {
+      "key": "OPENAEGIS_API_KEY",
+      "required": true,
+      "description": "OpenAegis API key"
+    },
+    {
+      "key": "OPENAEGIS_TIMEOUT_MS",
+      "required": false,
+      "description": "HTTP timeout in ms"
+    }
+  ],
+  "capabilities": [
+    "chat",
+    "module-execution",
+    "runbooks",
+    "watchtower"
+  ]
+}

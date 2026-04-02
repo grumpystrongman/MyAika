@@ -1,0 +1,13 @@
+{
+  "id": "openaegis-flowise",
+  "type": "flowise-node",
+  "label": "OpenAegis for Flowise",
+  "description": "OpenAegis node/plugin package for Flowise agent chains.",
+  "icon": "tool",
+  "version": "0.1.0",
+  "actions": [
+    "chat",
+    "module",
+    "runbook"
+  ]
+}

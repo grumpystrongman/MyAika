@@ -1,0 +1,29 @@
+{
+  "name": "@openaegis/flowise-plugin",
+  "version": "0.1.0",
+  "description": "OpenAegis node/plugin package for Flowise agent chains.",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "src",
+    "index.js",
+    "README.md",
+    ".env.example",
+    "openaegis.plugin.json",
+    "src/adapters/flowise/OpenAegisFlowiseNode.js",
+    "src/adapters/flowise/flowise.node.json"
+  ],
+  "scripts": {
+    "self-check": "node ./src/index.js --self-check"
+  },
+  "keywords": [
+    "openaegis",
+    "plugin",
+    "flowise"
+  ],
+  "license": "MIT",
+  "flowise": {
+    "node": "src/adapters/flowise/OpenAegisFlowiseNode.js",
+    "schema": "src/adapters/flowise/flowise.node.json"
+  }
+}

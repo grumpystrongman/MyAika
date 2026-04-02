@@ -1,0 +1,31 @@
+{
+  "id": "openaegis-openclaw",
+  "name": "OpenAegis for OpenClaw",
+  "host": "openclaw",
+  "version": "0.1.0",
+  "description": "OpenAegis assistant plugin for OpenClaw orchestration workflows.",
+  "entrypoint": "index.js",
+  "config": [
+    {
+      "key": "OPENAEGIS_BASE_URL",
+      "required": true,
+      "description": "OpenAegis API base URL"
+    },
+    {
+      "key": "OPENAEGIS_API_KEY",
+      "required": true,
+      "description": "OpenAegis API key"
+    },
+    {
+      "key": "OPENAEGIS_TIMEOUT_MS",
+      "required": false,
+      "description": "HTTP timeout in ms"
+    }
+  ],
+  "capabilities": [
+    "chat",
+    "module-execution",
+    "runbooks",
+    "watchtower"
+  ]
+}

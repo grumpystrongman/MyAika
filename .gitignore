@@ -10,6 +10,7 @@ dist
 .next
 out
 output/
+partners/**/*.tgz
 data/aika_tts_cache/
 data/
 data/skills/

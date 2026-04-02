@@ -450,6 +450,10 @@ A lightweight queue for distributed ingestion/execution and a plugin registry fo
 1. Set `WORKER_EXECUTION_MODE=inline` for local execution or `distributed` for external workers.
 2. Enqueue a job such as `{ "type": "ingest.fireflies.sync", "payload": { "limit": 10 } }`.
 3. Register a plugin manifest via `POST /api/plugins` (admin token required).
+4. Seed OpenAegis partner manifests with `npm run plugins:openaegis:seed` (or `npm run plugins:openaegis:seed:openclaw`).
+5. Build a distributable plugin package with `npm run plugins:openaegis:pack:openclaw`.
+6. Track adoption with `npm run plugins:openaegis:adoption:record -- --plugin openaegis-openclaw --event install`.
+7. Pull weekly adoption metrics in dashboards via `GET /api/plugins/adoption/weekly` (admin required).
 
 ## Fireflies Tab
 ![Fireflies tab](user-guide/screenshots/fireflies.png)

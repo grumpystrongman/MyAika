@@ -1,0 +1,40 @@
+{
+  "name": "OpenAegisComponent",
+  "display_name": "OpenAegis for Langflow",
+  "description": "OpenAegis custom component package for Langflow pipelines.",
+  "category": "tools",
+  "icon": "zap",
+  "outputs": [
+    {
+      "name": "response",
+      "method": "run_model"
+    }
+  ],
+  "inputs": [
+    {
+      "name": "operation",
+      "display_name": "Operation",
+      "options": [
+        "chat",
+        "module",
+        "runbook"
+      ],
+      "value": "chat"
+    },
+    {
+      "name": "prompt",
+      "display_name": "Prompt",
+      "value": ""
+    },
+    {
+      "name": "module_name",
+      "display_name": "Module Name",
+      "value": ""
+    },
+    {
+      "name": "runbook_name",
+      "display_name": "Runbook Name",
+      "value": ""
+    }
+  ]
+}

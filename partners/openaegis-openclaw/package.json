@@ -1,0 +1,23 @@
+{
+  "name": "@openaegis/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "OpenAegis assistant plugin for OpenClaw orchestration workflows.",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "src",
+    "index.js",
+    "README.md",
+    ".env.example",
+    "openaegis.plugin.json"
+  ],
+  "scripts": {
+    "self-check": "node ./src/index.js --self-check"
+  },
+  "keywords": [
+    "openaegis",
+    "plugin",
+    "openclaw"
+  ],
+  "license": "MIT"
+}
