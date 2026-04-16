@@ -17,6 +17,16 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { importLive2DZip } from "./avatar_import.js";
 import {
+  createInteractionRuntime,
+  emotionController,
+  voiceProsody,
+  lipsyncEngine,
+  createMotionController,
+  createBlendshapeAnimator,
+  TTSProvider
+} from "./src/avatar/index.js";
+import { initializeAvatarBridge } from "./src/avatar/avatarBridge.js";
+import {
   connectGoogle,
   exchangeGoogleCode,
   createGoogleDoc,
@@ -137,7 +147,7 @@ import { listRunbooks, executeRunbook } from "./src/aika/runbookEngine.js";
 import { createWatchItemFromTemplate, observeWatchItem, listWatchtowerItems, loadWatchTemplates } from "./src/aika/watchtower.js";
 import { buildDigestByType, recordDigest } from "./src/aika/digestEngine.js";
 import { getBootSequence, completeBootSequence } from "./src/aika/boot.js";
-import { handleBootFlow } from "./src/aika/bootFlow.js";
+import { handleBootFlow, shouldHandleBootFlow } from "./src/aika/bootFlow.js";
 import { ensureDigestTasks } from "./src/aika/scheduler.js";
 import { routeAikaCommand } from "./src/aika/commandRouter.js";
 import { combineChunks, transcribeAudio, splitAudioForTranscription } from "./recordings/processor.js";
@@ -360,6 +370,10 @@ app.use((req, res, next) => {
   if (publicPrefixes.some(prefix => path.startsWith(prefix))) return next();
   return requireAuth(req, res, next);
 });
+
+const avatarRuntime = createAvatarRuntime();
+initializeAvatarBridge(app, null, avatarRuntime, "/api/aika/avatar/runtime");
+
 startReminderScheduler();
 startDiscordBot();
 
@@ -555,7 +569,26 @@ const tradingUpload = multer({ dest: tradingUploadDir });
 const recordingsDir = getRecordingBaseDir();
 const sttUploadDir = path.resolve(serverRoot, "..", "..", "data", "_stt_uploads");
 if (!fs.existsSync(sttUploadDir)) fs.mkdirSync(sttUploadDir, { recursive: true });
-const sttUpload = multer({ dest: sttUploadDir });
+function inferSttUploadExtension(file) {
+  const extFromName = path.extname(String(file?.originalname || "")).toLowerCase();
+  if (extFromName) return extFromName;
+  const mime = String(file?.mimetype || "").toLowerCase();
+  if (mime.includes("webm")) return ".webm";
+  if (mime.includes("ogg") || mime.includes("oga")) return ".ogg";
+  if (mime.includes("wav")) return ".wav";
+  if (mime.includes("mp3") || mime.includes("mpeg")) return ".mp3";
+  if (mime.includes("m4a")) return ".m4a";
+  if (mime.includes("mp4")) return ".mp4";
+  return ".webm";
+}
+const sttUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, sttUploadDir),
+    filename: (_req, file, cb) => {
+      cb(null, `stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${inferSttUploadExtension(file)}`);
+    }
+  })
+});
 const telegramUploadDir = path.resolve(serverRoot, "..", "..", "data", "_telegram_uploads");
 if (!fs.existsSync(telegramUploadDir)) fs.mkdirSync(telegramUploadDir, { recursive: true });
 const recordingUpload = multer({
@@ -609,13 +642,54 @@ function readAikaConfig() {
   }
 }
 
+function buildAvatarExpressionConfig() {
+  const map = emotionController.getExpressionMap?.() || {};
+  const expressionMaps = map.expressionMaps || {};
+  const expressions = {};
+  const allTargets = new Set();
+  for (const [name, value] of Object.entries(expressionMaps)) {
+    const blendshapes = value?.blendshapeValues || {};
+    expressions[name] = { blendshapes };
+    Object.keys(blendshapes).forEach(key => allTargets.add(key));
+  }
+  return {
+    expressions,
+    allBlendshapeTargets: Array.from(allTargets)
+  };
+}
+
+function createAvatarRuntime() {
+  const ttsProvider = new TTSProvider({
+    engine: (process.env.AVATAR_TTS_ENGINE || process.env.TTS_ENGINE || "piper").toLowerCase(),
+    voice: process.env.AVATAR_TTS_VOICE || process.env.PIPER_DEFAULT_VOICE || "en_GB-semaine-medium",
+    baseUrl: process.env.AVATAR_TTS_BASE_URL || process.env.PIPER_HTTP_URL || "http://localhost:8020"
+  });
+
+  return createInteractionRuntime({
+    emotionController,
+    voiceProsody,
+    lipsyncEngine,
+    motionController: createMotionController(emotionController.getCharacterSpec?.()),
+    blendshapeAnimator: createBlendshapeAnimator(null, buildAvatarExpressionConfig(), {
+      transitionDuration: 260,
+      interpolationMethod: "ease-in-out"
+    }),
+    ttsProvider,
+    interruptionEnabled: true,
+    maxContextLength: 30,
+    maxSessionDuration: 2 * 60 * 60 * 1000,
+    maxActiveSessions: Number(process.env.AVATAR_MAX_ACTIVE_SESSIONS || 20)
+  });
+}
+
 function withAvatarStatus(models) {
   const list = Array.isArray(models) ? models : [];
   return list.map(model => {
     const modelUrl = model.modelUrl || "";
-    const localPath = modelUrl.startsWith("/")
-      ? path.join(webPublicDir, modelUrl.replace(/^\//, ""))
-      : path.join(webPublicDir, modelUrl);
+    const modelFileUrl = String(modelUrl).split("?")[0];
+    const localPath = modelFileUrl.startsWith("/")
+      ? path.join(webPublicDir, modelFileUrl.replace(/^\//, ""))
+      : path.join(webPublicDir, modelFileUrl);
     const thumbUrl = model.thumbnail || "";
     const thumbPath = thumbUrl
       ? path.join(webPublicDir, thumbUrl.replace(/^\//, ""))
@@ -624,16 +698,128 @@ function withAvatarStatus(models) {
     const fallbackPath = fallbackUrl
       ? path.join(webPublicDir, fallbackUrl.replace(/^\//, ""))
       : "";
-    const hasLive2D = Boolean(modelUrl) && fs.existsSync(localPath);
+    const hasModelFile = Boolean(modelUrl) && fs.existsSync(localPath);
     const hasPng = Boolean(fallbackUrl) && fs.existsSync(fallbackPath);
     const engine = String(model.engine || "").toLowerCase();
-    const isPngModel = engine === "png" || (!modelUrl && Boolean(fallbackUrl));
+    const isPngModel = engine === "png" || engine === "cinematic" || (!modelUrl && Boolean(fallbackUrl));
+    const isPortraitModel = engine === "portrait";
+    const isStageModel = engine === "stage";
     return {
       ...model,
-      available: isPngModel ? hasPng : hasLive2D,
+      available: (isPortraitModel || isStageModel) ? (hasModelFile || hasPng) : (isPngModel ? hasPng : hasModelFile),
       thumbnailAvailable: Boolean(thumbUrl) && fs.existsSync(thumbPath)
     };
   });
+}
+
+const BUILT_IN_AVATAR_MODELS = [
+  {
+    id: "aika_nocturne_3d",
+    label: "AIKA Nocturne (3D)",
+    modelUrl: fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-ultra-draco.glb"))
+      ? "/assets/aika/3d/external/lenore-runtime-ultra-draco.glb?v=20260416lenore-runtime-ultra-draco"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-lite-draco.glb"))
+      ? "/assets/aika/3d/external/lenore-runtime-lite-draco.glb?v=20260416lenore-runtime-lite-draco"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-draco.glb"))
+      ? "/assets/aika/3d/external/lenore-runtime-draco.glb?v=20260416lenore-runtime-draco-restfix"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-conversation.glb"))
+      ? "/assets/aika/3d/external/lenore-runtime-conversation.glb?v=20260416lenore-runtime-conversation"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-fast.glb"))
+      ? "/assets/aika/3d/external/lenore-runtime-fast.glb?v=20260416lenore-runtime-fast"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-clip.glb"))
+      ? "/assets/aika/3d/external/lenore-runtime-clip.glb?v=20260415lenore-runtime-clip"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-fbx", "lenore_fbx.Fbx"))
+      ? "/assets/aika/3d/external/lenore-fbx/lenore_fbx.Fbx?v=20260415lenore-fbx"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-clean.glb"))
+      ? "/assets/aika/3d/external/lenore-clean.glb?v=20260415lenore-clean"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore.glb"))
+      ? "/assets/aika/3d/external/lenore.glb?v=20260415lenore-rigfix"
+      : "/assets/aika/3d/bespoke/nocturne-bespoke.glb?v=20260415b",
+    fallbackPng: "/assets/aika/stage/nocturne-human/base.png",
+    thumbnail: "/assets/aika/stage/nocturne-human/base.png",
+    source: "built_in",
+    engine: "talkinghead"
+  },
+  {
+    id: "aika_nocturne_brunette",
+    label: "AIKA Nocturne (Brunette Base)",
+    modelUrl: "/assets/aika/3d/alternates/brunette.glb",
+    fallbackPng: "/assets/aika/stage/nocturne-human/base.png",
+    thumbnail: "/assets/aika/stage/nocturne-human/base.png",
+    source: "built_in",
+    engine: "talkinghead"
+  },
+  {
+    id: "aika_nocturne_brunette_t",
+    label: "AIKA Nocturne (Brunette T Base)",
+    modelUrl: "/assets/aika/3d/alternates/brunette-t.glb",
+    fallbackPng: "/assets/aika/stage/nocturne-human/base.png",
+    thumbnail: "/assets/aika/stage/nocturne-human/base.png",
+    source: "built_in",
+    engine: "talkinghead"
+  },
+  {
+    id: "aika_nocturne_mpfb",
+    label: "AIKA Nocturne (MPFB Base)",
+    modelUrl: "/assets/aika/3d/alternates/mpfb.glb",
+    fallbackPng: "/assets/aika/stage/nocturne-human/base.png",
+    thumbnail: "/assets/aika/stage/nocturne-human/base.png",
+    source: "built_in",
+    engine: "talkinghead"
+  },
+  {
+    id: "aika_nocturne_avaturn",
+    label: "AIKA Nocturne (Avaturn Base)",
+    modelUrl: "/assets/aika/3d/alternates/avaturn.glb",
+    fallbackPng: "/assets/aika/stage/nocturne-human/base.png",
+    thumbnail: "/assets/aika/stage/nocturne-human/base.png",
+    source: "built_in",
+    engine: "talkinghead"
+  },
+  {
+    id: "aika_nocturne_stage",
+    label: "AIKA Nocturne (Stage)",
+    modelUrl: "/assets/aika/stage/nocturne-human/config.json",
+    fallbackPng: "/assets/aika/stage/nocturne-human/base.png",
+    thumbnail: "/assets/aika/stage/nocturne-human/base.png",
+    source: "built_in",
+    engine: "stage"
+  },
+  {
+    id: "aika_nocturne_portrait",
+    label: "AIKA Nocturne (Portrait)",
+    modelUrl: "/assets/aika/portraits/nocturne-human/config.json",
+    fallbackPng: "/assets/aika/portraits/nocturne-human/base.png",
+    thumbnail: "/assets/aika/portraits/nocturne-human/base.png",
+    source: "built_in",
+    engine: "portrait"
+  },
+  {
+    id: "aika_nocturne_cinematic",
+    label: "AIKA Nocturne (Cinematic)",
+    modelUrl: "",
+    fallbackPng: "/assets/aika/live2d/placeholder.svg",
+    thumbnail: "/assets/aika/live2d/placeholder.svg",
+    source: "built_in",
+    engine: "cinematic"
+  }
+];
+
+function withBuiltInAvatarModels(models) {
+  const merged = new Map();
+  for (const model of Array.isArray(models) ? models : []) {
+    if (model?.id) merged.set(model.id, model);
+  }
+  for (const builtIn of BUILT_IN_AVATAR_MODELS.slice().reverse()) {
+    if (!merged.has(builtIn.id)) merged.set(builtIn.id, builtIn);
+  }
+  const ordered = [];
+  for (const builtIn of BUILT_IN_AVATAR_MODELS) {
+    ordered.push(merged.get(builtIn.id) || builtIn);
+    merged.delete(builtIn.id);
+  }
+  for (const model of merged.values()) ordered.push(model);
+  return ordered;
 }
 
 function getDefaultTtsEngine() {
@@ -643,7 +829,53 @@ function getDefaultTtsEngine() {
   const piperBin = process.env.PIPER_BIN || process.env.PIPER_PYTHON_BIN;
   const piperVoices = listPiperVoices();
   if (piperBin && piperVoices.length) return "piper";
+  if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim()) return "openai";
   return "gptsovits";
+}
+
+const OPENAI_TTS_VOICES = new Set([
+  "alloy",
+  "ash",
+  "ballad",
+  "cedar",
+  "coral",
+  "echo",
+  "fable",
+  "marin",
+  "nova",
+  "onyx",
+  "sage",
+  "shimmer",
+  "verse"
+]);
+
+function mergeTtsSettingsWithDefaults(settings, cfg) {
+  const engine = String(settings?.engine || getDefaultTtsEngine()).trim().toLowerCase();
+  const requestedVoice = String(settings?.voice?.name || "").trim();
+  const defaultVoice = String(process.env.TTS_VOICE_NAME || cfg?.voice?.default_name || "").trim();
+  const openaiVoice = OPENAI_TTS_VOICES.has(requestedVoice.toLowerCase())
+    ? requestedVoice
+    : OPENAI_TTS_VOICES.has(defaultVoice.toLowerCase())
+      ? defaultVoice
+      : "";
+
+  const mergedSettings = {
+    ...settings,
+    voice: {
+      ...settings?.voice
+    }
+  };
+
+  if (engine === "openai") {
+    if (openaiVoice) mergedSettings.voice.name = openaiVoice;
+  } else if (!requestedVoice && defaultVoice) {
+    mergedSettings.voice.name = defaultVoice;
+  }
+
+  if (!mergedSettings.voice?.reference_wav_path && cfg?.voice?.default_reference_wav) {
+    mergedSettings.voice.reference_wav_path = defaultRefOverride || cfg.voice.default_reference_wav;
+  }
+  return mergedSettings;
 }
 
 let defaultRefOverride = null;
@@ -1139,6 +1371,20 @@ function buildConnections(userId = "") {
 // Heuristic fallback behavior
 function inferBehaviorFromText(text) {
   const t = text.toLowerCase();
+  if (/\b(plan|decision|objective|execute|next step)\b/.test(t))
+    return makeBehavior({ emotion: Emotion.FOCUSED_EXECUTIVE, intensity: 0.48 });
+  if (/\b(analyze|analysis|compare|data|evidence|metrics)\b/.test(t))
+    return makeBehavior({ emotion: Emotion.ANALYTICAL, intensity: 0.44 });
+  if (/\b(reflect|consider|thoughtful|pause)\b/.test(t))
+    return makeBehavior({ emotion: Emotion.REFLECTIVE, intensity: 0.42 });
+  if (/\b(tease|flirt|playful|mischief)\b/.test(t))
+    return makeBehavior({ emotion: Emotion.TEASING, intensity: 0.56 });
+  if (/\b(support|you got this|breathe|calm down|i'm here)\b/.test(t))
+    return makeBehavior({ emotion: Emotion.WARM_SUPPORTIVE, intensity: 0.5 });
+  if (/\b(serious|urgent|critical|risk|warning)\b/.test(t))
+    return makeBehavior({ emotion: Emotion.SERIOUS, intensity: 0.5 });
+  if (/\b(joke|banter|funny|wit)\b/.test(t))
+    return makeBehavior({ emotion: Emotion.WITTY_PLAYFUL, intensity: 0.55 });
   if (t.includes("thank") || t.includes("love") || t.includes("yay"))
     return makeBehavior({ emotion: Emotion.HAPPY, intensity: 0.55 });
   if (t.includes("sorry") || t.includes("sad"))
@@ -2351,11 +2597,12 @@ function resolveRagSelection(text, requested) {
   const prefixMatch = lower.match(/^rag:\s*([a-z0-9_-]+)/);
   const meetingPrefix = lower.startsWith("meeting:") ? "meetings" : "";
   const hinted = prefixMatch?.[1] || meetingPrefix;
-  const selected = cleaned && cleaned !== "auto" ? cleaned : hinted;
+  const requestedSelection = cleaned && cleaned !== "auto" && cleaned !== "all" ? cleaned : "";
+  const selected = requestedSelection || hinted;
   if (selected) {
     return { id: selected, forced: true, filters: {} };
   }
-  return { id: "auto", forced: false, filters: {} };
+  return { id: cleaned === "all" ? "all" : "auto", forced: false, filters: {} };
 }
 
 function addDays(date, days) {
@@ -3214,19 +3461,22 @@ app.post("/chat", async (req, res) => {
 
     const bootSequence = await getBootSequence(getUserId(req));
     if (!bootSequence.completed) {
-      const bootResult = handleBootFlow({ userId: getUserId(req), userText });
-      if (bootResult?.handled) {
+      if (shouldHandleBootFlow(userText)) {
+        const bootResult = handleBootFlow({ userId: getUserId(req), userText });
+        if (bootResult?.handled) {
+          return sendAssistantReply(
+            bootResult.reply,
+            makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+            { boot: { completed: true } }
+          );
+        }
         return sendAssistantReply(
-          bootResult.reply,
-          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
-          { boot: { completed: true } }
+          bootSequence.steps.join("\n"),
+          makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
+          { boot: bootSequence }
         );
       }
-      return sendAssistantReply(
-        bootSequence.steps.join("\n"),
-        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.35 }),
-        { boot: bootSequence }
-      );
+      completeBootSequence(getUserId(req));
     }
 
     const statedLocation = extractLocationFromText(userText);
@@ -3652,7 +3902,7 @@ app.post("/chat", async (req, res) => {
       .filter(m => m.role === "user" || m.role === "assistant")
       .map(m => ({
         role: m.role === "assistant" ? "assistant" : "user",
-        content: [{ type: "input_text", text: m.content }]
+        content: String(m.content || "")
       }));
 
     const systemPrompt = `
@@ -3665,9 +3915,16 @@ IDENTITY:
 - Memory rule: ${persona.memory_rules}
 
 INSTRUCTIONS:
-- Be conversational and warm
+- Be conversational, warm, and vividly human
 - Use memories as true unless corrected
-- Keep responses concise
+- Use memory only when it is directly relevant and helpful to the current user turn
+- Do not mention retrieval, stored memories, repeated phrasing, or prior matches unless the user asks
+- Speak like a close, sharp friend rather than a generic assistant
+- Usually answer in 1 to 4 spoken sentences unless the user asks for depth
+- Ask at most one question when it naturally moves the conversation forward
+- Avoid bullet lists unless the user explicitly asks for them
+- Avoid canned assistant phrasing, onboarding tone, or sterile customer-service language
+- Do not use emojis
 - Reply in English unless the user explicitly asks for another language
 - At the END, output a JSON object on its own line:
   {
@@ -3676,32 +3933,24 @@ INSTRUCTIONS:
   }
 `.trim();
 
-    // ✅ CORRECT Responses API CALL
-    let response;
+    let rawText = "";
     try {
-      response = await responsesCreate({
-      model: OPENAI_MODEL,
-      max_output_tokens: Math.min(600, Math.max(80, Number(maxOutputTokens) || Number(process.env.OPENAI_MAX_OUTPUT_TOKENS) || 220)),
-      input: [
-        {
-          role: "system",
-          content: [
-            { type: "input_text", text: systemPrompt },
-            {
-              type: "input_text",
-              text: `Relevant memories:\n${memoryBlock}`
-            }
-          ]
-        },
-        ...threadInput,
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: userText }
-          ]
-        }
-      ]
+      const response = await chatCompletionsCreate({
+        model: OPENAI_MODEL,
+        max_tokens: Math.min(600, Math.max(80, Number(maxOutputTokens) || Number(process.env.OPENAI_MAX_OUTPUT_TOKENS) || 220)),
+        messages: [
+          {
+            role: "system",
+            content: `${systemPrompt}\n\nRelevant memories:\n${memoryBlock}`
+          },
+          ...threadInput,
+          {
+            role: "user",
+            content: userText
+          }
+        ]
       });
+      rawText = String(response?.choices?.[0]?.message?.content || "").trim();
     } catch (err) {
       console.error("OPENAI ERROR:", err);
       return res.status(502).json({
@@ -3710,8 +3959,6 @@ INSTRUCTIONS:
       });
     }
 
-    // Extract model text output
-    let rawText = extractResponseText(response);
     if (!rawText.trim()) {
       const fallbackUserText = threadContextText
         ? `Conversation context:
@@ -3862,22 +4109,7 @@ app.post("/api/aika/voice", async (req, res) => {
   try {
     const { text, settings } = req.body || {};
     const cfg = readAikaConfig();
-    const mergedSettings =
-      settings && settings.voice && settings.voice.name
-        ? settings
-        : {
-            ...settings,
-            voice: {
-              ...settings?.voice,
-              name: process.env.TTS_VOICE_NAME || cfg.voice?.default_name || settings?.voice?.name
-            }
-          };
-    if (!mergedSettings.voice?.reference_wav_path && cfg.voice?.default_reference_wav) {
-      mergedSettings.voice = {
-        ...mergedSettings.voice,
-        reference_wav_path: defaultRefOverride || cfg.voice.default_reference_wav
-      };
-    }
+    const mergedSettings = mergeTtsSettingsWithDefaults(settings, cfg);
     const result = await generateAikaVoice({ text, settings: mergedSettings });
     if (result.warnings && result.warnings.length > 0) {
       res.set("x-tts-warnings", result.warnings.join(","));
@@ -3900,22 +4132,7 @@ app.post("/api/aika/voice/inline", async (req, res) => {
   try {
     const { text, settings } = req.body || {};
     const cfg = readAikaConfig();
-    const mergedSettings =
-      settings && settings.voice && settings.voice.name
-        ? settings
-        : {
-            ...settings,
-            voice: {
-              ...settings?.voice,
-              name: process.env.TTS_VOICE_NAME || cfg.voice?.default_name || settings?.voice?.name
-            }
-          };
-    if (!mergedSettings.voice?.reference_wav_path && cfg.voice?.default_reference_wav) {
-      mergedSettings.voice = {
-        ...mergedSettings.voice,
-        reference_wav_path: defaultRefOverride || cfg.voice.default_reference_wav
-      };
-    }
+    const mergedSettings = mergeTtsSettingsWithDefaults(settings, cfg);
     const result = await generateAikaVoice({ text, settings: mergedSettings });
     if (result.warnings && result.warnings.length > 0) {
       res.set("x-tts-warnings", result.warnings.join(","));
@@ -3945,6 +4162,24 @@ app.get("/api/aika/voices", async (_req, res) => {
     if (engine === "piper") {
       const piperVoices = listPiperVoices();
       return res.json({ engine, voices: piperVoices, piperVoices });
+    }
+    if (engine === "openai") {
+      const openaiVoices = [
+        { id: "alloy", label: "alloy" },
+        { id: "ash", label: "ash" },
+        { id: "ballad", label: "ballad" },
+        { id: "cedar", label: "cedar" },
+        { id: "coral", label: "coral" },
+        { id: "echo", label: "echo" },
+        { id: "fable", label: "fable" },
+        { id: "marin", label: "marin" },
+        { id: "nova", label: "nova" },
+        { id: "onyx", label: "onyx" },
+        { id: "sage", label: "sage" },
+        { id: "shimmer", label: "shimmer" },
+        { id: "verse", label: "verse" }
+      ];
+      return res.json({ engine, voices: openaiVoices, piperVoices: listPiperVoices() });
     }
     return res.json({ engine, voices: [], piperVoices: listPiperVoices() });
   } catch (err) {
@@ -3976,6 +4211,13 @@ app.post("/api/aika/voice/test", async (req, res) => {
 
 app.get("/api/aika/tts/health", async (_req, res) => {
   const engine = getDefaultTtsEngine();
+  if (engine === "openai") {
+    return res.json({
+      engine,
+      online: Boolean(process.env.OPENAI_API_KEY),
+      model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"
+    });
+  }
   if (engine !== "gptsovits") {
     return res.json({ engine, online: engine === "sapi" || engine === "coqui" });
   }
@@ -4045,6 +4287,10 @@ app.get("/api/aika/tts/diagnostics", async (_req, res) => {
 
   res.json({
     engine,
+    openai: {
+      configured: Boolean(process.env.OPENAI_API_KEY),
+      model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts"
+    },
     gptsovits: {
       url: ttsUrl,
       docsUrl: healthUrl,
@@ -4070,81 +4316,125 @@ app.get("/api/aika/tts/diagnostics", async (_req, res) => {
 app.get("/api/aika/avatar/models", (_req, res) => {
   try {
     const manifestPath = path.join(live2dDir, "models.json");
-    if (!fs.existsSync(manifestPath)) return res.json({ models: [] });
+    if (!fs.existsSync(manifestPath)) {
+      return res.json({
+        models: withAvatarStatus(BUILT_IN_AVATAR_MODELS)
+      });
+    }
     const data = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
     const models = Array.isArray(data.models) ? data.models : [];
-    res.json({ models: withAvatarStatus(models) });
+    res.json({ models: withAvatarStatus(withBuiltInAvatarModels(models)) });
   } catch (err) {
     res.status(500).json({ error: err.message || "avatar_models_failed" });
   }
 });
 
-app.post("/api/aika/avatar/import", upload.single("file"), (req, res) => {
+app.post("/api/aika/avatar/import", upload.single("file"), async (req, res) => {
+  const uploadPath = req.file?.path || "";
+  if (!uploadPath) return res.status(400).json({ error: "file_required" });
   try {
-    if (!req.file?.path) return res.status(400).json({ error: "file_required" });
-    const models = importLive2DZip({ zipPath: req.file.path, webPublicDir });
-    fs.unlinkSync(req.file.path);
-    res.json({ ok: true, models: withAvatarStatus(models) });
+    const decision = await executeAction({
+      actionType: "file.write",
+      params: {
+        operation: "avatar_import_zip",
+        sourcePath: uploadPath,
+        targetPath: live2dDir,
+        fileName: req.file?.originalname || ""
+      },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      resourceRefs: [uploadPath, live2dDir, path.join(live2dDir, "models.json")],
+      summary: "Import Live2D avatar pack",
+      handler: async () => {
+        const models = importLive2DZip({ zipPath: uploadPath, webPublicDir });
+        return { models: withAvatarStatus(models) };
+      }
+    });
+    if (decision.status === "approval_required") {
+      return res.status(403).json(decision);
+    }
+    return res.json({ ok: true, ...decision.data });
   } catch (err) {
-    res.status(500).json({ error: err.message || "avatar_import_failed" });
+    return res.status(500).json({ error: err.message || "avatar_import_failed", reason: err.reason });
+  } finally {
+    try {
+      if (uploadPath && fs.existsSync(uploadPath)) fs.unlinkSync(uploadPath);
+    } catch {
+      // noop
+    }
   }
 });
 
-app.post("/api/aika/avatar/refresh", (_req, res) => {
+app.post("/api/aika/avatar/refresh", async (req, res) => {
   try {
-    const manifestPath = path.join(live2dDir, "models.json");
-    if (!fs.existsSync(live2dDir)) return res.json({ models: [] });
-    let existingModels = [];
-    if (fs.existsSync(manifestPath)) {
-      try {
-        const existing = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-        existingModels = Array.isArray(existing.models) ? existing.models : [];
-      } catch {
-        existingModels = [];
-      }
-    }
+    const decision = await executeAction({
+      actionType: "file.write",
+      params: {
+        operation: "avatar_refresh_manifest",
+        targetPath: path.join(live2dDir, "models.json")
+      },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      resourceRefs: [live2dDir, path.join(live2dDir, "models.json")],
+      summary: "Refresh avatar model manifest",
+      handler: async () => {
+        const manifestPath = path.join(live2dDir, "models.json");
+        if (!fs.existsSync(live2dDir)) return { models: [] };
+        let existingModels = [];
+        if (fs.existsSync(manifestPath)) {
+          try {
+            const existing = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+            existingModels = Array.isArray(existing.models) ? existing.models : [];
+          } catch {
+            existingModels = [];
+          }
+        }
 
-    const preserved = existingModels.filter(model => {
-      const engine = String(model.engine || "").toLowerCase();
-      return engine === "png" || (!model.modelUrl && model.fallbackPng);
+        const preserved = existingModels.filter(model => {
+          const engine = String(model.engine || "").toLowerCase();
+          return engine === "png" || engine === "cinematic" || engine === "portrait" || (!model.modelUrl && model.fallbackPng);
+        });
+
+        const models = [];
+        const ignored = new Set(["runtime", "__macosx"]);
+        const dirs = fs
+          .readdirSync(live2dDir, { withFileTypes: true })
+          .filter(d => d.isDirectory() && !ignored.has(d.name.toLowerCase()));
+        for (const dir of dirs) {
+          const folder = path.join(live2dDir, dir.name);
+          const modelFiles = fs.readdirSync(folder).filter(f => f.endsWith(".model3.json"));
+          if (!modelFiles.length) continue;
+          const modelFile = modelFiles[0];
+          const thumb = path.join(folder, "thumb.png");
+          if (!fs.existsSync(thumb)) {
+            const png = fs.readdirSync(folder).find(f => f.toLowerCase().endsWith(".png"));
+            if (png) fs.copyFileSync(path.join(folder, png), thumb);
+          }
+          models.push({
+            id: dir.name,
+            label: `${dir.name.replace(/_/g, " ")} (Local)`,
+            modelUrl: `/assets/aika/live2d/${dir.name}/${modelFile}`,
+            fallbackPng: "/assets/aika/live2d/placeholder.svg",
+            thumbnail: `/assets/aika/live2d/${dir.name}/thumb.png`,
+            source: "local_scan"
+          });
+        }
+        const merged = new Map();
+        for (const model of preserved) {
+          if (model?.id) merged.set(model.id, model);
+        }
+        for (const model of models) {
+          if (model?.id) merged.set(model.id, model);
+        }
+        const nextModels = withBuiltInAvatarModels(Array.from(merged.values()));
+        fs.writeFileSync(manifestPath, JSON.stringify({ models: nextModels }, null, 2));
+        return { models: withAvatarStatus(nextModels) };
+      }
     });
-
-    const models = [];
-    const ignored = new Set(["runtime", "__macosx"]);
-    const dirs = fs
-      .readdirSync(live2dDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && !ignored.has(d.name.toLowerCase()));
-    for (const dir of dirs) {
-      const folder = path.join(live2dDir, dir.name);
-      const modelFiles = fs.readdirSync(folder).filter(f => f.endsWith(".model3.json"));
-      if (!modelFiles.length) continue;
-      const modelFile = modelFiles[0];
-      const thumb = path.join(folder, "thumb.png");
-      if (!fs.existsSync(thumb)) {
-        const png = fs.readdirSync(folder).find(f => f.toLowerCase().endsWith(".png"));
-        if (png) fs.copyFileSync(path.join(folder, png), thumb);
-      }
-      models.push({
-        id: dir.name,
-        label: `${dir.name.replace(/_/g, " ")} (Local)`,
-        modelUrl: `/assets/aika/live2d/${dir.name}/${modelFile}`,
-        fallbackPng: "/assets/aika/live2d/placeholder.svg",
-        thumbnail: `/assets/aika/live2d/${dir.name}/thumb.png`,
-        source: "local_scan"
-      });
+    if (decision.status === "approval_required") {
+      return res.status(403).json(decision);
     }
-    const merged = new Map();
-    for (const model of preserved) {
-      if (model?.id) merged.set(model.id, model);
-    }
-    for (const model of models) {
-      if (model?.id) merged.set(model.id, model);
-    }
-    const nextModels = Array.from(merged.values());
-    fs.writeFileSync(manifestPath, JSON.stringify({ models: nextModels }, null, 2));
-    res.json({ models: withAvatarStatus(nextModels) });
+    return res.json(decision.data);
   } catch (err) {
-    res.status(500).json({ error: err.message || "avatar_refresh_failed" });
+    return res.status(500).json({ error: err.message || "avatar_refresh_failed", reason: err.reason });
   }
 });
 
@@ -4156,22 +4446,46 @@ app.get("/api/aika/avatar/core", (_req, res) => {
   });
 });
 
-app.post("/api/aika/avatar/core", upload.single("file"), (req, res) => {
+app.post("/api/aika/avatar/core", upload.single("file"), async (req, res) => {
+  const uploadPath = req.file?.path || "";
+  if (!uploadPath) return res.status(400).json({ error: "file_required" });
+
   try {
-    if (!req.file?.path) return res.status(400).json({ error: "file_required" });
-    if (!fs.existsSync(live2dDir)) fs.mkdirSync(live2dDir, { recursive: true });
     const name = (req.file.originalname || "").toLowerCase();
-    if (name.endsWith(".js")) {
-      fs.copyFileSync(req.file.path, live2dCoreJs);
-    } else if (name.endsWith(".wasm")) {
-      fs.copyFileSync(req.file.path, live2dCoreWasm);
-    } else {
+    if (!name.endsWith(".js") && !name.endsWith(".wasm")) {
       return res.status(400).json({ error: "core_file_must_be_js_or_wasm" });
     }
-    fs.unlinkSync(req.file.path);
-    res.json({ ok: true, coreJs: fs.existsSync(live2dCoreJs), coreWasm: fs.existsSync(live2dCoreWasm) });
+    const targetPath = name.endsWith(".js") ? live2dCoreJs : live2dCoreWasm;
+
+    const decision = await executeAction({
+      actionType: "file.write",
+      params: {
+        operation: "avatar_core_upload",
+        sourcePath: uploadPath,
+        targetPath
+      },
+      context: { userId: getUserId(req), sessionId: req.aikaSessionId },
+      resourceRefs: [uploadPath, targetPath],
+      summary: "Upload Live2D core runtime",
+      handler: async () => {
+        if (!fs.existsSync(live2dDir)) fs.mkdirSync(live2dDir, { recursive: true });
+        fs.copyFileSync(uploadPath, targetPath);
+        return { coreJs: fs.existsSync(live2dCoreJs), coreWasm: fs.existsSync(live2dCoreWasm) };
+      }
+    });
+
+    if (decision.status === "approval_required") {
+      return res.status(403).json(decision);
+    }
+    return res.json({ ok: true, ...decision.data });
   } catch (err) {
-    res.status(500).json({ error: err.message || "avatar_core_upload_failed" });
+    return res.status(500).json({ error: err.message || "avatar_core_upload_failed", reason: err.reason });
+  } finally {
+    try {
+      if (uploadPath && fs.existsSync(uploadPath)) fs.unlinkSync(uploadPath);
+    } catch {
+      // noop
+    }
   }
 });
 
@@ -7412,7 +7726,8 @@ app.get("/api/status", async (_req, res) => {
       selected: engine,
       engines: {
         gptsovits: { enabled: engine === "gptsovits", online: gptsovitsOnline, status: gptsovitsStatus },
-        piper: { enabled: engine === "piper", ready: Boolean(piperBin) && piperVoices > 0, voices: piperVoices }
+        piper: { enabled: engine === "piper", ready: Boolean(piperBin) && piperVoices > 0, voices: piperVoices },
+        openai: { enabled: engine === "openai", configured: Boolean(process.env.OPENAI_API_KEY), model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts" }
       }
     },
     integrations: buildIntegrationsState(getUserId(_req)),

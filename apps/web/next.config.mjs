@@ -3,9 +3,16 @@ const configuredDistDir = (process.env.NEXT_DIST_DIR || "").trim();
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   ...(configuredDistDir ? { distDir: configuredDistDir } : {}),
-  allowedDevOrigins: ["http://127.0.0.1:3105", "http://localhost:3105", "http://127.0.0.1:3000", "http://localhost:3000"],
+  allowedDevOrigins: [
+    "http://127.0.0.1:3105",
+    "http://localhost:3105",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3412",
+    "http://localhost:3412"
+  ],
   async rewrites() {
-    const target = process.env.AIKA_SERVER_URL || "http://127.0.0.1:8790";
+    const target = String(process.env.AIKA_SERVER_URL || "http://127.0.0.1:3512").trim().replace(/\/$/, "");
     return [
       { source: "/chat", destination: `${target}/chat` },
       { source: "/api/:path*", destination: `${target}/api/:path*` }

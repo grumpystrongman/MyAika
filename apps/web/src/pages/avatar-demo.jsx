@@ -1,7 +1,7 @@
 import { useState } from "react";
 import AikaAvatar from "../components/AikaAvatar";
 
-const MOODS = ["neutral", "happy", "thinking", "concerned", "surprised"];
+const MOODS = ["neutral", "happy", "teasing", "thinking", "concerned", "surprised"];
 
 export default function AvatarDemo() {
   const [mood, setMood] = useState("neutral");
@@ -11,12 +11,17 @@ export default function AvatarDemo() {
 
   return (
     <div style={{ padding: 24, display: "grid", gap: 16 }}>
-      <h1 style={{ margin: 0 }}>Aika Avatar Demo</h1>
+      <h1 style={{ margin: 0 }}>AIKA Nocturne Avatar Demo</h1>
+      <p style={{ margin: 0, color: "#a4a4ad" }}>
+        Original human-portrait gothic-hostess renderer with realtime speaking and listening states.
+      </p>
       <AikaAvatar
         mood={mood}
         isTalking={isTalking}
         talkIntensity={talkIntensity}
         isListening={isListening}
+        engineHint="portrait"
+        modelUrl="/assets/aika/portraits/nocturne-human/config.json"
       />
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>

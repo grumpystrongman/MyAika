@@ -1,0 +1,47 @@
+# Multi-stage build for AIKA Avatar System
+FROM node:24-alpine AS builder
+
+WORKDIR /app
+
+# Copy source
+COPY package*.json ./
+COPY apps/server/src/avatar ./src/avatar/
+COPY apps/server/src/avatar/index.js ./src/avatar/
+
+# Install production dependencies only
+RUN npm ci --only=production \
+    && npm cache clean --force
+
+# Runtime stage  
+FROM node:24-alpine
+
+WORKDIR /app
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Copy from builder
+COPY --from=builder /app/node_modules ./node_modules/
+COPY --from=builder /app/package*.json ./
+
+# Copy avatar module and config
+COPY apps/server/src/avatar ./src/avatar/
+COPY config/avatar/ ./config/avatar/
+
+# Create logs directory
+RUN mkdir -p logs && chmod 755 logs
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD node -e "console.log('ok')"
+
+# Use dumb-init to reap zombie processes
+ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
+
+# Default command
+CMD ["node", "src/avatar/index.js"]
+
+# Metadata
+LABEL maintainer="AIKA Avatar System"
+LABEL version="1.0.0"
+LABEL description="Production-ready AIKA avatar system with emotion, voice, lipsync, and motion"

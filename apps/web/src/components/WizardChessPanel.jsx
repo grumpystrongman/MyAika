@@ -66,9 +66,9 @@ function resolveServerUrl() {
   if (envUrl) return envUrl.replace(/\/$/, "");
   if (typeof window !== "undefined" && window.location?.origin) {
     const origin = window.location.origin;
-    if (/localhost|127\.0\.0\.1/i.test(origin)) return "http://127.0.0.1:8790";
+    if (/localhost|127\.0\.0\.1/i.test(origin)) return "http://127.0.0.1:3512";
   }
-  return "http://127.0.0.1:8790";
+  return "http://127.0.0.1:3512";
 }
 
 function buildEngineServerCandidates(primary = "") {
@@ -89,10 +89,10 @@ function buildEngineServerCandidates(primary = "") {
     [
       "http://127.0.0.1:8791",
       "http://localhost:8791",
-      "http://127.0.0.1:8790",
-      "http://localhost:8790",
+      "http://127.0.0.1:3512",
+      "http://localhost:3512",
       "http://127.0.0.1:8787",
-      "http://localhost:8787"
+      "http://localhost:3512"
     ].forEach(add);
   }
   return values;

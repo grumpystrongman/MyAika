@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elvira Avatar - Live Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1a0033 0%, #330066 50%, #1a0033 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeInDown 0.8s ease;
+        }
+        
+        .header h1 {
+            font-size: 3.5em;
+            color: #ff1493;
+            text-shadow: 0 0 20px rgba(255, 20, 147, 0.8),
+                         0 0 40px rgba(255, 20, 147, 0.4);
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.3em;
+            color: #d0a0ff;
+            text-shadow: 0 0 10px rgba(208, 160, 255, 0.5);
+        }
+        
+        .container {
+            display: flex;
+            gap: 40px;
+            max-width: 1400px;
+            width: 100%;
+            align-items: flex-start;
+            animation: fadeIn 1s ease 0.3s both;
+        }
+        
+        .avatar-viewer {
+            flex: 1;
+            min-width: 400px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid #8b0000;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(139, 0, 0, 0.5);
+        }
+        
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 9/16;
+            background: linear-gradient(135deg, #2d0a4e 0%, #1a0033 100%);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1em;
+            color: #d0a0ff;
+        }
+        
+        #avatarCanvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        
+        .controls {
+            flex: 1;
+            min-width: 300px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid #8b0000;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(139, 0, 0, 0.5);
+        }
+        
+        .controls h2 {
+            color: #ff1493;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+            text-shadow: 0 0 10px rgba(255, 20, 147, 0.5);
+        }
+        
+        .control-group {
+            margin-bottom: 20px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #d0a0ff;
+            font-weight: bold;
+        }
+        
+        .control-group select,
+        .control-group input {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(50, 0, 100, 0.8);
+            color: #fff;
+            border: 1px solid #8b0000;
+            border-radius: 5px;
+            font-size: 0.95em;
+        }
+        
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: #ff1493;
+            box-shadow: 0 0 10px rgba(255, 20, 147, 0.3);
+        }
+        
+        .button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #ff1493, #8b0000);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            margin-bottom: 10px;
+        }
+        
+        .button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(255, 20, 147, 0.6);
+        }
+        
+        .button:active {
+            transform: scale(0.98);
+        }
+        
+        .status {
+            padding: 15px;
+            background: rgba(50, 0, 100, 0.6);
+            border-left: 3px solid #ff1493;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+        
+        .status.success {
+            border-left-color: #00ff00;
+            color: #00ff00;
+        }
+        
+        .status.error {
+            border-left-color: #ff0000;
+            color: #ff6b6b;
+        }
+        
+        .loading {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        .specs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(50, 0, 100, 0.4);
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        
+        .spec-item {
+            padding: 8px;
+            background: rgba(139, 0, 0, 0.3);
+            border-left: 2px solid #ff1493;
+            padding-left: 10px;
+        }
+        
+        .spec-label {
+            color: #d0a0ff;
+            font-weight: bold;
+        }
+        
+        .spec-value {
+            color: #ff1493;
+            margin-top: 3px;
+        }
+        
+        @media (max-width: 900px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            .avatar-viewer,
+            .controls {
+                min-width: 100%;
+            }
+            
+            .header h1 {
+                font-size: 2.5em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>💜 ELVIRA: MISTRESS OF THE DARK 💜</h1>
+        <p>Avatar Edition - Live Viewer</p>
+    </div>
+    
+    <div class="container">
+        <div class="avatar-viewer">
+            <div class="canvas-container" id="canvasContainer">
+                <div class="loading">Loading Elvira...</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <h2>Avatar Controls</h2>
+            
+            <div class="control-group">
+                <label for="emotionSelect">Emotion:</label>
+                <select id="emotionSelect">
+                    <option value="neutral">Neutral-Sultry</option>
+                    <option value="delighted">Delighted-Wicked</option>
+                    <option value="seductive">Seductive</option>
+                    <option value="shocked">Shocked-Surprised</option>
+                    <option value="evil">Evil Grin</option>
+                    <option value="disgusted">Disgusted-Sarcastic</option>
+                    <option value="mysterious">Mysterious-Intrigued</option>
+                    <option value="laughing">Laughing-Cackling</option>
+                    <option value="sarcastic">Sarcastic-Eye-Roll</option>
+                    <option value="commanding">Commanding-Dominant</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="voiceSelect">Voice Variant:</label>
+                <select id="voiceSelect">
+                    <option value="witty">Witty</option>
+                    <option value="seductive">Seductive</option>
+                    <option value="mysterious">Mysterious</option>
+                    <option value="excited">Excited</option>
+                    <option value="sarcastic">Sarcastic</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="textInput">Send Message:</label>
+                <input type="text" id="textInput" placeholder="Type something for Elvira to respond to..." value="Tell me something wicked, Elvira...">
+            </div>
+            
+            <button class="button" onclick="sendInteraction()">Send 💬</button>
+            <button class="button" onclick="triggerEmotion()">Change Expression 🎭</button>
+            <button class="button" onclick="toggleAnimation()">Toggle Animation ✨</button>
+            
+            <div class="status" id="status">
+                ✓ Avatar System Ready
+            </div>
+            
+            <div class="specs">
+                <div class="spec-item">
+                    <div class="spec-label">Hair</div>
+                    <div class="spec-value">Jet Black, 1.8x Volume</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Eyes</div>
+                    <div class="spec-value">Deep Brown, Almond</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Makeup</div>
+                    <div class="spec-value">Theatrical Extreme</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Voice</div>
+                    <div class="spec-value">Husky, Seductive</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Presence</div>
+                    <div class="spec-value">Statuesque</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Status</div>
+                    <div class="spec-value">ONLINE ✓</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:3000';
+        let avatarSession = null;
+        let currentEmotion = 'neutral';
+        
+        // Create canvas and Three.js scene
+        const container = document.getElementById('canvasContainer');
+        container.innerHTML = '<canvas id="avatarCanvas"></canvas>';
+        
+        // Initialize Three.js scene
+        const canvas = document.getElementById('avatarCanvas');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+        
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setClearColor(0x19001f, 1);
+        camera.position.z = 5;
+        
+        // Build the Elvira avatar model
+        function createElviraAvatar() {
+            const materials = {
+                skin: new THREE.MeshStandardMaterial({ color: 0xf4d7d1, roughness: 0.32, metalness: 0.05 }),
+                hair: new THREE.MeshStandardMaterial({ color: 0x050405, roughness: 0.22, metalness: 0.08 }),
+                dress: new THREE.MeshStandardMaterial({ color: 0x0b040d, roughness: 0.28, metalness: 0.05 }),
+                eyeWhite: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0 }),
+                iris: new THREE.MeshStandardMaterial({ color: 0x311720, roughness: 0.6, metalness: 0.1 }),
+                lips: new THREE.MeshStandardMaterial({ color: 0x9b0f1e, roughness: 0.34, metalness: 0.12 }),
+                makeup: new THREE.MeshStandardMaterial({ color: 0x8f2db8, roughness: 0.7, metalness: 0.05 })
+            };
+            
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.82, 64, 64), materials.skin);
+            head.position.set(0, 1.5, 0);
+            scene.add(head);
+            
+            const hairGroup = new THREE.Group();
+            const hairBack = new THREE.Mesh(new THREE.SphereGeometry(1.25, 64, 64), materials.hair);
+            hairBack.scale.set(1.05, 1.2, 1.05);
+            hairBack.position.set(0, 1.82, -0.16);
+            hairGroup.add(hairBack);
+            
+            const hairFront = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.85, 0.5), materials.hair);
+            hairFront.position.set(0, 2.08, 0.18);
+            hairFront.rotation.x = -0.12;
+            hairGroup.add(hairFront);
+            
+            const strandLeft = new THREE.Mesh(new THREE.BoxGeometry(0.38, 2.2, 0.28), materials.hair);
+            strandLeft.position.set(-0.86, 1.24, 0.1);
+            strandLeft.rotation.z = 0.08;
+            hairGroup.add(strandLeft);
+            
+            const strandRight = strandLeft.clone();
+            strandRight.position.set(0.86, 1.24, 0.1);
+            strandRight.rotation.z = -0.08;
+            hairGroup.add(strandRight);
+            
+            const fringe = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 0.35), materials.hair);
+            fringe.position.set(0, 2.2, 0.35);
+            fringe.rotation.x = -0.16;
+            hairGroup.add(fringe);
+            
+            scene.add(hairGroup);
+            
+            const eyeLeft = new THREE.Mesh(new THREE.SphereGeometry(0.135, 32, 32), materials.eyeWhite);
+            eyeLeft.position.set(-0.29, 1.7, 0.76);
+            scene.add(eyeLeft);
+            const eyeRight = eyeLeft.clone();
+            eyeRight.position.set(0.29, 1.7, 0.76);
+            scene.add(eyeRight);
+            
+            const irisLeft = new THREE.Mesh(new THREE.SphereGeometry(0.06, 32, 32), materials.iris);
+            irisLeft.position.set(-0.29, 1.7, 0.83);
+            scene.add(irisLeft);
+            const irisRight = irisLeft.clone();
+            irisRight.position.set(0.29, 1.7, 0.83);
+            scene.add(irisRight);
+            
+            const highlightMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0, metalness: 0.75, transparent: true, opacity: 0.75 });
+            const eyeHighlightLeft = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 16), highlightMaterial);
+            eyeHighlightLeft.position.set(-0.22, 1.72, 0.88);
+            scene.add(eyeHighlightLeft);
+            const eyeHighlightRight = eyeHighlightLeft.clone();
+            eyeHighlightRight.position.set(0.36, 1.72, 0.88);
+            scene.add(eyeHighlightRight);
+            
+            const browGeom = new THREE.BoxGeometry(0.48, 0.08, 0.07);
+            const browMat = new THREE.MeshStandardMaterial({ color: 0x16070c, roughness: 0.35 });
+            const browLeft = new THREE.Mesh(browGeom, browMat);
+            browLeft.position.set(-0.28, 1.9, 0.72);
+            browLeft.rotation.z = 0.12;
+            scene.add(browLeft);
+            const browRight = browLeft.clone();
+            browRight.position.set(0.28, 1.9, 0.72);
+            browRight.rotation.z = -0.12;
+            scene.add(browRight);
+            
+            const eyeShadowGeom = new THREE.BoxGeometry(0.5, 0.1, 0.06);
+            const shadowLeft = new THREE.Mesh(eyeShadowGeom, materials.makeup);
+            shadowLeft.position.set(-0.3, 1.78, 0.82);
+            shadowLeft.rotation.x = -0.15;
+            scene.add(shadowLeft);
+            const shadowRight = shadowLeft.clone();
+            shadowRight.position.set(0.3, 1.78, 0.82);
+            scene.add(shadowRight);
+            
+            const lips = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.14, 0.08), materials.lips);
+            lips.position.set(0, 1.26, 0.88);
+            scene.add(lips);
+            
+            const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 0.75, 32), materials.skin);
+            neck.position.set(0, 0.92, 0);
+            scene.add(neck);
+            
+            const collar = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.12, 16, 40), materials.dress);
+            collar.position.set(0, 0.9, 0);
+            collar.rotation.x = Math.PI / 2;
+            scene.add(collar);
+            
+            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.78, 1.75, 32, 1, true), materials.dress);
+            torso.position.set(0, -0.05, 0);
+            scene.add(torso);
+            
+            const chestPanel = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.46, 0.35), materials.dress);
+            chestPanel.position.set(0, 0.55, 0.08);
+            chestPanel.rotation.x = 0.06;
+            scene.add(chestPanel);
+            
+            const dressSkirt = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.7, 32), materials.dress);
+            dressSkirt.position.set(0, -1.2, 0);
+            scene.add(dressSkirt);
+            
+            const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.08), new THREE.MeshStandardMaterial({ color: 0xff1493, roughness: 0.15, metalness: 0.9 }));
+            gem.position.set(0, 0.48, 0.18);
+            scene.add(gem);
+            
+            return { hairGroup, head, eyeLeft, eyeRight, lips, torso, gem, eyeHighlightLeft, eyeHighlightRight };
+        }
+        
+        const avatarMeshes = createElviraAvatar();
+        
+        // Add improved lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+        scene.add(ambientLight);
+        const keyLight = new THREE.DirectionalLight(0xff8cff, 1.0);
+        keyLight.position.set(4, 5, 5);
+        scene.add(keyLight);
+        const rimLight = new THREE.DirectionalLight(0x4400ff, 0.45);
+        rimLight.position.set(-3, 2, -4);
+        scene.add(rimLight);
+        const floorLight = new THREE.PointLight(0x990033, 0.25, 20);
+        floorLight.position.set(0, -3, 3);
+        scene.add(floorLight);
+        
+        camera.position.set(0, 1.4, 7.5);
+        camera.lookAt(0, 1.4, 0);
+        
+        renderer.setPixelRatio(window.devicePixelRatio || 1);
+        function onResize() {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            renderer.setSize(width, height);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+        }
+        window.addEventListener('resize', onResize);
+        onResize();
+        
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const elapsed = clock.getElapsedTime();
+            avatarMeshes.hairGroup.rotation.y = Math.sin(elapsed * 0.3) * 0.08;
+            avatarMeshes.head.rotation.y = Math.sin(elapsed * 0.1) * 0.02;
+            avatarMeshes.gem.rotation.y = elapsed * 0.8;
+            avatarMeshes.lips.rotation.z = Math.sin(elapsed * 1.5) * 0.01;
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+        
+        // Initialize avatar session
+        async function initializeAvatar() {
+            try {
+                const response = await fetch(`${API_BASE}/avatar/initialize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: 'elvira_' + Date.now() })
+                });
+                const data = await response.json();
+                avatarSession = data.sessionId;
+                updateStatus('Avatar initialized. Ready for interaction! 🎭', 'success');
+            } catch (e) {
+                updateStatus('Backend not responding, but avatar is displayed locally', 'error');
+            }
+        }
+        
+        // Send interaction
+        async function sendInteraction() {
+            const text = document.getElementById('textInput').value;
+            if (!text.trim()) return;
+            
+            updateStatus('Processing... ⏳');
+            
+            try {
+                if (avatarSession) {
+                    await fetch(`${API_BASE}/avatar/interaction/user-input`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: avatarSession,
+                            userInput: text
+                        })
+                    });
+                }
+                updateStatus('Response sent 💬 Elvira is processing...', 'success');
+                triggerEmotion();
+            } catch (e) {
+                updateStatus('Interaction queued locally', 'error');
+            }
+        }
+        
+        // Change emotion
+        function triggerEmotion() {
+            const emotion = document.getElementById('emotionSelect').value;
+            currentEmotion = emotion;
+            
+            // Visual feedback
+            avatarMeshes.head.rotation.x += 0.2;
+            avatarMeshes.hair.scale.y = 1.2 + Math.random() * 0.2;
+            
+            updateStatus(`Expression changed to: ${emotion} 🎭`, 'success');
+        }
+        
+        // Toggle animation
+        function toggleAnimation() {
+            const isAnimating = renderer.domElement.style.filter === 'blur(1px)';
+            renderer.domElement.style.filter = isAnimating ? 'none' : 'blur(1px)';
+            updateStatus('Animation ' + (isAnimating ? 'resumed' : 'paused'), 'success');
+        }
+        
+        // Update status
+        function updateStatus(msg, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = msg;
+            status.className = 'status ' + type;
+        }
+        
+        // Initialize on load
+        window.addEventListener('load', () => {
+            initializeAvatar();
+        });
+    </script>
+

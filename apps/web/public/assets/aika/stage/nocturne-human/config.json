@@ -1,0 +1,70 @@
+{
+  "baseImage": "/assets/aika/stage/nocturne-human/base.png",
+  "layers": {
+    "bodyShell": "/assets/aika/stage/nocturne-human/layer-body-shell.png",
+    "faceShell": "/assets/aika/stage/nocturne-human/layer-face-shell.png",
+    "hairBack": "/assets/aika/stage/nocturne-human/layer-hair-back.png",
+    "hairFront": "/assets/aika/stage/nocturne-human/layer-hair-front.png",
+    "eyeZone": "/assets/aika/stage/nocturne-human/layer-eye-zone.png",
+    "mouthCore": "/assets/aika/stage/nocturne-human/layer-mouth-core.png"
+  },
+  "variants": {
+    "browLift": "/assets/aika/stage/nocturne-human/brow-lift.png",
+    "browKnit": "/assets/aika/stage/nocturne-human/brow-knit.png",
+    "eyeGloss": "/assets/aika/stage/nocturne-human/eye-gloss.png",
+    "mouthSoft": "/assets/aika/stage/nocturne-human/mouth-soft.png",
+    "mouthMedium": "/assets/aika/stage/nocturne-human/mouth-medium.png",
+    "mouthWide": "/assets/aika/stage/nocturne-human/mouth-wide.png",
+    "mouthRound": "/assets/aika/stage/nocturne-human/mouth-round.png",
+    "mouthClosedPress": "/assets/aika/stage/nocturne-human/mouth-closed-press.png",
+    "mouthLipBite": "/assets/aika/stage/nocturne-human/mouth-lip-bite.png",
+    "mouthEe": "/assets/aika/stage/nocturne-human/mouth-ee.png",
+    "mouthAh": "/assets/aika/stage/nocturne-human/mouth-ah.png",
+    "mouthOh": "/assets/aika/stage/nocturne-human/mouth-oh.png",
+    "mouthSibilant": "/assets/aika/stage/nocturne-human/mouth-sibilant.png",
+    "mouthTongue": "/assets/aika/stage/nocturne-human/mouth-tongue.png"
+  },
+  "frame": {
+    "scale": 0.98,
+    "offsetX": 0,
+    "offsetY": 0.04
+  },
+  "anchors": {
+    "leftBrow": {
+      "x": 0.314,
+      "y": 0.162,
+      "w": 0.124,
+      "h": 0.038
+    },
+    "rightBrow": {
+      "x": 0.56,
+      "y": 0.162,
+      "w": 0.124,
+      "h": 0.038
+    },
+    "leftEye": {
+      "x": 0.318,
+      "y": 0.215,
+      "w": 0.112,
+      "h": 0.04
+    },
+    "rightEye": {
+      "x": 0.565,
+      "y": 0.215,
+      "w": 0.112,
+      "h": 0.04
+    },
+    "mouth": {
+      "x": 0.424,
+      "y": 0.31,
+      "w": 0.154,
+      "h": 0.065
+    },
+    "face": {
+      "x": 0.274,
+      "y": 0.082,
+      "w": 0.45,
+      "h": 0.36
+    }
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "version": "2.0.0",
+  "expressionMaps": {
+    "neutral": {
+      "name": "Neutral",
+      "emotionalIntensity": 0,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": 0,
+        "eyeBrowsRaiseRight": 0,
+        "eyeClose": 0,
+        "mouthSmile": 0.05,
+        "mouthFrown": 0,
+        "jawOpen": 0.03,
+        "noseWrinkle": 0,
+        "cheekRaise": 0.05,
+        "eyeWideLeft": 0.05,
+        "eyeWideRight": 0.05,
+        "browsInnerRaise": 0,
+        "browsInnerLower": 0.05,
+        "browsOuter": 0.05,
+        "chinRaise": 0.05,
+        "mouthOpen": 0.05,
+        "mouthPucker": 0.04,
+        "mouthRollUpper": 0.03,
+        "mouthRollLower": 0.03,
+        "mouthLowerDown": 0,
+        "mouthUpperUp": 0
+      },
+      "duration": 320
+    },
+    "warm": {
+      "name": "Warm Supportive",
+      "emotionalIntensity": 0.45,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": 0.12,
+        "eyeBrowsRaiseRight": 0.12,
+        "eyeClose": 0.08,
+        "mouthSmile": 0.38,
+        "jawOpen": 0.08,
+        "cheekRaise": 0.22,
+        "eyeWideLeft": 0.12,
+        "eyeWideRight": 0.12,
+        "browsInnerRaise": 0.14,
+        "mouthOpen": 0.1
+      },
+      "duration": 420
+    },
+    "witty": {
+      "name": "Witty Playful",
+      "emotionalIntensity": 0.65,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": 0.22,
+        "eyeBrowsRaiseRight": 0.06,
+        "eyeClose": 0.04,
+        "mouthSmile": 0.52,
+        "jawOpen": 0.12,
+        "cheekRaise": 0.32,
+        "eyeWideLeft": 0.2,
+        "eyeWideRight": 0.14,
+        "browsInnerRaise": 0.08,
+        "mouthOpen": 0.14
+      },
+      "duration": 260
+    },
+    "analytical": {
+      "name": "Analytical",
+      "emotionalIntensity": 0.24,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": 0.04,
+        "eyeBrowsRaiseRight": 0.04,
+        "browsInnerRaise": 0.16,
+        "browsInnerLower": 0.1,
+        "eyeClose": 0.02,
+        "jawOpen": 0.05,
+        "mouthSmile": 0.04,
+        "mouthOpen": 0.06
+      },
+      "duration": 360
+    },
+    "serious": {
+      "name": "Serious",
+      "emotionalIntensity": 0.3,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": -0.08,
+        "eyeBrowsRaiseRight": -0.08,
+        "browsInnerLower": 0.18,
+        "eyeClose": -0.04,
+        "mouthSmile": 0,
+        "mouthFrown": 0.12,
+        "jawOpen": 0.02,
+        "mouthOpen": 0.03
+      },
+      "duration": 420
+    },
+    "reflective": {
+      "name": "Reflective",
+      "emotionalIntensity": 0.18,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": 0.02,
+        "eyeBrowsRaiseRight": 0.02,
+        "eyeClose": 0.1,
+        "mouthSmile": 0.08,
+        "mouthFrown": 0.06,
+        "jawOpen": 0.03,
+        "browsInnerRaise": 0.12,
+        "mouthOpen": 0.05
+      },
+      "duration": 520
+    },
+    "teasing": {
+      "name": "Teasing",
+      "emotionalIntensity": 0.62,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": 0.2,
+        "eyeBrowsRaiseRight": 0,
+        "eyeClose": 0.06,
+        "mouthSmile": 0.44,
+        "jawOpen": 0.09,
+        "cheekRaise": 0.25,
+        "browsOuter": 0.15,
+        "mouthPucker": 0.08,
+        "mouthOpen": 0.12
+      },
+      "duration": 280
+    },
+    "focused": {
+      "name": "Focused Executive",
+      "emotionalIntensity": 0.36,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": -0.02,
+        "eyeBrowsRaiseRight": -0.02,
+        "eyeClose": 0.02,
+        "mouthSmile": 0.03,
+        "jawOpen": 0.04,
+        "browsInnerLower": 0.14,
+        "mouthOpen": 0.05
+      },
+      "duration": 250
+    },
+    "surprised": {
+      "name": "Surprised",
+      "emotionalIntensity": 0.82,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": 0.72,
+        "eyeBrowsRaiseRight": 0.72,
+        "eyeWideLeft": 0.66,
+        "eyeWideRight": 0.66,
+        "mouthOpen": 0.56,
+        "jawOpen": 0.42,
+        "browsInnerRaise": 0.44
+      },
+      "duration": 250
+    },
+    "sad": {
+      "name": "Sad",
+      "emotionalIntensity": -0.64,
+      "blendshapeValues": {
+        "eyeBrowsRaiseLeft": -0.08,
+        "eyeBrowsRaiseRight": -0.08,
+        "browsInnerRaise": -0.15,
+        "eyeClose": 0.16,
+        "mouthFrown": 0.42,
+        "jawOpen": 0.02,
+        "chinRaise": 0.16,
+        "mouthOpen": 0.04
+      },
+      "duration": 540
+    }
+  },
+  "microExpressions": {
+    "blink": {
+      "eyeCloseTarget": 1,
+      "duration": 120,
+      "frequency": "12-18/min"
+    },
+    "eyeDart": {
+      "leftGaze": 0.35,
+      "rightGaze": 0.35,
+      "duration": 90,
+      "frequency": "4-7/min"
+    },
+    "browRaise": {
+      "browRaiseTarget": 0.32,
+      "duration": 180,
+      "frequency": "low"
+    }
+  },
+  "emotionToExpressionMapping": {
+    "joy": ["witty", "warm"],
+    "sadness": ["sad", "reflective"],
+    "anger": ["serious", "focused"],
+    "fear": ["serious", "reflective"],
+    "disgust": ["serious"],
+    "surprise": ["surprised", "witty"],
+    "neutral": ["neutral", "focused"],
+    "curiosity": ["analytical", "reflective"],
+    "affection": ["warm", "teasing"],
+    "flirtation": ["teasing", "witty"],
+    "warm_supportive": ["warm"],
+    "witty_playful": ["witty"],
+    "analytical": ["analytical"],
+    "serious": ["serious"],
+    "reflective": ["reflective"],
+    "teasing": ["teasing"],
+    "focused_executive": ["focused"]
+  },
+  "blendTransitionCurves": {
+    "default": "cubic-hermite",
+    "rapid": "linear-fast",
+    "subtle": "ease-in-out"
+  },
+  "exertedBlendshapes": [
+    {
+      "name": "eyeBrowsRaiseLeft",
+      "minValue": -0.5,
+      "maxValue": 1,
+      "muscleGroup": "frontalis"
+    },
+    {
+      "name": "eyeBrowsRaiseRight",
+      "minValue": -0.5,
+      "maxValue": 1,
+      "muscleGroup": "frontalis"
+    },
+    {
+      "name": "eyeClose",
+      "minValue": 0,
+      "maxValue": 1,
+      "muscleGroup": "orbicularis-oculi"
+    },
+    {
+      "name": "mouthSmile",
+      "minValue": 0,
+      "maxValue": 1,
+      "muscleGroup": "zygomatic-major"
+    },
+    {
+      "name": "mouthFrown",
+      "minValue": 0,
+      "maxValue": 0.8,
+      "muscleGroup": "depressor-anguli-oris"
+    },
+    {
+      "name": "jawOpen",
+      "minValue": 0,
+      "maxValue": 0.6,
+      "muscleGroup": "masseter"
+    },
+    {
+      "name": "cheekRaise",
+      "minValue": 0,
+      "maxValue": 0.75,
+      "muscleGroup": "orbicularis-oculi"
+    },
+    {
+      "name": "noseWrinkle",
+      "minValue": 0,
+      "maxValue": 0.6,
+      "muscleGroup": "levator-labii-superioris"
+    }
+  ]
+}

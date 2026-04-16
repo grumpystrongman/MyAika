@@ -96,6 +96,34 @@ function isLikelyHallucinatedTranscript(text) {
   return false;
 }
 
+function normalizeAudioForTranscription(audioPath) {
+  if (!audioPath || !fs.existsSync(audioPath)) {
+    return { path: audioPath, cleanup: false };
+  }
+  const sourceExt = path.extname(audioPath).toLowerCase();
+  const outputPath = path.join(
+    path.dirname(audioPath),
+    `${path.basename(audioPath, sourceExt || "")}.stt.wav`
+  );
+  const ok = runFfmpeg([
+    "-y",
+    "-i",
+    audioPath,
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-c:a",
+    "pcm_s16le",
+    outputPath
+  ]);
+  if (!ok || !fs.existsSync(outputPath)) {
+    return { path: audioPath, cleanup: false };
+  }
+  return { path: outputPath, cleanup: outputPath !== audioPath };
+}
+
 export function combineChunks(recordingId, recordingsDir) {
   const chunks = listRecordingChunks(recordingId);
   if (!chunks.length) return null;
@@ -281,7 +309,9 @@ export async function transcribeAudio(audioPath) {
   if (!audioPath || !fs.existsSync(audioPath)) {
     return { text: "", language: "en", provider: "none", error: "audio_missing" };
   }
-  const stat = fs.statSync(audioPath);
+  const normalized = normalizeAudioForTranscription(audioPath);
+  const sourcePath = normalized.path;
+  const stat = fs.statSync(sourcePath);
   if (stat.size < 256) {
     return {
       text: "",
@@ -291,7 +321,7 @@ export async function transcribeAudio(audioPath) {
       segments: []
     };
   }
-  if (stat.size <= 50000 && isSilentWav(audioPath)) {
+  if (stat.size <= 50000 && isSilentWav(sourcePath)) {
     return {
       text: "",
       language: STT_FORCE_LANGUAGE || "en",
@@ -310,7 +340,7 @@ export async function transcribeAudio(audioPath) {
     };
   }
   try {
-    const file = fs.createReadStream(audioPath);
+    const file = fs.createReadStream(sourcePath);
     let result;
     try {
       result = await transcriptionsCreate({
@@ -326,7 +356,7 @@ export async function transcribeAudio(audioPath) {
     } catch (primaryErr) {
       const msg = String(primaryErr?.message || "").toLowerCase();
       if (!msg.includes("timestamp") && !msg.includes("response_format")) throw primaryErr;
-      const fallbackFile = fs.createReadStream(audioPath);
+      const fallbackFile = fs.createReadStream(sourcePath);
       result = await transcriptionsCreate({
         file: fallbackFile,
         model: TRANSCRIBE_MODEL,
@@ -382,6 +412,12 @@ export async function transcribeAudio(audioPath) {
       error: "transcription_failed",
       segments: []
     };
+  } finally {
+    if (normalized.cleanup && sourcePath && fs.existsSync(sourcePath)) {
+      try {
+        fs.unlinkSync(sourcePath);
+      } catch {}
+    }
   }
 }
 

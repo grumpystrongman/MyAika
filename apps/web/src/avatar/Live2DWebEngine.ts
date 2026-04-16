@@ -1,4 +1,4 @@
-import type { AvatarEngine, Mood } from "./AvatarEngine";
+import type { AvatarEngine, AvatarLipsyncSequence, Mood } from "./AvatarEngine";
 
 type MoodMap = Record<Mood, string | number>;
 
@@ -19,6 +19,7 @@ export class Live2DWebEngine implements AvatarEngine {
     this.moodMap = {
       neutral: "neutral",
       happy: "happy",
+      teasing: "happy",
       thinking: "thinking",
       concerned: "concerned",
       surprised: "surprised",
@@ -78,6 +79,10 @@ export class Live2DWebEngine implements AvatarEngine {
   setTalking(isTalking: boolean, intensity = 0.5): void {
     this.isTalking = isTalking;
     this.talkIntensity = Math.max(0, Math.min(1, intensity));
+  }
+
+  setLipSyncSequence(_sequence: AvatarLipsyncSequence | null, _startedAtMs = 0): void {
+    return;
   }
 
   setListening(isListening: boolean): void {

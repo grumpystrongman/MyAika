@@ -36,8 +36,30 @@ const NO_INTEGRATIONS_MATCHES = [
   "none available"
 ];
 
+const BOOT_EXPLICIT_MATCHES = [
+  "begin now",
+  "start boot",
+  "start onboarding",
+  "run boot",
+  "run onboarding",
+  "boot sequence",
+  "onboarding",
+  "setup integrations",
+  "configure integrations"
+];
+
 function detectMatches(input, matches = []) {
   return matches.some(match => input.includes(match));
+}
+
+export function shouldHandleBootFlow(userText) {
+  const raw = normalizeLower(userText);
+  if (!raw) return false;
+  if (detectMatches(raw, SKIP_BOOT_MATCHES)) return true;
+  if (detectMatches(raw, NO_INTEGRATIONS_MATCHES)) return true;
+  if (detectMatches(raw, BOOT_EXPLICIT_MATCHES)) return true;
+  const integrations = extractIntegrations(raw);
+  return integrations.length > 0;
 }
 
 function extractIntegrations(text) {

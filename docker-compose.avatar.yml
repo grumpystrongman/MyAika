@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # AIKA Avatar System
+  aika-avatar:
+    build:
+      context: .
+      dockerfile: Dockerfile.avatar
+    container_name: aika-avatar-system
+    ports:
+      - "3000:3000"  # Avatar API
+      - "8020:8020"  # TTS local (Piper) - if enabled
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - TTS_ENGINE=piper
+      - AVATAR_SESSION_TIMEOUT=3600000
+      - MAX_ACTIVE_SESSIONS=10
+      - ENABLE_AUDIT_LOG=true
+      - RATE_LIMIT_WINDOW_MS=60000
+      - RATE_LIMIT_MAX_REQUESTS=100
+    volumes:
+      - ./logs:/app/logs
+      - ./config/avatar:/app/config/avatar:ro
+      - avatar-cache:/app/cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - aika-network
+
+  # Optional: Redis for distributed caching/rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: aika-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aika-network
+
+  # Optional: Monitoring with Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aika-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+    networks:
+      - aika-network
+
+volumes:
+  avatar-cache:
+  redis-data:
+  prometheus-data:
+
+networks:
+  aika-network:
+    driver: bridge

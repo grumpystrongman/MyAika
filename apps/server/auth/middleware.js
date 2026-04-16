@@ -1,7 +1,7 @@
 import { getSession } from "./session.js";
 import { parseJwtFromRequest, verifyJwt } from "./jwt.js";
 import { runWithContext } from "./context.js";
-import { ensureUser } from "../storage/users.js";
+import { ensureUser, getUser } from "../storage/users.js";
 
 export function isAuthRequired() {
   return String(process.env.AUTH_REQUIRED || process.env.AIKA_AUTH_REQUIRED || "") === "1";
@@ -55,19 +55,39 @@ export function authMiddleware(req, _res, next) {
   if (!user && !authRequired) {
     const headerUser = req.headers["x-user-id"] || req.headers["x-user"] || "";
     if (headerUser) {
-      user = { id: String(headerUser).trim() };
+      const headerUserId = String(headerUser).trim();
+      const existing = getUser(headerUserId);
+      user = {
+        id: headerUserId,
+        name: existing?.name || "",
+        email: existing?.email || ""
+      };
       authType = "header";
     }
   }
 
   if (!user && !authRequired) {
-    user = { id: "local", name: "Local" };
+    const localUser = getUser("local");
+    user = {
+      id: "local",
+      name: localUser?.name || "",
+      email: localUser?.email || ""
+    };
     authType = "local";
   }
 
   if (user?.id) {
     user.id = String(user.id).trim();
     if (user.email) user.email = String(user.email).toLowerCase();
+    try {
+      const existing = getUser(user.id);
+      if (existing) {
+        user.name = user.name || existing.name || "";
+        user.email = user.email || existing.email || "";
+      }
+    } catch {
+      // ignore db init issues for middleware enrichment
+    }
     try {
       ensureUser(user.id, { name: user.name || user.email || user.id, email: user.email || "" });
     } catch {

@@ -13,6 +13,21 @@ const STYLE_PRESETS = {
     prefix: "Listen, ",
     taglines: ["Focus.", "Nope.", "Not quite."],
     closers: ["Do it right.", "Try again.", "Better."]
+  },
+  nocturne_hostess: {
+    prefix: "",
+    taglines: [],
+    closers: []
+  },
+  nocturne_velvet: {
+    prefix: "",
+    taglines: [],
+    closers: []
+  },
+  nocturne_command: {
+    prefix: "",
+    taglines: [],
+    closers: []
   }
 };
 

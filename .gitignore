@@ -40,3 +40,11 @@ apps/web/certificates/
 __pycache__/
 *.pyc
 aika-trading-assistant/*.db
+apps/web/next3412*.log
+apps/web/public/assets/aika/3d/external/lenore.glb
+apps/web/public/assets/aika/3d/external/lenore-clean.glb
+apps/web/public/assets/aika/3d/external/lenore-runtime.glb
+apps/web/public/assets/aika/3d/external/lenore-runtime-clip.glb
+apps/web/public/assets/aika/3d/external/lenore-runtime-fast.glb
+apps/web/public/assets/aika/3d/external/lenore-runtime-lite.glb
+apps/web/public/assets/aika/3d/external/lenore-runtime-conversation.glb

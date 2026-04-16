@@ -8,6 +8,7 @@ import { readWavMeta } from "./wav_meta.js";
 import { generateWithGptSovits } from "./engine_gptsovits.js";
 import { normalizeReferenceWav } from "./voice_ref.js";
 import { generateWithPiper, listPiperVoices } from "./engine_piper.js";
+import { generateWithOpenAI } from "./engine_openai.js";
 
 function writeStubWav(filePath, sampleRate = 22050, durationSec = 0.2) {
   const numSamples = Math.max(1, Math.floor(sampleRate * durationSec));
@@ -41,6 +42,7 @@ function getDefaultEngine() {
   const piperBin = process.env.PIPER_BIN || process.env.PIPER_PYTHON_BIN;
   const piperVoices = listPiperVoices();
   if (piperBin && piperVoices.length) return "piper";
+  if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim()) return "openai";
   return "gptsovits";
 }
 
@@ -77,7 +79,7 @@ export async function generateAikaVoice({ text, settings = {} }) {
 
   const { settings: normalized, warnings } = normalizeSettings(settings);
   const selectedEngine =
-    normalized.engine && (normalized.engine === "piper" || normalized.engine === "gptsovits")
+    normalized.engine && (normalized.engine === "piper" || normalized.engine === "gptsovits" || normalized.engine === "openai")
       ? normalized.engine
       : ENGINE;
   const useRawText = settings.use_raw_text === true;
@@ -163,7 +165,7 @@ export async function generateAikaVoice({ text, settings = {} }) {
 
   const defaultPrompt =
     process.env.GPTSOVITS_DEFAULT_PROMPT_TEXT ||
-    "Aika is a confident, playful, feminine assistant with a warm, witty tone.";
+    "AIKA Nocturne is a cinematic gothic-glamour assistant: warm, witty, articulate, and theatrically controlled.";
   let engineMeta;
   if (selectedEngine === "gptsovits") {
     const promptText = (normalized.voice?.prompt_text || "").trim() || defaultPrompt;
@@ -175,6 +177,17 @@ export async function generateAikaVoice({ text, settings = {} }) {
       language: "en",
       rate: normalized.rate,
       fast: normalized.fast
+    });
+  } else if (selectedEngine === "openai") {
+    if (voicePath) warnings.push("reference_wav_ignored");
+    if (Math.abs(normalized.rate - 1) > 0.08) warnings.push("rate_ignored");
+    engineMeta = await generateWithOpenAI({
+      text: formatted,
+      outputPath,
+      format: normalized.format,
+      style: normalized.style,
+      promptText: (normalized.voice?.prompt_text || "").trim() || defaultPrompt,
+      voiceName: normalized.voice?.name || ""
     });
   } else if (selectedEngine === "piper") {
     if (normalized.format !== "wav") {

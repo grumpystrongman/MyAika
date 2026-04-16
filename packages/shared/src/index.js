@@ -5,7 +5,14 @@ export const Emotion = Object.freeze({
   SAD: "sad",
   ANGRY: "angry",
   SURPRISED: "surprised",
-  SLEEPY: "sleepy"
+  SLEEPY: "sleepy",
+  WARM_SUPPORTIVE: "warm_supportive",
+  WITTY_PLAYFUL: "witty_playful",
+  ANALYTICAL: "analytical",
+  SERIOUS: "serious",
+  REFLECTIVE: "reflective",
+  TEASING: "teasing",
+  FOCUSED_EXECUTIVE: "focused_executive"
 });
 
 /**

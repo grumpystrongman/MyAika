@@ -7,6 +7,23 @@ const DEFAULT_MEMORY_MODE = "opt_in";
 const DEFAULT_RAG_MODEL = process.env.DEFAULT_RAG_MODEL || "all";
 const MAX_SUMMARY_CHARS = 2000;
 
+function defaultVoiceSettings(promptText = "") {
+  return {
+    style: "nocturne_hostess",
+    format: "wav",
+    rate: 1.05,
+    pitch: 0,
+    energy: 1.0,
+    pause: 1.1,
+    engine: process.env.OPENAI_API_KEY ? "openai" : "piper",
+    voice: {
+      reference_wav_path: "",
+      name: process.env.OPENAI_API_KEY ? "marin" : "",
+      prompt_text: promptText
+    }
+  };
+}
+
 function limitText(value, max) {
   const text = String(value || "").trim();
   if (!max || text.length <= max) return text;
@@ -26,28 +43,46 @@ function defaultPreferences() {
       theme: "aurora",
       appBackground: "",
       avatarBackground: "none",
-      avatarModelId: "miku"
+      avatarModelId: "aika_nocturne_3d",
+      avatarLook: {
+        preset: "goth_hostess",
+        cameraFrame: "waist",
+        hairColor: "#09050a",
+        skinColor: "#f3d9e2",
+        lipColor: "#5b0c22",
+        outfitColor: "#12070f",
+        accentColor: "#5b1025",
+        eyeGlow: 0.7,
+        matte: 0.88,
+        showHair: true,
+        showJacket: false,
+        showWrap: false,
+        showGloves: true,
+        showTop: true,
+        showBottoms: true,
+        showStockings: true,
+        showBoots: true,
+        showChoker: true,
+        showPiercing: true
+      },
+      avatarMotion: {
+        playClip: true,
+        clipName: "auto",
+        clipSpeed: 0.85,
+        clipWeight: 1,
+        idleHead: 0.35,
+        talkHead: 0.2,
+        bodySway: 0.2,
+        choreographyPreset: "auto"
+      }
     },
     audio: {
-      sttSilenceMs: 1400,
+      sttSilenceMs: 2200,
       meetingCommandListening: false
     },
     voice: {
       promptText: "",
-      settings: {
-        style: "brat_baddy",
-        format: "wav",
-        rate: 1.05,
-        pitch: 0,
-        energy: 1.0,
-        pause: 1.1,
-        engine: "piper",
-        voice: {
-          reference_wav_path: "riko_sample.wav",
-          name: "en_GB-semaine-medium",
-          prompt_text: ""
-        }
-      }
+      settings: defaultVoiceSettings("")
     },
     rag: {
       defaultModel: DEFAULT_RAG_MODEL,
@@ -129,6 +164,69 @@ function mapRow(row, userId) {
   const desiredDefault = String(DEFAULT_RAG_MODEL || "").trim().toLowerCase();
   if ((!currentDefault || currentDefault === "auto") && desiredDefault && desiredDefault !== currentDefault) {
     preferences = mergePreferences(preferences, { rag: { defaultModel: DEFAULT_RAG_MODEL } });
+  }
+  const storedVoiceSettings = preferences?.voice?.settings || {};
+  const storedVoice = storedVoiceSettings?.voice || {};
+  const shouldMigrateLegacyVoice =
+    process.env.OPENAI_API_KEY &&
+    storedVoiceSettings.engine === "piper" &&
+    String(storedVoice.reference_wav_path || "").trim() === "riko_sample.wav" &&
+    String(storedVoice.name || "").trim() === "en_GB-semaine-medium";
+  if (shouldMigrateLegacyVoice) {
+    preferences = mergePreferences(preferences, {
+      voice: {
+        settings: defaultVoiceSettings(preferences?.voice?.promptText || storedVoice.prompt_text || "")
+      }
+    });
+  }
+  const storedAvatarModelId = String(preferences?.appearance?.avatarModelId || "").trim().toLowerCase();
+  if (
+    !storedAvatarModelId ||
+    storedAvatarModelId === "miku" ||
+    storedAvatarModelId === "aika_nocturne_portrait" ||
+    storedAvatarModelId === "aika_nocturne_stage" ||
+    storedAvatarModelId === "aika_nocturne_brunette" ||
+    storedAvatarModelId === "aika_nocturne_brunette_t" ||
+    storedAvatarModelId === "aika_nocturne_mpfb" ||
+    storedAvatarModelId === "aika_nocturne_avaturn" ||
+    storedAvatarModelId === "aika_nocturne_vroid" ||
+    storedAvatarModelId === "aika_nocturne_avatarsdk"
+  ) {
+    preferences = mergePreferences(preferences, {
+      appearance: {
+        avatarModelId: "aika_nocturne_3d"
+      }
+    });
+  }
+  const storedAvatarLook = preferences?.appearance?.avatarLook || {};
+  const storedPreset = String(storedAvatarLook.preset || "").trim().toLowerCase();
+  const looksLikeOldLenorePreset =
+    (storedPreset === "goth_hostess" || storedPreset === "velvet_reveal") &&
+    storedAvatarLook.showJacket === false &&
+    storedAvatarLook.showWrap === false &&
+    storedAvatarLook.showGloves === false;
+  if (looksLikeOldLenorePreset) {
+    preferences = mergePreferences(preferences, {
+      appearance: {
+        avatarLook: {
+          showWrap: true,
+          showGloves: storedPreset === "goth_hostess" ? true : false
+        }
+      }
+    });
+  }
+  const storedVoiceName = String(preferences?.voice?.settings?.voice?.name || "").trim().toLowerCase();
+  const preferredVoiceNames = new Set(["marin", "shimmer", "cedar"]);
+  if (process.env.OPENAI_API_KEY && (!preferredVoiceNames.has(storedVoiceName) || storedVoiceName === "coral")) {
+    preferences = mergePreferences(preferences, {
+      voice: {
+        settings: {
+          voice: {
+            name: "marin"
+          }
+        }
+      }
+    });
   }
   const summary = safeJsonParse(row.summary_json, null) || {};
   return {

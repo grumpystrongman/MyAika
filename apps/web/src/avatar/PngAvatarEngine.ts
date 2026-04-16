@@ -141,6 +141,7 @@ function buildFramesByMood(moods: PngMoodFrames | undefined, basePath: string) {
   const result: Record<Mood, string[]> = {
     neutral: [],
     happy: [],
+    teasing: [],
     thinking: [],
     concerned: [],
     surprised: []

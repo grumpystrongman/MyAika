@@ -1,5 +1,7 @@
 function getServerBase() {
-  return process.env.AIKA_SERVER_URL || process.env.NEXT_PUBLIC_SERVER_URL || "http://127.0.0.1:8790";
+  return String(
+    process.env.AIKA_SERVER_URL || process.env.NEXT_PUBLIC_SERVER_URL || "http://127.0.0.1:3512"
+  ).trim();
 }
 
 export default async function handler(req, res) {

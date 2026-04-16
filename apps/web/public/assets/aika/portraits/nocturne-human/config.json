@@ -1,0 +1,84 @@
+{
+  "imageUrl": "/assets/aika/portraits/nocturne-human/base.png",
+  "skinTint": "rgba(229, 203, 195, 0.92)",
+  "shadowTint": "rgba(35, 20, 25, 0.58)",
+  "lipTint": "rgba(137, 22, 44, 0.9)",
+  "variants": {
+    "blink": "/assets/aika/portraits/nocturne-human/blink.png",
+    "browLift": "/assets/aika/portraits/nocturne-human/brow-lift.png",
+    "browKnit": "/assets/aika/portraits/nocturne-human/brow-knit.png",
+    "frontHair": "/assets/aika/portraits/nocturne-human/front-hair.png",
+    "eyeGloss": "/assets/aika/portraits/nocturne-human/eye-gloss.png",
+    "jawShadow": "/assets/aika/portraits/nocturne-human/jaw-shadow.png",
+    "makeupWarm": "/assets/aika/portraits/nocturne-human/makeup-warm.png",
+    "makeupConcerned": "/assets/aika/portraits/nocturne-human/makeup-concerned.png",
+    "makeupSurprised": "/assets/aika/portraits/nocturne-human/makeup-surprised.png",
+    "makeupTeasing": "/assets/aika/portraits/nocturne-human/makeup-teasing.png",
+    "cheekWarm": "/assets/aika/portraits/nocturne-human/cheek-warm.png",
+    "cheekConcerned": "/assets/aika/portraits/nocturne-human/cheek-concerned.png",
+    "cheekTeasing": "/assets/aika/portraits/nocturne-human/cheek-teasing.png",
+    "mouthSoft": "/assets/aika/portraits/nocturne-human/mouth-open-soft.png",
+    "mouthMedium": "/assets/aika/portraits/nocturne-human/mouth-open-medium.png",
+    "mouthWide": "/assets/aika/portraits/nocturne-human/mouth-open-wide.png",
+    "mouthRound": "/assets/aika/portraits/nocturne-human/mouth-round.png",
+    "mouthClosedPress": "/assets/aika/portraits/nocturne-human/mouth-closed-press.png",
+    "mouthLipBite": "/assets/aika/portraits/nocturne-human/mouth-lip-bite.png",
+    "mouthEe": "/assets/aika/portraits/nocturne-human/mouth-ee.png",
+    "mouthAh": "/assets/aika/portraits/nocturne-human/mouth-ah.png",
+    "mouthOh": "/assets/aika/portraits/nocturne-human/mouth-oh.png",
+    "mouthSibilant": "/assets/aika/portraits/nocturne-human/mouth-sibilant.png",
+    "mouthTongue": "/assets/aika/portraits/nocturne-human/mouth-tongue.png"
+  },
+  "layers": {
+    "faceCore": "/assets/aika/portraits/nocturne-human/layer-face-core.png",
+    "eyeCore": "/assets/aika/portraits/nocturne-human/layer-eye-core.png",
+    "irisCore": "/assets/aika/portraits/nocturne-human/layer-iris-core.png",
+    "lidSoft": "/assets/aika/portraits/nocturne-human/layer-lid-soft.png",
+    "mouthCore": "/assets/aika/portraits/nocturne-human/layer-mouth-core.png",
+    "hairShell": "/assets/aika/portraits/nocturne-human/layer-hair-shell.png",
+    "fringeVeil": "/assets/aika/portraits/nocturne-human/layer-fringe-veil.png"
+  },
+  "frame": {
+    "scale": 0.96,
+    "offsetX": 0,
+    "offsetY": 0.02
+  },
+  "anchors": {
+    "leftBrow": {
+      "x": 0.286,
+      "y": 0.158,
+      "w": 0.142,
+      "h": 0.046
+    },
+    "rightBrow": {
+      "x": 0.542,
+      "y": 0.158,
+      "w": 0.142,
+      "h": 0.046
+    },
+    "leftEye": {
+      "x": 0.294,
+      "y": 0.214,
+      "w": 0.126,
+      "h": 0.05
+    },
+    "rightEye": {
+      "x": 0.55,
+      "y": 0.214,
+      "w": 0.126,
+      "h": 0.05
+    },
+    "mouth": {
+      "x": 0.424,
+      "y": 0.318,
+      "w": 0.154,
+      "h": 0.072
+    },
+    "face": {
+      "x": 0.235,
+      "y": 0.098,
+      "w": 0.53,
+      "h": 0.43
+    }
+  }
+}

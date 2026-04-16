@@ -9,7 +9,7 @@ export function normalizeSettings(input = {}) {
     typeof input.engine === "string"
       ? input.engine.toLowerCase()
       : "";
-  const style = typeof input.style === "string" ? input.style : "brat_baddy";
+  const style = typeof input.style === "string" ? input.style : "nocturne_hostess";
   const format = input.format === "mp3" ? "mp3" : "wav";
 
   const rate = clamp(input.rate ?? 1.05, 0.8, 1.3);
@@ -32,7 +32,7 @@ export function normalizeSettings(input = {}) {
   if (input.format && input.format !== "wav" && input.format !== "mp3") {
     warnings.push(`Unsupported format "${input.format}", using wav.`);
   }
-  if (engine && engine !== "gptsovits" && engine !== "piper") {
+  if (engine && engine !== "gptsovits" && engine !== "piper" && engine !== "openai") {
     warnings.push(`Unsupported engine "${engine}", using default.`);
   }
 

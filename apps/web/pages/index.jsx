@@ -23,20 +23,247 @@ function isLocalhostUrl(value) {
 }
 
 function resolveServerUrl() {
-  const envUrl = process.env.NEXT_PUBLIC_SERVER_URL || "";
+  const envUrl = String(process.env.NEXT_PUBLIC_SERVER_URL || "").trim();
   if (typeof window !== "undefined") {
-    const origin = window.location.origin || "";
+    const origin = String(window.location.origin || "").trim();
     if (!envUrl) return origin;
     if (origin && isLocalhostUrl(envUrl) && !isLocalhostUrl(origin)) {
       return origin;
     }
   }
-  return envUrl;
+  return envUrl.replace(/\/$/, "");
 }
 
 const SERVER_URL = resolveServerUrl();
 const ALWAYS_SERVER_STT = true;
 const REQUIRE_GOOGLE_AUTH = process.env.NEXT_PUBLIC_REQUIRE_GOOGLE_AUTH !== "false";
+const PREFERRED_NOCTURNE_VOICE = "marin";
+const LEGACY_AVATAR_IDS = new Set([
+  "aika_nocturne_portrait",
+  "aika_nocturne_stage",
+  "aika_nocturne_brunette",
+  "aika_nocturne_brunette_t",
+  "aika_nocturne_mpfb",
+  "aika_nocturne_avaturn",
+  "aika_nocturne_vroid",
+  "aika_nocturne_avatarsdk"
+]);
+
+const LENORE_LOOK_DEFAULTS = {
+  preset: "goth_hostess",
+  cameraFrame: "waist",
+  hairColor: "#09050a",
+  skinColor: "#f3d9e2",
+  lipColor: "#5b0c22",
+  outfitColor: "#12070f",
+  accentColor: "#5b1025",
+  eyeGlow: 0.7,
+  matte: 0.88,
+  showHair: true,
+  showJacket: false,
+  showWrap: false,
+  showGloves: true,
+  showTop: true,
+  showBottoms: true,
+  showStockings: true,
+  showBoots: true,
+  showChoker: true,
+  showPiercing: true
+};
+
+const LENORE_MOTION_DEFAULTS = {
+  playClip: true,
+  clipName: "auto",
+  clipSpeed: 0.85,
+  clipWeight: 1,
+  idleHead: 0.35,
+  talkHead: 0.2,
+  bodySway: 0.2,
+  choreographyPreset: "auto",
+  responseClass: "neutral",
+  motionIntensity: 0.45
+};
+
+const LENORE_LOOK_PRESETS = {
+  goth_hostess: {
+    preset: "goth_hostess",
+    cameraFrame: "waist",
+    showHair: true,
+    showJacket: false,
+    showWrap: false,
+    showGloves: true,
+    showTop: true,
+    showBottoms: true,
+    showStockings: true,
+    showBoots: true,
+    showChoker: true,
+    showPiercing: true,
+    hairColor: "#09050a",
+    skinColor: "#f3d9e2",
+    lipColor: "#5b0c22",
+    outfitColor: "#12070f",
+    accentColor: "#5b1025",
+    eyeGlow: 0.7,
+    matte: 0.9
+  },
+  stage_entrance: {
+    preset: "stage_entrance",
+    cameraFrame: "waist",
+    showHair: true,
+    showJacket: true,
+    showWrap: false,
+    showGloves: true,
+    showTop: true,
+    showBottoms: true,
+    showStockings: true,
+    showBoots: true,
+    showChoker: true,
+    showPiercing: true,
+    hairColor: "#070408",
+    skinColor: "#f2d7e0",
+    lipColor: "#581022",
+    outfitColor: "#11070f",
+    accentColor: "#6f1432",
+    eyeGlow: 0.74,
+    matte: 0.9
+  },
+  velvet_reveal: {
+    preset: "velvet_reveal",
+    cameraFrame: "waist",
+    showHair: true,
+    showJacket: false,
+    showWrap: false,
+    showGloves: false,
+    showStockings: true,
+    showBoots: true,
+    showChoker: true,
+    showTop: true,
+    showBottoms: true,
+    showPiercing: true,
+    hairColor: "#070307",
+    skinColor: "#f5dbe4",
+    lipColor: "#67112a",
+    outfitColor: "#1a0811",
+    accentColor: "#7a1534",
+    eyeGlow: 0.82,
+    matte: 0.84
+  },
+  after_hours: {
+    preset: "after_hours",
+    cameraFrame: "waist",
+    showHair: true,
+    showJacket: false,
+    showWrap: false,
+    showGloves: false,
+    showTop: true,
+    showBottoms: true,
+    showStockings: false,
+    showBoots: false,
+    showChoker: true,
+    showPiercing: true,
+    hairColor: "#080408",
+    skinColor: "#f2d9e2",
+    lipColor: "#6f1530",
+    outfitColor: "#160810",
+    accentColor: "#7a1838",
+    eyeGlow: 0.8,
+    matte: 0.86
+  },
+  formal_dark: {
+    preset: "formal_dark",
+    cameraFrame: "waist",
+    showHair: true,
+    showJacket: true,
+    showWrap: true,
+    showGloves: true,
+    showTop: true,
+    showBottoms: true,
+    showStockings: true,
+    showBoots: true,
+    showChoker: true,
+    showPiercing: true,
+    hairColor: "#0a080c",
+    skinColor: "#efd5dd",
+    lipColor: "#4d091d",
+    outfitColor: "#120b14",
+    accentColor: "#2c1627",
+    eyeGlow: 0.5,
+    matte: 0.94
+  },
+  nude: {
+    preset: "nude",
+    cameraFrame: "full",
+    showHair: true,
+    showJacket: false,
+    showWrap: false,
+    showGloves: false,
+    showTop: false,
+    showBottoms: false,
+    showStockings: false,
+    showBoots: false,
+    showChoker: false,
+    showPiercing: false,
+    hairColor: "#09050a",
+    skinColor: "#f3d9e2",
+    lipColor: "#5b0c22",
+    outfitColor: "#12070f",
+    accentColor: "#5b1025",
+    eyeGlow: 0.72,
+    matte: 0.9
+  }
+};
+
+const LENORE_PRESET_OPTIONS = [
+  { value: "goth_hostess", label: "Goth Hostess", description: "Corseted hostess look with gloves, stockings, boots, and spikes." },
+  { value: "stage_entrance", label: "Stage Entrance", description: "Outerwear silhouette with jacket, gloves, and full dark stage styling." },
+  { value: "velvet_reveal", label: "Velvet Reveal", description: "Lingerie-forward reveal with stockings, boots, and jewelry." },
+  { value: "after_hours", label: "After Hours", description: "Minimal late-night look using only the core lingerie set and jewelry." },
+  { value: "formal_dark", label: "Formal Dark", description: "Fully dressed dark look with jacket, wrap, gloves, and boots." },
+  { value: "nude", label: "Nude", description: "All removable clothing hidden." }
+];
+
+const LENORE_WARDROBE_ITEMS = [
+  ["showHair", "Hair"],
+  ["showJacket", "Jacket"],
+  ["showWrap", "Wrap"],
+  ["showGloves", "Opera gloves"],
+  ["showTop", "Lingerie top"],
+  ["showBottoms", "Lingerie bottoms"],
+  ["showStockings", "Lace stockings"],
+  ["showBoots", "Boots"],
+  ["showChoker", "Spike choker"],
+  ["showPiercing", "Piercing"]
+];
+
+const LENORE_MOTION_OPTIONS = [
+  { value: "auto", label: "Auto", description: "Lets AIKA pick pose or embedded motion based on tone and response." },
+  { value: "runtime_pose", label: "Hostess pose", description: "Composed hostess framing with restrained movement." },
+  { value: "source_motion", label: "Source motion", description: "Uses Lenore's imported embedded body-performance clip." }
+];
+
+const LENORE_FRAME_OPTIONS = [
+  { value: "portrait", label: "Portrait", description: "Face and shoulders for close lip-sync review." },
+  { value: "bust", label: "Bust", description: "Head to upper torso with more costume detail." },
+  { value: "waist", label: "Waist", description: "Default hostess framing for conversation." },
+  { value: "three_quarter", label: "Three-quarter", description: "Shows most of the body without full-body distance." },
+  { value: "full", label: "Full body", description: "Full-body review framing." }
+];
+
+const LENORE_CHOREOGRAPHY_OPTIONS = [
+  { value: "auto", label: "Auto", description: "Lets response tone bias the hostess movement automatically." },
+  { value: "velvet_tease", label: "Velvet Tease", description: "More flirtatious shoulder and head play over the active motion." },
+  { value: "command_presence", label: "Command Presence", description: "Composed, restrained authority with firmer posture." },
+  { value: "soft_reassure", label: "Soft Reassure", description: "Gentler supportive posture with softer arm phrasing." },
+  { value: "quiet_poise", label: "Quiet Poise", description: "Minimal poised motion for calm presence." },
+  { value: "source_driven", label: "Source Driven", description: "Favor the imported source-body performance whenever possible." }
+];
+
+const LENORE_LOOK_SLOT_DEFAULTS = [
+  { id: "hostess", name: "Hostess", look: { ...LENORE_LOOK_PRESETS.goth_hostess }, motion: { ...LENORE_MOTION_DEFAULTS, choreographyPreset: "auto" } },
+  { id: "entrance", name: "Entrance", look: { ...LENORE_LOOK_PRESETS.stage_entrance }, motion: { ...LENORE_MOTION_DEFAULTS, clipName: "runtime_pose", choreographyPreset: "command_presence" } },
+  { id: "reveal", name: "Reveal", look: { ...LENORE_LOOK_PRESETS.velvet_reveal }, motion: { ...LENORE_MOTION_DEFAULTS, clipName: "source_motion", clipSpeed: 0.92, choreographyPreset: "velvet_tease" } },
+  { id: "formal", name: "Formal", look: { ...LENORE_LOOK_PRESETS.formal_dark }, motion: { ...LENORE_MOTION_DEFAULTS, clipName: "runtime_pose", bodySway: 0.14, choreographyPreset: "quiet_poise" } }
+];
 
 const THINKING_CUES = [
   "Hold on, I'm thinking.",
@@ -248,7 +475,7 @@ const VALID_TABS = new Set([
   "capabilities"
 ]);
 
-const VALID_SETTINGS_TABS = new Set(["connections", "knowledge", "skills", "trading", "appearance", "voice", "aika", "legacy"]);
+const VALID_SETTINGS_TABS = new Set(["connections", "knowledge", "skills", "trading", "appearance", "avatar", "voice", "aika", "legacy"]);
 const VALID_FEATURES_VIEWS = new Set(["mcp"]);
 
 function pickThinkingCue() {
@@ -262,6 +489,7 @@ function applyEmotionTuning(settings, behavior) {
   let pitch = settings.pitch ?? 0;
   let energy = settings.energy ?? 1.0;
   let pause = settings.pause ?? 1.1;
+  let style = settings.style || "nocturne_hostess";
 
   const scale = 0.6 + intensity * 0.8;
 
@@ -302,12 +530,56 @@ function applyEmotionTuning(settings, behavior) {
       energy -= 0.3 * scale;
       pause += 0.25 * scale;
       break;
+    case "warm_supportive":
+      style = "nocturne_velvet";
+      rate -= 0.06 * scale;
+      pitch += 0.12 * scale;
+      energy -= 0.06 * scale;
+      pause += 0.1 * scale;
+      break;
+    case "witty_playful":
+      style = "nocturne_hostess";
+      rate += 0.08 * scale;
+      pitch += 0.16 * scale;
+      energy += 0.08 * scale;
+      pause -= 0.05 * scale;
+      break;
+    case "analytical":
+    case "focused_executive":
+      style = "nocturne_command";
+      rate += 0.03 * scale;
+      pitch -= 0.05 * scale;
+      energy += 0.03 * scale;
+      pause -= 0.08 * scale;
+      break;
+    case "serious":
+      style = "nocturne_command";
+      rate -= 0.04 * scale;
+      pitch -= 0.12 * scale;
+      energy -= 0.04 * scale;
+      pause += 0.08 * scale;
+      break;
+    case "reflective":
+      style = "nocturne_velvet";
+      rate -= 0.08 * scale;
+      pitch -= 0.08 * scale;
+      energy -= 0.08 * scale;
+      pause += 0.14 * scale;
+      break;
+    case "teasing":
+      style = "nocturne_hostess";
+      rate += 0.06 * scale;
+      pitch += 0.08 * scale;
+      energy += 0.05 * scale;
+      pause -= 0.02 * scale;
+      break;
     default:
       break;
   }
 
   return {
     ...settings,
+    style,
     rate: Number(rate.toFixed(2)),
     pitch: Number(pitch.toFixed(2)),
     energy: Number(energy.toFixed(2)),
@@ -347,6 +619,72 @@ function splitSpeechText(text, maxChars = 180) {
   return merged;
 }
 
+function mergeTranscriptSegments(existingText, nextText) {
+  const existing = String(existingText || "").trim();
+  const next = String(nextText || "").trim();
+  if (!existing) return next;
+  if (!next) return existing;
+  if (existing === next) return existing;
+  if (next.startsWith(existing)) return next;
+  if (existing.endsWith(next)) return existing;
+
+  const normalizedExisting = existing.replace(/\s+/g, " ");
+  const normalizedNext = next.replace(/\s+/g, " ");
+  const maxOverlap = Math.min(normalizedExisting.length, normalizedNext.length, 80);
+  for (let overlap = maxOverlap; overlap >= 8; overlap -= 1) {
+    if (
+      normalizedExisting.slice(-overlap).toLowerCase() ===
+      normalizedNext.slice(0, overlap).toLowerCase()
+    ) {
+      return `${normalizedExisting} ${normalizedNext.slice(overlap)}`.replace(/\s+/g, " ").trim();
+    }
+  }
+
+  return `${normalizedExisting} ${normalizedNext}`.replace(/\s+/g, " ").trim();
+}
+
+function parseTtsWarnings(headerValue) {
+  return String(headerValue || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => item !== "reference_wav_ignored");
+}
+
+function sanitizeNocturneVoiceSettings(input) {
+  const next = {
+    style: "nocturne_hostess",
+    format: "wav",
+    rate: 1.02,
+    pitch: -0.1,
+    energy: 0.92,
+    pause: 1.16,
+    engine: "openai",
+    voice: {
+      reference_wav_path: "",
+      name: PREFERRED_NOCTURNE_VOICE,
+      prompt_text: ""
+    }
+  };
+  if (!input || typeof input !== "object") return next;
+  const merged = {
+    ...next,
+    ...input,
+    voice: {
+      ...next.voice,
+      ...(input.voice || {})
+    }
+  };
+  merged.style = merged.style || "nocturne_hostess";
+  merged.engine = "openai";
+  merged.voice = {
+    ...merged.voice,
+    name: PREFERRED_NOCTURNE_VOICE,
+    reference_wav_path: ""
+  };
+  return merged;
+}
+
 function stripEmotionTags(text) {
   let cleaned = String(text || "");
   cleaned = cleaned.replace(/```json[\s\S]*?```/gi, "");
@@ -357,6 +695,165 @@ function stripEmotionTags(text) {
   cleaned = cleaned.replace(/\/([^/]+)\//g, (m, inner) => (ipaChars.test(inner) ? "" : m));
   cleaned = cleaned.replace(/\[([^\]]+)\]/g, (m, inner) => (ipaChars.test(inner) ? "" : m));
   return cleaned.replace(/\s+/g, " ").trim();
+}
+
+function classifyLenoreResponse(text, behavior) {
+  const raw = String(text || "").trim();
+  const lower = raw.toLowerCase();
+  const emotion = String(behavior?.emotion || "").toLowerCase();
+  if (!raw) return "neutral";
+  if (emotion === "teasing" || /\b(darling|tempt|tease|wicked|mischief|shadows|seduce|love)\b/.test(lower)) return "teasing";
+  if (emotion === "warm_supportive" || /\b(i'm here|i am here|breathe|easy|it's okay|you've got this|i understand|glad)\b/.test(lower)) return "comfort";
+  if (emotion === "serious" || /\b(urgent|careful|warning|critical|risk|danger|must|need to)\b/.test(lower)) return "directive";
+  if (emotion === "focused_executive" || emotion === "analytical" || /\b(plan|next|step|execute|objective|compare|analyze|evidence)\b/.test(lower)) return "executive";
+  if (emotion === "reflective" || emotion === "thinking" || /\b(perhaps|maybe|consider|reflect|let me think)\b/.test(lower)) return "reflective";
+  if (emotion === "surprised" || /[!?]{2,}|\b(wow|oh|well now|my)\b/.test(lower)) return "surprised";
+  if (/\?$/.test(raw) || /\b(what do you think|shall we|should we|do you want|would you like|how does that sound)\b/.test(lower)) return "question";
+  if (emotion === "happy" || emotion === "witty_playful" || /\b(gorgeous|perfect|wonderful|beautiful|delicious|lovely|tonight)\b/.test(lower)) return "playful";
+  return "neutral";
+}
+
+function deriveLenoreRuntimeMotion(baseMotion, behavior, assistantText, ttsStatus, micState, micStatus, conversationEnabled) {
+  const next = { ...baseMotion };
+  const responseClass = classifyLenoreResponse(assistantText, behavior);
+  const emotion = String(behavior?.emotion || "").toLowerCase();
+  const choreographyPreset = String(baseMotion?.choreographyPreset || "auto").toLowerCase();
+  const intensity = Number.isFinite(behavior?.intensity) ? behavior.intensity : 0.35;
+  const speaking = ttsStatus === "playing" || ttsStatus === "loading" || Boolean(behavior?.speaking);
+  const listening = micState === "listening";
+
+  next.responseClass = responseClass;
+  next.choreographyPreset = choreographyPreset;
+  next.motionIntensity = Number((0.35 + intensity * 0.85).toFixed(2));
+  next.idleState = inferLenoreIdleState({ ttsStatus, micState, micStatus, conversationEnabled });
+  if (!speaking && ["paused", "ready", "listening", "thinking"].includes(next.idleState)) {
+    next.clipName = "runtime_pose";
+  }
+
+  if ((responseClass === "teasing" || responseClass === "playful" || responseClass === "surprised") && next.clipName === "auto") {
+    next.clipName = "source_motion";
+  } else if ((responseClass === "directive" || responseClass === "executive" || responseClass === "reflective") && next.clipName === "auto") {
+    next.clipName = "runtime_pose";
+  }
+
+  if (responseClass === "teasing") {
+    next.clipSpeed = Math.min(1.05, baseMotion.clipSpeed + 0.08);
+    next.idleHead = Math.min(0.7, baseMotion.idleHead + 0.08);
+    next.talkHead = Math.min(0.72, baseMotion.talkHead + 0.16);
+    next.bodySway = Math.min(0.55, baseMotion.bodySway + 0.12);
+  } else if (responseClass === "playful" || responseClass === "surprised") {
+    next.clipSpeed = Math.min(1.1, baseMotion.clipSpeed + 0.12);
+    next.idleHead = Math.min(0.65, baseMotion.idleHead + 0.05);
+    next.talkHead = Math.min(0.68, baseMotion.talkHead + 0.12);
+    next.bodySway = Math.min(0.48, baseMotion.bodySway + 0.08);
+  } else if (responseClass === "directive" || responseClass === "executive") {
+    next.clipSpeed = Math.max(0.72, baseMotion.clipSpeed - 0.04);
+    next.idleHead = Math.max(0.18, baseMotion.idleHead - 0.08);
+    next.talkHead = Math.min(0.4, baseMotion.talkHead + 0.04);
+    next.bodySway = Math.max(0.08, baseMotion.bodySway - 0.08);
+  } else if (responseClass === "reflective" || responseClass === "question") {
+    next.clipSpeed = Math.max(0.68, baseMotion.clipSpeed - 0.08);
+    next.clipWeight = Math.max(0.62, baseMotion.clipWeight - 0.08);
+    next.idleHead = Math.min(0.6, baseMotion.idleHead + 0.04);
+    next.talkHead = Math.max(0.14, baseMotion.talkHead - 0.02);
+    next.bodySway = Math.max(0.08, baseMotion.bodySway - 0.04);
+  } else if (responseClass === "comfort") {
+    next.clipSpeed = Math.max(0.74, baseMotion.clipSpeed - 0.02);
+    next.clipWeight = Math.max(0.7, baseMotion.clipWeight - 0.04);
+    next.idleHead = Math.min(0.62, baseMotion.idleHead + 0.08);
+    next.talkHead = Math.min(0.52, baseMotion.talkHead + 0.06);
+    next.bodySway = Math.min(0.32, baseMotion.bodySway + 0.02);
+  }
+
+  if (choreographyPreset === "velvet_tease") {
+    if (next.clipName === "auto") next.clipName = "source_motion";
+    next.clipSpeed = Math.min(1.08, next.clipSpeed + 0.06);
+    next.idleHead = Math.min(0.72, next.idleHead + 0.08);
+    next.talkHead = Math.min(0.76, next.talkHead + 0.14);
+    next.bodySway = Math.min(0.58, next.bodySway + 0.12);
+  } else if (choreographyPreset === "command_presence") {
+    if (next.clipName === "auto") next.clipName = "runtime_pose";
+    next.clipSpeed = Math.max(0.7, next.clipSpeed - 0.06);
+    next.idleHead = Math.max(0.16, next.idleHead - 0.1);
+    next.talkHead = Math.max(0.16, next.talkHead - 0.04);
+    next.bodySway = Math.max(0.06, next.bodySway - 0.1);
+  } else if (choreographyPreset === "soft_reassure") {
+    if (next.clipName === "auto") next.clipName = "runtime_pose";
+    next.clipSpeed = Math.max(0.72, next.clipSpeed - 0.04);
+    next.idleHead = Math.min(0.68, next.idleHead + 0.08);
+    next.talkHead = Math.min(0.58, next.talkHead + 0.04);
+    next.bodySway = Math.max(0.08, next.bodySway - 0.02);
+  } else if (choreographyPreset === "quiet_poise") {
+    if (next.clipName === "auto") next.clipName = "runtime_pose";
+    next.clipSpeed = Math.max(0.66, next.clipSpeed - 0.08);
+    next.clipWeight = Math.max(0.72, next.clipWeight - 0.08);
+    next.idleHead = Math.max(0.14, next.idleHead - 0.12);
+    next.talkHead = Math.max(0.12, next.talkHead - 0.08);
+    next.bodySway = Math.max(0.04, next.bodySway - 0.12);
+  } else if (choreographyPreset === "source_driven") {
+    if (next.clipName === "auto") next.clipName = "source_motion";
+    next.clipSpeed = Math.min(1.12, next.clipSpeed + 0.04);
+    next.bodySway = Math.min(0.62, next.bodySway + 0.08);
+  }
+
+  if (listening) {
+    next.idleHead = Math.min(0.7, next.idleHead + 0.06);
+    next.bodySway = Math.min(0.4, next.bodySway + 0.02);
+  }
+  if (!speaking) {
+    next.talkHead = Math.max(0.12, next.talkHead - 0.04);
+  }
+  if (emotion === "concerned" || emotion === "serious") {
+    next.bodySway = Math.max(0.08, next.bodySway - 0.06);
+  }
+
+  return next;
+}
+
+function normalizeLenoreLookSlots(input) {
+  const fallback = LENORE_LOOK_SLOT_DEFAULTS.map((slot) => ({
+    ...slot,
+    look: { ...slot.look },
+    motion: { ...slot.motion }
+  }));
+  if (!Array.isArray(input) || !input.length) return fallback;
+  return input.slice(0, 6).map((slot, index) => {
+    const base = fallback[index] || fallback[fallback.length - 1];
+    return {
+      id: String(slot?.id || base.id || `slot_${index + 1}`),
+      name: String(slot?.name || base.name || `Look ${index + 1}`),
+      look: {
+        ...LENORE_LOOK_DEFAULTS,
+        ...(base.look || {}),
+        ...(slot?.look || {})
+      },
+      motion: {
+        ...LENORE_MOTION_DEFAULTS,
+        ...(base.motion || {}),
+        ...(slot?.motion || {})
+      }
+    };
+  });
+}
+
+function getLenoreFrameMeta(frame) {
+  return LENORE_FRAME_OPTIONS.find((option) => option.value === frame) || LENORE_FRAME_OPTIONS.find((option) => option.value === "waist");
+}
+
+function getLenoreMotionMeta(clipName) {
+  return LENORE_MOTION_OPTIONS.find((option) => option.value === clipName) || LENORE_MOTION_OPTIONS.find((option) => option.value === "auto");
+}
+
+function getLenoreChoreographyMeta(choreographyPreset) {
+  return LENORE_CHOREOGRAPHY_OPTIONS.find((option) => option.value === choreographyPreset) || LENORE_CHOREOGRAPHY_OPTIONS.find((option) => option.value === "auto");
+}
+
+function inferLenoreIdleState({ ttsStatus, micState, micStatus, conversationEnabled }) {
+  if (ttsStatus === "playing" || ttsStatus === "loading") return "speaking";
+  if (/^Thinking/i.test(String(micStatus || "")) || /^Sending:/i.test(String(micStatus || ""))) return "thinking";
+  if (micState === "listening") return "listening";
+  if (conversationEnabled) return "ready";
+  return "paused";
 }
 
 function formatActionLabel(actionType = "") {
@@ -431,6 +928,65 @@ async function readJsonResponse(response) {
     const snippet = text.replace(/\s+/g, " ").slice(0, 160);
     throw new Error(`Invalid JSON response (${response.status}). ${snippet}`);
   }
+}
+
+function deriveConversationUiState({ micEnabled, voiceMode, textOnly, micState, micStatus, ttsStatus }) {
+  const conversationEnabled = Boolean(micEnabled && voiceMode && !textOnly);
+  const speaking = ttsStatus === "loading" || ttsStatus === "playing";
+  const thinking = /^Thinking/i.test(String(micStatus || "")) || /^Sending:/i.test(String(micStatus || ""));
+  if (speaking) {
+    return {
+      label: "Speaking",
+      detail: "Aika has the floor",
+      actionLabel: conversationEnabled ? "Pause Conversation" : "Start Conversation",
+      chip: conversationEnabled ? "Speaking" : "Conversation off"
+    };
+  }
+  if (thinking) {
+    return {
+      label: "Thinking",
+      detail: "Aika is preparing a reply",
+      actionLabel: conversationEnabled ? "Pause Conversation" : "Start Conversation",
+      chip: conversationEnabled ? "Thinking" : "Conversation off"
+    };
+  }
+  if (micState === "listening") {
+    return {
+      label: "Listening",
+      detail: "Speak naturally and pause when you finish",
+      actionLabel: "Pause Conversation",
+      chip: "Listening"
+    };
+  }
+  if (conversationEnabled) {
+    return {
+      label: "Ready",
+      detail: "Conversation stays open between turns",
+      actionLabel: "Pause Conversation",
+      chip: "Ready"
+    };
+  }
+  return {
+    label: "Paused",
+    detail: "Click to open conversation mode",
+    actionLabel: "Start Conversation",
+    chip: "Conversation off"
+  };
+}
+
+async function readErrorResponseMessage(response, fallback = "request_failed") {
+  if (!response) return fallback;
+  try {
+    const data = await response.clone().json();
+    const message = String(data?.error || data?.message || "").trim();
+    if (message) return message;
+  } catch {}
+  try {
+    const text = await response.text();
+    const message = String(text || "").trim();
+    if (message) return message;
+  } catch {}
+  return fallback;
 }
 
 async function fetchCalendarEventsWithFallback({ baseUrl, query, credentials = "include" }) {
@@ -612,8 +1168,88 @@ async function playBlobWithAudioContext(blob) {
   });
 }
 
+function getSupportedRecorderConfig() {
+  if (typeof MediaRecorder === "undefined") return null;
+  const candidates = [
+    { mimeType: "audio/webm;codecs=opus", ext: "webm" },
+    { mimeType: "audio/webm", ext: "webm" },
+    { mimeType: "audio/ogg;codecs=opus", ext: "ogg" },
+    { mimeType: "audio/ogg", ext: "ogg" },
+    { mimeType: "audio/mp4;codecs=mp4a.40.2", ext: "m4a" },
+    { mimeType: "audio/mp4", ext: "m4a" },
+    { mimeType: "audio/mpeg", ext: "mp3" }
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(candidate.mimeType)) return candidate;
+    } catch {}
+  }
+  return { mimeType: "", ext: "webm" };
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function downsampleBuffer(samples, inputSampleRate, outputSampleRate) {
+  if (!samples?.length) return new Float32Array(0);
+  if (!Number.isFinite(inputSampleRate) || inputSampleRate <= 0) return samples;
+  if (!Number.isFinite(outputSampleRate) || outputSampleRate <= 0 || outputSampleRate >= inputSampleRate) {
+    return samples;
+  }
+  const ratio = inputSampleRate / outputSampleRate;
+  const newLength = Math.max(1, Math.round(samples.length / ratio));
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.min(samples.length, Math.round((offsetResult + 1) * ratio));
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer; i++) {
+      accum += samples[i];
+      count += 1;
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult += 1;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
+}
+
+function encodeMonoWavBlob(floatSamples, sampleRate) {
+  const input = floatSamples instanceof Float32Array ? floatSamples : new Float32Array(floatSamples || []);
+  const targetRate = sampleRate > 16000 ? 16000 : sampleRate || 16000;
+  const samples = targetRate !== sampleRate
+    ? downsampleBuffer(input, sampleRate, targetRate)
+    : input;
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset, value) => {
+    for (let i = 0; i < value.length; i++) {
+      view.setUint8(offset + i, value.charCodeAt(i));
+    }
+  };
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, targetRate, true);
+  view.setUint32(28, targetRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: "audio/wav" });
 }
 
 function makeMessageId() {
@@ -632,7 +1268,8 @@ function isLowSignalUtterance(text) {
 }
 
 function buildGreeting(user) {
-  const name = user?.name || user?.email || "there";
+  const rawName = String(user?.name || user?.email || "").trim();
+  const name = !rawName || rawName.toLowerCase() === "local" ? "there" : rawName;
   return `Hello ${name}, Aika is here to serve. How may I assist you today?`;
 }
 
@@ -645,7 +1282,7 @@ function readLegacyPreferences() {
       avatarBackground: window.localStorage.getItem("aika_avatar_bg") || "",
       avatarModelId: window.localStorage.getItem("aika_avatar_model") || "",
       meetingCommands: window.localStorage.getItem("aika_meeting_commands") || "",
-      sttSilenceMs: Number(window.localStorage.getItem("aika_stt_silence_ms") || "1400"),
+      sttSilenceMs: Number(window.localStorage.getItem("aika_stt_silence_ms") || "2200"),
       ragModel: window.localStorage.getItem("aika_default_rag_model") || window.localStorage.getItem("aika_active_rag_model") || ""
     };
   } catch {
@@ -745,7 +1382,11 @@ export default function Home() {
   const [featuresView, setFeaturesView] = useState("mcp");
   const [connectModal, setConnectModal] = useState(null);
   const [avatarModels, setAvatarModels] = useState([]);
-  const [avatarModelId, setAvatarModelId] = useState("miku");
+  const [avatarModelId, setAvatarModelId] = useState("aika_nocturne_3d");
+  const [avatarLook, setAvatarLook] = useState(LENORE_LOOK_DEFAULTS);
+  const [avatarMotion, setAvatarMotion] = useState(LENORE_MOTION_DEFAULTS);
+  const [avatarLookSlots, setAvatarLookSlots] = useState(() => normalizeLenoreLookSlots(LENORE_LOOK_SLOT_DEFAULTS));
+  const [avatarModelOverride, setAvatarModelOverride] = useState("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarHidden, setAvatarHidden] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -813,7 +1454,7 @@ export default function Home() {
   const [micState, setMicState] = useState("idle"); // idle | listening | error | unsupported
   const [micError, setMicError] = useState("");
   const [micLevel, setMicLevel] = useState(0);
-  const [micStatus, setMicStatus] = useState("Mic idle");
+  const [micStatus, setMicStatus] = useState("Conversation paused");
   const [sttDebug, setSttDebug] = useState({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
   const [chatError, setChatError] = useState("");
   const [feedbackError, setFeedbackError] = useState("");
@@ -821,7 +1462,7 @@ export default function Home() {
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [textOnly, setTextOnly] = useState(false);
   const [voiceMode, setVoiceMode] = useState(true);
-  const [micEnabled, setMicEnabled] = useState(true);
+  const [micEnabled, setMicEnabled] = useState(false);
   const [fastReplies, setFastReplies] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -877,31 +1518,40 @@ export default function Home() {
     if (settings && VALID_SETTINGS_TABS.has(settings)) setSettingsTab(settings);
     const features = params.get("featuresView");
     if (features && VALID_FEATURES_VIEWS.has(features)) setFeaturesView(features);
+    const avatarModel = params.get("avatarModel");
+    if (avatarModel) setAvatarModelOverride(avatarModel);
   }, []);
   const [themeId, setThemeId] = useState("aurora");
   const [appBackground, setAppBackground] = useState("");
   const [avatarBackground, setAvatarBackground] = useState("none");
   const [meetingCommandListening, setMeetingCommandListening] = useState(false);
   const [activeRecordingId, setActiveRecordingId] = useState("");
-  const [sttSilenceMs, setSttSilenceMs] = useState(1400);
+  const [sttSilenceMs, setSttSilenceMs] = useState(2200);
   const [ttsEngineOnline, setTtsEngineOnline] = useState(null);
   const [voicePromptText, setVoicePromptText] = useState("");
   const [ttsStatus, setTtsStatus] = useState("idle");
   const [ttsError, setTtsError] = useState("");
   const [ttsWarnings, setTtsWarnings] = useState([]);
   const [ttsLevel, setTtsLevel] = useState(0);
+  const [avatarLipsync, setAvatarLipsync] = useState(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [pendingSpeak, setPendingSpeak] = useState(null);
   const [lastAssistantText, setLastAssistantText] = useState("");
+  const [currentAvatarSpeechText, setCurrentAvatarSpeechText] = useState("");
+  const conversationEnabled = Boolean(micEnabled && voiceMode && !textOnly);
+  const lenoreRuntimeMotion = useMemo(
+    () => deriveLenoreRuntimeMotion(avatarMotion, behavior, currentAvatarSpeechText || lastAssistantText, ttsStatus, micState, micStatus, conversationEnabled),
+    [avatarMotion, behavior, currentAvatarSpeechText, lastAssistantText, ttsStatus, micState, micStatus, conversationEnabled]
+  );
   const [ttsSettings, setTtsSettings] = useState({
-    style: "brat_baddy",
+    style: "nocturne_hostess",
     format: "wav",
-    rate: 1.05,
-    pitch: 0,
-    energy: 1.0,
-    pause: 1.1,
-    engine: "piper",
-    voice: { reference_wav_path: "riko_sample.wav", name: "en_GB-semaine-medium", prompt_text: "" }
+    rate: 1.02,
+    pitch: -0.1,
+    energy: 0.92,
+    pause: 1.16,
+    engine: "openai",
+    voice: { reference_wav_path: "", name: PREFERRED_NOCTURNE_VOICE, prompt_text: "" }
   });
   const [meetingLock, setMeetingLock] = useState(false);
   const previousChatState = useRef(null);
@@ -921,13 +1571,13 @@ export default function Home() {
 
   function buildPreferencePayload(overrides = {}) {
     const base = assistantProfile?.preferences || {};
-    const voiceSettings = {
+    const voiceSettings = sanitizeNocturneVoiceSettings({
       ...ttsSettings,
       voice: {
         ...(ttsSettings.voice || {}),
         prompt_text: voicePromptText || ttsSettings.voice?.prompt_text || ""
       }
-    };
+    });
     return {
       ...base,
       ...overrides,
@@ -936,7 +1586,10 @@ export default function Home() {
         theme: themeId,
         appBackground,
         avatarBackground,
-        avatarModelId
+        avatarModelId,
+        avatarLook,
+        avatarMotion,
+        avatarLookSlots
       },
       audio: {
         ...(base.audio || {}),
@@ -1037,27 +1690,39 @@ export default function Home() {
         setThemeId(prefs.appearance?.theme || "aurora");
         setAppBackground(prefs.appearance?.appBackground || "");
         setAvatarBackground(prefs.appearance?.avatarBackground || "none");
-        if (prefs.appearance?.avatarModelId) {
-          setAvatarModelId(prefs.appearance.avatarModelId);
+        setAvatarLook({
+          ...LENORE_LOOK_DEFAULTS,
+          ...(prefs.appearance?.avatarLook || {})
+        });
+        setAvatarMotion({
+          ...LENORE_MOTION_DEFAULTS,
+          ...(prefs.appearance?.avatarMotion || {})
+        });
+        setAvatarLookSlots(normalizeLenoreLookSlots(prefs.appearance?.avatarLookSlots || LENORE_LOOK_SLOT_DEFAULTS));
+        if (avatarModelOverride) {
+          setAvatarModelId(avatarModelOverride);
+        } else if (prefs.appearance?.avatarModelId) {
+          const storedAvatar = String(prefs.appearance.avatarModelId || "").toLowerCase();
+          setAvatarModelId(
+            LEGACY_AVATAR_IDS.has(storedAvatar)
+              ? "aika_nocturne_3d"
+              : prefs.appearance.avatarModelId
+          );
         }
         setMeetingCommandListening(Boolean(prefs.audio?.meetingCommandListening));
-        const silenceMs = Number(prefs.audio?.sttSilenceMs || 1400);
+        const silenceMs = Number(prefs.audio?.sttSilenceMs || 2200);
         if (Number.isFinite(silenceMs)) {
           setSttSilenceMs(Math.max(800, Math.min(3000, silenceMs)));
         }
         if (prefs.voice?.settings) {
-          setTtsSettings(prev => ({
-            ...prev,
-            ...prefs.voice.settings,
-            voice: { ...prev.voice, ...(prefs.voice.settings.voice || {}) }
-          }));
+          setTtsSettings(sanitizeNocturneVoiceSettings(prefs.voice.settings));
         }
         const prompt = prefs.voice?.promptText || prefs.voice?.settings?.voice?.prompt_text || "";
         if (prompt) {
           setVoicePromptText(prompt);
-          setTtsSettings(prev => ({
+          setTtsSettings(prev => sanitizeNocturneVoiceSettings({
             ...prev,
-            voice: { ...prev.voice, prompt_text: prompt }
+            voice: { ...(prev.voice || {}), prompt_text: prompt }
           }));
         }
         setDefaultRagModel(prefs.rag?.defaultModel || "auto");
@@ -1085,11 +1750,15 @@ export default function Home() {
     const prefs = buildPreferencePayload();
     schedulePreferenceSave(prefs);
   }, [
+    avatarModelOverride,
     assistantProfileLoaded,
     themeId,
     appBackground,
     avatarBackground,
     avatarModelId,
+    avatarLook,
+    avatarMotion,
+    avatarLookSlots,
     meetingCommandListening,
     sttSilenceMs,
     ttsSettings,
@@ -1241,6 +1910,9 @@ export default function Home() {
   const sttInitChunkRef = useRef(null);
   const sttSpeechActiveRef = useRef(false);
   const sttRequestInFlightRef = useRef(false);
+  const sttSegmentStartedAtRef = useRef(0);
+  const sttSegmentTimerRef = useRef(null);
+  const sttAutoRestartRef = useRef(false);
   const sttRmsRef = useRef(0);
   const sttNoiseFloorRef = useRef(0.0035);
   const sttThresholdRef = useRef(0.012);
@@ -1249,6 +1921,7 @@ export default function Home() {
   const forceServerSttRef = useRef(false);
   const ttsSourceRef = useRef(null);
   const ttsRafRef = useRef(null);
+  const ttsPlaybackTokenRef = useRef(0);
   const prefTimerRef = useRef(null);
   const lastPrefRef = useRef("");
   const promptTimerRef = useRef(null);
@@ -1256,11 +1929,37 @@ export default function Home() {
   const mediaStreamRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
+  const mediaSourceRef = useRef(null);
+  const sttProcessorRef = useRef(null);
+  const sttProcessorGainRef = useRef(null);
+  const sttPcmBuffersRef = useRef([]);
+  const sttPcmSampleCountRef = useRef(0);
   const rafRef = useRef(null);
   const silenceTimerRef = useRef(null);
   const latestTranscriptRef = useRef("");
   const micStartingRef = useRef(false);
   const ttsActiveRef = useRef(false);
+  const assistantTurnActiveRef = useRef(false);
+  const micEnabledRef = useRef(micEnabled);
+  const voiceModeRef = useRef(voiceMode);
+  const textOnlyRef = useRef(textOnly);
+  const autoSpeakRef = useRef(autoSpeak);
+
+  useEffect(() => {
+    micEnabledRef.current = micEnabled;
+  }, [micEnabled]);
+
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
+
+  useEffect(() => {
+    textOnlyRef.current = textOnly;
+  }, [textOnly]);
+
+  useEffect(() => {
+    autoSpeakRef.current = autoSpeak;
+  }, [autoSpeak]);
 
   async function send(overrideText) {
     if (activeTab === "recordings" || meetingLock) {
@@ -1276,9 +1975,8 @@ export default function Home() {
     }
 
     stopMic();
-    if (voiceMode && autoSpeak && !textOnly) {
-      speak(pickThinkingCue(), { ...ttsSettings, style: "brat_soft", fast: true, use_raw_text: true }, { restartMicOnEnd: false });
-    }
+    setMicStatus("Thinking...");
+    assistantTurnActiveRef.current = true;
     const userMessageId = makeMessageId();
     setLog(l => [...l, { id: userMessageId, role: "user", text }]);
     setUserText("");
@@ -1303,6 +2001,7 @@ export default function Home() {
         })
       });
     } catch (err) {
+      assistantTurnActiveRef.current = false;
       setChatError("chat_unreachable");
       setLog(l => [...l, { role: "assistant", text: "(no reply)" }]);
       return;
@@ -1384,9 +2083,15 @@ export default function Home() {
     ]);
     setLastAssistantText(displayReply);
 
-    if (autoSpeak && !textOnly && displayReply) {
-      const spoken = displayReply;
-      if (spoken) speakChunks(spoken, { use_raw_text: true });
+    try {
+      if (autoSpeakRef.current && !textOnlyRef.current && displayReply) {
+        const spoken = displayReply;
+        if (spoken) {
+          await speakChunks(spoken, { use_raw_text: true });
+        }
+      }
+    } finally {
+      assistantTurnActiveRef.current = false;
     }
   }
 
@@ -1417,6 +2122,8 @@ export default function Home() {
   }
 
   async function stopAudio(fadeMs = 160) {
+    ttsPlaybackTokenRef.current += 1;
+    setCurrentAvatarSpeechText("");
     const audio = audioRef.current;
     if (audio) {
       const start = Number.isFinite(audio.volume) ? audio.volume : 1;
@@ -1443,6 +2150,50 @@ export default function Home() {
     if (ttsRafRef.current) cancelAnimationFrame(ttsRafRef.current);
     ttsRafRef.current = null;
     setTtsLevel(0);
+    setAvatarLipsync(null);
+  }
+
+  async function ensureAudioDurationMs(audio) {
+    if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
+      return Math.max(320, Math.round(audio.duration * 1000));
+    }
+    if (!audio) return 1800;
+    return await new Promise(resolve => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        audio.removeEventListener("loadedmetadata", finish);
+        audio.removeEventListener("canplay", finish);
+        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+          ? Math.max(320, Math.round(audio.duration * 1000))
+          : 1800;
+        resolve(durationMs);
+      };
+      audio.addEventListener("loadedmetadata", finish, { once: true });
+      audio.addEventListener("canplay", finish, { once: true });
+      setTimeout(finish, 900);
+    });
+  }
+
+  async function fetchAvatarLipsyncPreview(text, durationMs) {
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return null;
+    try {
+      const r = await fetch(`${SERVER_URL}/api/aika/avatar/runtime/lipsync/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: cleanText,
+          durationMs: Math.max(320, Math.round(Number(durationMs) || 1800))
+        })
+      });
+      if (!r.ok) return null;
+      const data = await r.json().catch(() => ({}));
+      return data?.lipsync || null;
+    } catch {
+      return null;
+    }
   }
 
   async function startLipSync(audio) {
@@ -1486,6 +2237,7 @@ export default function Home() {
 
   async function testVoice() {
     try {
+      const sampleText = "Testing Aika Voice. If you hear this, audio output is working.";
       if (!audioUnlocked) {
         setTtsError("audio_locked_click_enable");
         return;
@@ -1497,59 +2249,74 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: "Testing Aika Voice. If you hear this, audio output is working.",
-          settings: applyEmotionTuning(ttsSettings, behavior)
+          text: sampleText,
+          settings: { ...applyEmotionTuning(ttsSettings, behavior), use_raw_text: true }
         })
       });
       if (!r.ok) {
-        let errText = "voice_test_failed";
-        try {
-          const data = await r.json();
-          errText = data.error || errText;
-        } catch {
-          errText = await r.text();
-        }
+        const errText = await readErrorResponseMessage(r, "voice_test_failed");
         throw new Error(errText || "voice_test_failed");
       }
 
       const warningsHeader = r.headers.get("x-tts-warnings");
       if (warningsHeader) {
-        setTtsWarnings(warningsHeader.split(",").map(s => s.trim()).filter(Boolean));
+        setTtsWarnings(parseTtsWarnings(warningsHeader));
       }
       const blob = await r.blob();
       if (!blob || blob.size < 64) throw new Error("audio_blob_invalid");
+      setCurrentAvatarSpeechText(sampleText);
 
       const objectUrl = URL.createObjectURL(blob);
       const audio = audioRef.current || new Audio();
+      const playbackToken = ++ttsPlaybackTokenRef.current;
       audioRef.current = audio;
       audio.src = objectUrl;
       audio.preload = "auto";
       audio.volume = 1;
+      const durationMs = await ensureAudioDurationMs(audio);
+      const lipsync = await fetchAvatarLipsyncPreview(sampleText, durationMs);
       startLipSync(audio);
+      audio.onplaying = () => {
+        if (playbackToken !== ttsPlaybackTokenRef.current) return;
+        setMicStatus("Speaking...");
+        setAvatarLipsync(lipsync ? { sequence: lipsync, startedAtMs: performance.now() } : null);
+      };
       audio.onended = () => {
         URL.revokeObjectURL(objectUrl);
         setTtsStatus("idle");
         setBehavior(prev => ({ ...prev, speaking: false }));
+        setCurrentAvatarSpeechText("");
         stopLipSync();
         if (voiceMode && !textOnly) {
+          setMicStatus("Listening...");
           setTimeout(() => startMic(), 200);
+        } else {
+          setMicStatus("Conversation paused");
         }
       };
       audio.onerror = async () => {
         URL.revokeObjectURL(objectUrl);
         try {
+          if (playbackToken === ttsPlaybackTokenRef.current) {
+            setAvatarLipsync(lipsync ? { sequence: lipsync, startedAtMs: performance.now() } : null);
+          }
           setTtsStatus("playing");
           await playBlobWithAudioContext(blob);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          setCurrentAvatarSpeechText("");
           stopLipSync();
           if (voiceMode && !textOnly) {
+            setMicStatus("Listening...");
             setTimeout(() => startMic(), 200);
+          } else {
+            setMicStatus("Conversation paused");
           }
         } catch (e) {
           setTtsStatus("error");
           setTtsError(e?.message || "audio_play_failed");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          setCurrentAvatarSpeechText("");
           stopLipSync();
         }
       };
@@ -1572,7 +2339,7 @@ export default function Home() {
   }
 
   async function speak(textToSpeak, settingsOverride, options = {}) {
-    if (textOnly) return;
+      if (textOnly) return;
     if (!audioUnlocked) {
       setPendingSpeak({ text: textToSpeak, settings: settingsOverride });
       setTtsError("audio_locked_click_enable");
@@ -1580,6 +2347,7 @@ export default function Home() {
     }
     const text = String(textToSpeak || "").trim();
     if (!text) return;
+    setCurrentAvatarSpeechText(text);
 
     try {
       const { skipStop = false, restartMicOnEnd = true } = options;
@@ -1588,9 +2356,11 @@ export default function Home() {
         stopMic();
         await stopAudio();
       }
+      const playbackToken = ++ttsPlaybackTokenRef.current;
       ttsActiveRef.current = true;
       setTtsError("");
       setTtsStatus("loading");
+      setMicStatus("Speaking...");
       const tuned = applyEmotionTuning(settingsOverride || ttsSettings, behavior);
       const requestSettings = { ...tuned, fast: useFast, use_raw_text: true };
       const t0 = performance.now();
@@ -1600,20 +2370,14 @@ export default function Home() {
         body: JSON.stringify({ text, settings: requestSettings })
       });
       if (!r.ok) {
-        let errText = "tts_failed";
-        try {
-          const data = await r.json();
-          errText = data.error || errText;
-        } catch {
-          errText = await r.text();
-        }
+        const errText = await readErrorResponseMessage(r, "tts_failed");
         setTtsError(errText || "tts_failed");
         throw new Error(errText || "tts_failed");
       }
 
       const warningsHeader = r.headers.get("x-tts-warnings");
       if (warningsHeader) {
-        setTtsWarnings(warningsHeader.split(",").map(s => s.trim()).filter(Boolean));
+        setTtsWarnings(parseTtsWarnings(warningsHeader));
       }
       const blob = await r.blob();
       const t1 = performance.now();
@@ -1631,34 +2395,70 @@ export default function Home() {
         audio.src = objectUrl;
         audio.preload = "auto";
         audio.volume = 1;
+        ensureAudioDurationMs(audio)
+          .then(durationMs => fetchAvatarLipsyncPreview(text, durationMs))
+          .then(lipsync => {
+            audio.__aikaLipsync = playbackToken === ttsPlaybackTokenRef.current ? lipsync : null;
+            if (
+              playbackToken === ttsPlaybackTokenRef.current &&
+              lipsync &&
+              !audio.paused &&
+              Number.isFinite(audio.currentTime)
+            ) {
+              setAvatarLipsync({
+                sequence: lipsync,
+                startedAtMs: performance.now() - audio.currentTime * 1000
+              });
+            }
+          })
+          .catch(() => {
+            audio.__aikaLipsync = null;
+          });
         startLipSync(audio);
+        audio.onplaying = () => {
+          if (playbackToken !== ttsPlaybackTokenRef.current) return;
+          setMicStatus("Speaking...");
+          setAvatarLipsync(audio.__aikaLipsync ? { sequence: audio.__aikaLipsync, startedAtMs: performance.now() } : null);
+        };
         audio.onended = () => {
           URL.revokeObjectURL(objectUrl);
           setTtsStatus("idle");
           setBehavior(prev => ({ ...prev, speaking: false }));
+          setCurrentAvatarSpeechText("");
           ttsActiveRef.current = false;
           stopLipSync();
-          if (restartMicOnEnd && voiceMode && !textOnly) {
+          if (restartMicOnEnd && micEnabledRef.current && voiceModeRef.current && !textOnlyRef.current) {
+            setMicStatus("Listening...");
             setTimeout(() => startMic(), 600);
+          } else {
+            setMicStatus("Conversation paused");
           }
           resolve();
         };
         audio.onerror = async () => {
           URL.revokeObjectURL(objectUrl);
           try {
+            if (playbackToken === ttsPlaybackTokenRef.current) {
+              setAvatarLipsync(audio.__aikaLipsync ? { sequence: audio.__aikaLipsync, startedAtMs: performance.now() } : null);
+            }
             setTtsStatus("playing");
             await playBlobWithAudioContext(blob);
             setTtsStatus("idle");
             setBehavior(prev => ({ ...prev, speaking: false }));
+            setCurrentAvatarSpeechText("");
             ttsActiveRef.current = false;
             stopLipSync();
-            if (restartMicOnEnd && voiceMode && !textOnly) {
+            if (restartMicOnEnd && micEnabledRef.current && voiceModeRef.current && !textOnlyRef.current) {
+              setMicStatus("Listening...");
               setTimeout(() => startMic(), 600);
+            } else {
+              setMicStatus("Conversation paused");
             }
           } catch (e) {
             setTtsStatus("error");
             setTtsError(e?.message || "audio_play_failed");
             setBehavior(prev => ({ ...prev, speaking: false }));
+            setCurrentAvatarSpeechText("");
             ttsActiveRef.current = false;
             stopLipSync();
           }
@@ -1673,6 +2473,7 @@ export default function Home() {
       setTtsStatus("error");
       setTtsError(e?.message || "tts_failed");
       setBehavior(prev => ({ ...prev, speaking: false }));
+      setCurrentAvatarSpeechText("");
       ttsActiveRef.current = false;
     }
   }
@@ -1692,7 +2493,7 @@ export default function Home() {
     for (const chunk of chunks) {
       await speak(chunk, settingsOverride, { skipStop: true, restartMicOnEnd: false });
     }
-    if (voiceMode && !textOnly) {
+    if (micEnabledRef.current && voiceModeRef.current && !textOnlyRef.current) {
       setTimeout(() => startMic(), 600);
     }
   }
@@ -1717,7 +2518,7 @@ export default function Home() {
       lastMicStartRef.current = Date.now();
       setMicState("listening");
       setMicError("");
-      setMicStatus("Listening? speak now");
+      setMicStatus("Listening...");
     };
 
     r.onerror = (e) => {
@@ -1738,7 +2539,7 @@ export default function Home() {
         micFailCountRef.current = 0;
       }
       setMicState("idle");
-      setMicStatus("Mic idle");
+      setMicStatus(micEnabledRef.current && voiceModeRef.current && !textOnlyRef.current ? "Ready" : "Conversation paused");
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = null;
@@ -1746,7 +2547,7 @@ export default function Home() {
       stopLevelMeter();
       if (micFailCountRef.current >= 1) {
         forceServerSttRef.current = true;
-        setMicStatus("Switching to server STT...");
+        setMicStatus("Opening conversation...");
         startServerStt();
         return;
       }
@@ -1804,6 +2605,7 @@ export default function Home() {
       audioCtxRef.current = audioCtx;
 
       const source = audioCtx.createMediaStreamSource(stream);
+      mediaSourceRef.current = source;
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 512;
       analyserRef.current = analyser;
@@ -1837,6 +2639,19 @@ export default function Home() {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    if (sttProcessorRef.current) {
+      try { sttProcessorRef.current.disconnect(); } catch {}
+      sttProcessorRef.current.onaudioprocess = null;
+      sttProcessorRef.current = null;
+    }
+    if (sttProcessorGainRef.current) {
+      try { sttProcessorGainRef.current.disconnect(); } catch {}
+      sttProcessorGainRef.current = null;
+    }
+    if (mediaSourceRef.current) {
+      try { mediaSourceRef.current.disconnect(); } catch {}
+      mediaSourceRef.current = null;
+    }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(t => t.stop());
       mediaStreamRef.current = null;
@@ -1846,11 +2661,13 @@ export default function Home() {
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
+    sttPcmBuffersRef.current = [];
+    sttPcmSampleCountRef.current = 0;
     setMicLevel(0);
   }
 
   async function startServerStt() {
-    if (sttActiveRef.current) return;
+    if (sttActiveRef.current || assistantTurnActiveRef.current || ttsActiveRef.current || !micEnabledRef.current) return;
     const micReason = getMicUnavailableReason();
     if (micReason) {
       setMicState("error");
@@ -1862,6 +2679,13 @@ export default function Home() {
       await startLevelMeter();
       sttModeRef.current = "server";
       const stream = mediaStreamRef.current || await requestMicStream({ audio: true });
+      const audioCtx = audioCtxRef.current;
+      const source = mediaSourceRef.current;
+      if (!audioCtx || !source) {
+        setMicError("stt_audio_context_unavailable");
+        setMicStatus("Mic audio context unavailable");
+        return;
+      }
       sttActiveRef.current = true;
       sttLastDataRef.current = 0;
       sttChunkCountRef.current = 0;
@@ -1870,43 +2694,39 @@ export default function Home() {
       sttInitChunkRef.current = null;
       sttSpeechActiveRef.current = false;
       sttRequestInFlightRef.current = false;
-      setSttDebug({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
-        ? "audio/webm"
-        : MediaRecorder.isTypeSupported("audio/ogg")
-          ? "audio/ogg"
-          : "";
-      if (!mimeType) {
-        setMicError("audio_format_unsupported");
-        sttActiveRef.current = false;
-        return;
+      sttSegmentStartedAtRef.current = Date.now();
+      sttAutoRestartRef.current = false;
+      sttPcmBuffersRef.current = [];
+      sttPcmSampleCountRef.current = 0;
+      if (sttSegmentTimerRef.current) {
+        clearInterval(sttSegmentTimerRef.current);
+        sttSegmentTimerRef.current = null;
       }
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      sttRecorderRef.current = recorder;
-      recorder.onerror = () => {
-        setMicError("stt_recorder_error");
-        setMicState("idle");
-        setMicStatus("Mic restarted");
-      };
+      setSttDebug({ mode: "server", chunks: 0, sent: 0, lastTextAt: 0 });
       const sendBufferedUtterance = async () => {
         if (sttRequestInFlightRef.current) return;
-        const parts = sttBlobPartsRef.current;
-        if (!parts || !parts.length) return;
-        const initChunk = sttInitChunkRef.current;
-        const payloadParts =
-          initChunk && parts[0] !== initChunk
-            ? [initChunk, ...parts]
-            : parts;
-        const utteranceBlob = new Blob(payloadParts, { type: mimeType });
+        if (!sttPcmSampleCountRef.current) return;
+        const chunkBuffers = sttPcmBuffersRef.current;
+        const totalSamples = sttPcmSampleCountRef.current;
+        const merged = new Float32Array(totalSamples);
+        let offset = 0;
+        for (const chunk of chunkBuffers) {
+          merged.set(chunk, offset);
+          offset += chunk.length;
+        }
+        const sampleRate = audioCtx.sampleRate || 16000;
+        const utteranceBlob = encodeMonoWavBlob(merged, sampleRate);
+        sttPcmBuffersRef.current = [];
+        sttPcmSampleCountRef.current = 0;
         sttBlobPartsRef.current = [];
+        sttChunkCountRef.current = 0;
         sttLastSpeechRef.current = 0;
         sttSpeechActiveRef.current = false;
         if (!utteranceBlob || utteranceBlob.size < 512) return;
         sttRequestInFlightRef.current = true;
         try {
           const form = new FormData();
-          const ext = mimeType.includes("ogg") ? "ogg" : "webm";
-          form.append("audio", utteranceBlob, `stt-${Date.now()}.${ext}`);
+          form.append("audio", utteranceBlob, `stt-${Date.now()}.wav`);
           const r = await fetch(`${SERVER_URL}/api/stt/transcribe`, { method: "POST", body: form });
           const data = await r.json().catch(() => ({}));
           if (!r.ok) {
@@ -1923,31 +2743,36 @@ export default function Home() {
               setMicError("stt_provider_unavailable");
               return;
             }
-            latestTranscriptRef.current = transcriptText;
-            setMicStatus(`Heard: ${latestTranscriptRef.current}`);
-            setUserText(latestTranscriptRef.current);
+            const mergedTranscript = mergeTranscriptSegments(sttTranscriptRef.current, transcriptText);
+            sttTranscriptRef.current = mergedTranscript;
+            latestTranscriptRef.current = mergedTranscript;
+            setMicStatus(`Heard: ${mergedTranscript}`);
+            setUserText(mergedTranscript);
             setSttDebug(prev => ({
               ...prev,
               chunks: prev.chunks + 1,
               lastTextAt: Date.now()
             }));
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = setTimeout(() => {
-              const toSend = latestTranscriptRef.current.trim();
-              if (!toSend || isLowSignalUtterance(toSend)) {
-                setMicStatus("Listening...");
-                return;
-              }
-              setMicStatus(`Sending: ${toSend}`);
-              latestTranscriptRef.current = "";
-              sttTranscriptRef.current = "";
-              sttChunkCountRef.current = 0;
-              sttLastDataRef.current = 0;
-              sttLastSpeechRef.current = 0;
-              setSttDebug(prev => ({ ...prev, sent: prev.sent + 1 }));
-              setUserText("");
-              send(toSend);
-            }, 300);
+            const toSend = latestTranscriptRef.current.trim();
+            if (!toSend || isLowSignalUtterance(toSend)) {
+              setMicStatus("Listening...");
+              return;
+            }
+            if (silenceTimerRef.current) {
+              clearTimeout(silenceTimerRef.current);
+              silenceTimerRef.current = null;
+            }
+            setMicStatus(`Sending: ${toSend}`);
+            latestTranscriptRef.current = "";
+            sttTranscriptRef.current = "";
+            sttChunkCountRef.current = 0;
+            sttLastDataRef.current = 0;
+            sttLastSpeechRef.current = 0;
+            setSttDebug(prev => ({ ...prev, sent: prev.sent + 1 }));
+            setUserText("");
+            stopMic();
+            send(toSend);
           }
         } catch (err) {
           setMicError(err?.message || "stt_failed");
@@ -1955,39 +2780,51 @@ export default function Home() {
           sttRequestInFlightRef.current = false;
         }
       };
-
-      recorder.ondataavailable = async (evt) => {
-        if (ttsActiveRef.current) return;
-        if (!evt.data || evt.data.size < 256) return;
-        const now = Date.now();
-        if (!sttInitChunkRef.current) sttInitChunkRef.current = evt.data;
-        sttBlobPartsRef.current.push(evt.data);
-        if (sttBlobPartsRef.current.length > 60) {
-          sttBlobPartsRef.current.shift();
-        }
-        sttLastDataRef.current = now;
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      const muteGain = audioCtx.createGain();
+      muteGain.gain.value = 0;
+      processor.onaudioprocess = evt => {
+        if (!sttActiveRef.current || ttsActiveRef.current) return;
+        const input = evt.inputBuffer?.getChannelData?.(0);
+        if (!input || !input.length) return;
+        const copy = new Float32Array(input.length);
+        copy.set(input);
+        sttPcmBuffersRef.current.push(copy);
+        sttPcmSampleCountRef.current += copy.length;
+        sttChunkCountRef.current += 1;
+        sttLastDataRef.current = Date.now();
         if (sttRmsRef.current > 0.008) {
-          sttLastSpeechRef.current = now;
-        }
-        const hasSpeech = sttLastSpeechRef.current > 0;
-        if (hasSpeech) {
+          sttLastSpeechRef.current = Date.now();
           sttSpeechActiveRef.current = true;
-          const quietForMs = now - sttLastSpeechRef.current;
-          if (quietForMs >= sttSilenceMs) {
-            await sendBufferedUtterance();
-          }
         }
       };
-      recorder.onstop = () => {
-        sttActiveRef.current = false;
-        setMicState("idle");
-        if (!mediaStreamRef.current) {
-          stream.getTracks().forEach(t => t.stop());
+      source.connect(processor);
+      processor.connect(muteGain);
+      muteGain.connect(audioCtx.destination);
+      sttProcessorRef.current = processor;
+      sttProcessorGainRef.current = muteGain;
+      sttSegmentTimerRef.current = setInterval(() => {
+        if (!sttActiveRef.current || sttRequestInFlightRef.current || ttsActiveRef.current) return;
+        const now = Date.now();
+        const hasParts = sttPcmSampleCountRef.current > 0;
+        const segmentAge = now - (sttSegmentStartedAtRef.current || now);
+        const quietForMs = sttLastSpeechRef.current > 0 ? now - sttLastSpeechRef.current : 0;
+        const shouldFlushForSilence =
+          hasParts &&
+          sttSpeechActiveRef.current &&
+          quietForMs >= sttSilenceMs &&
+          segmentAge >= 1200;
+        const shouldFlushForAge =
+          hasParts &&
+          sttChunkCountRef.current >= 20 &&
+          segmentAge >= 5000;
+        if (shouldFlushForSilence || shouldFlushForAge) {
+          sttSegmentStartedAtRef.current = now;
+          void sendBufferedUtterance();
         }
-      };
-      recorder.start(500);
+      }, 250);
       setMicState("listening");
-      setMicStatus("Listening (server STT)...");
+      setMicStatus("Listening...");
     } catch (err) {
       sttActiveRef.current = false;
       setMicState("error");
@@ -1996,6 +2833,20 @@ export default function Home() {
   }
 
   function stopServerStt() {
+    sttAutoRestartRef.current = false;
+    if (sttSegmentTimerRef.current) {
+      clearInterval(sttSegmentTimerRef.current);
+      sttSegmentTimerRef.current = null;
+    }
+    if (sttProcessorRef.current) {
+      try { sttProcessorRef.current.disconnect(); } catch {}
+      sttProcessorRef.current.onaudioprocess = null;
+      sttProcessorRef.current = null;
+    }
+    if (sttProcessorGainRef.current) {
+      try { sttProcessorGainRef.current.disconnect(); } catch {}
+      sttProcessorGainRef.current = null;
+    }
     if (sttRecorderRef.current) {
       try { sttRecorderRef.current.stop(); } catch {}
       sttRecorderRef.current = null;
@@ -2009,13 +2860,19 @@ export default function Home() {
     sttInitChunkRef.current = null;
     sttSpeechActiveRef.current = false;
     sttRequestInFlightRef.current = false;
+    sttSegmentStartedAtRef.current = 0;
+    sttPcmBuffersRef.current = [];
+    sttPcmSampleCountRef.current = 0;
     setSttDebug(prev => ({ ...prev, mode: "off" }));
     setMicState("idle");
-    setMicStatus("Mic idle");
+    setMicStatus(micEnabledRef.current && voiceModeRef.current && !textOnlyRef.current ? "Ready" : "Conversation paused");
   }
 
   async function startMic() {
-    if (micState === "listening" || micStartingRef.current || ttsActiveRef.current) return;
+    if (micState === "listening" || micStartingRef.current) return;
+    if (ttsActiveRef.current) {
+      await stopAudio();
+    }
     const micReason = getMicUnavailableReason();
     if (micReason) {
       setMicState("error");
@@ -2069,8 +2926,9 @@ export default function Home() {
   }
 
   function stopMic() {
-    const r = ensureRecognizer();
-    if (r) r.stop();
+    if (recognizerRef.current) {
+      try { recognizerRef.current.stop(); } catch {}
+    }
     stopServerStt();
     forceServerSttRef.current = false;
     micFailCountRef.current = 0;
@@ -2085,25 +2943,38 @@ export default function Home() {
     const listening = micEnabled && micState === "listening";
     if (listening) {
       setMicEnabled(false);
+      micEnabledRef.current = false;
       setVoiceMode(false);
+      voiceModeRef.current = false;
       setAutoSpeak(false);
+      autoSpeakRef.current = false;
       setTextOnly(true);
+      textOnlyRef.current = true;
       stopMic();
       return;
     }
     setMicEnabled(true);
+    micEnabledRef.current = true;
     setVoiceMode(true);
+    voiceModeRef.current = true;
     setAutoSpeak(true);
+    autoSpeakRef.current = true;
     setTextOnly(false);
-    setMicStatus("Starting mic...");
-    const ok = await unlockAudio();
-    if (ok) {
+    textOnlyRef.current = false;
+    setMicStatus("Opening conversation...");
+    let audioReady = audioUnlocked;
+    try {
+      audioReady = await unlockAudio();
+    } catch {
+      audioReady = false;
+    }
+    if (audioReady) {
       setAudioUnlocked(true);
       setTtsError("");
-      await startMic();
     } else {
       setTtsError("audio_locked_click_enable");
     }
+    await startMic();
   }
 
   useEffect(() => {
@@ -2116,12 +2987,17 @@ export default function Home() {
   useEffect(() => {
     if (audioUnlocked) return;
     const tryUnlock = async () => {
-      const ok = await unlockAudio();
+      let ok = false;
+      try {
+        ok = await unlockAudio();
+      } catch {
+        ok = false;
+      }
       if (ok) {
-        setAudioUnlocked(true);
-        if (micEnabled && voiceMode && !textOnly && micState !== "listening") {
-          startMic();
-        }
+          setAudioUnlocked(true);
+      }
+      if (micEnabledRef.current && voiceModeRef.current && !textOnlyRef.current && micState !== "listening" && !assistantTurnActiveRef.current) {
+        startMic();
       }
     };
     const onFirstGesture = () => {
@@ -2149,6 +3025,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!voiceMode || !micEnabled || micState !== "idle") return;
+    if (assistantTurnActiveRef.current || ttsActiveRef.current) return;
     startMic();
   }, [voiceMode, micEnabled, micState]);
 
@@ -2156,9 +3033,10 @@ export default function Home() {
     const id = setInterval(() => {
       if (!micEnabled || !voiceMode || textOnly) return;
       if (!sttActiveRef.current) return;
+      if (assistantTurnActiveRef.current || ttsActiveRef.current || !micEnabledRef.current) return;
       const age = Date.now() - (sttLastDataRef.current || 0);
       if (age < 12000) return;
-      setMicStatus("Reconnecting mic...");
+      setMicStatus("Reconnecting...");
       stopServerStt();
       setTimeout(() => {
         startServerStt();
@@ -2172,10 +3050,8 @@ export default function Home() {
       try {
         const r = await fetch(`${SERVER_URL}/api/aika/tts/health`);
         const data = await r.json();
-        if (data?.engine === "gptsovits") {
-          setTtsEngineOnline(Boolean(data.online));
-        } else if (data?.engine) {
-          setTtsEngineOnline(false);
+        if (data?.engine) {
+          setTtsEngineOnline(typeof data.online === "boolean" ? data.online : null);
         } else {
           setTtsEngineOnline(null);
         }
@@ -2537,7 +3413,7 @@ export default function Home() {
               ? data.voices
               : [];
           setAvailableVoices(list);
-          if (list.length && !ttsSettings.voice?.name) {
+          if (data.engine === "piper" && list.length && !ttsSettings.voice?.name) {
             setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: list[0].id } }));
           }
           if (!ttsSettings.engine && data.engine) {
@@ -2558,10 +3434,17 @@ export default function Home() {
           const list = Array.isArray(data.models) ? data.models : [];
           setAvatarModels(list);
           const stored = window.localStorage.getItem("aika_avatar_model") || "";
-          const storedOk = stored && list.some(m => m.id === stored && m.available);
+          const threePreferred = list.find(m => m.id.toLowerCase() === "aika_nocturne_3d" && m.available)?.id || "";
+          const storedLegacy = LEGACY_AVATAR_IDS.has(stored);
+          const storedOk = stored && list.some(m => m.id === stored && m.available) && !(storedLegacy && threePreferred);
           const preferred =
+            (avatarModelOverride && list.some(m => m.id === avatarModelOverride && m.available) && avatarModelOverride) ||
             (storedOk && stored) ||
-            (list.find(m => m.id.toLowerCase() === "miku" && m.available)?.id ||
+            (threePreferred ||
+              list.find(m => m.id.toLowerCase() === "aika_nocturne_stage" && m.available)?.id ||
+              list.find(m => m.id.toLowerCase() === "aika_nocturne_portrait" && m.available)?.id ||
+              list.find(m => m.id.toLowerCase() === "aika_nocturne_cinematic" && m.available)?.id ||
+              list.find(m => m.id.toLowerCase() === "miku" && m.available)?.id ||
               list.find(m => m.available)?.id ||
               list[0]?.id ||
               "");
@@ -2578,7 +3461,13 @@ export default function Home() {
         }
       }
       loadAvatarModels();
-    }, []);
+    }, [avatarModelOverride]);
+
+    useEffect(() => {
+      if (!avatarModelOverride) return;
+      if (!avatarModels.some(m => m.id === avatarModelOverride && m.available)) return;
+      setAvatarModelId(avatarModelOverride);
+    }, [avatarModelOverride, avatarModels]);
 
     async function importAvatarZip(file) {
       if (!file) return;
@@ -2620,6 +3509,10 @@ export default function Home() {
         const list = Array.isArray(data.models) ? data.models : [];
         setAvatarModels(list);
         const preferred =
+          list.find(m => m.id.toLowerCase() === "aika_nocturne_3d" && m.available)?.id ||
+          list.find(m => m.id.toLowerCase() === "aika_nocturne_stage" && m.available)?.id ||
+          list.find(m => m.id.toLowerCase() === "aika_nocturne_portrait" && m.available)?.id ||
+          list.find(m => m.id.toLowerCase() === "aika_nocturne_cinematic" && m.available)?.id ||
           list.find(m => m.id.toLowerCase() === "miku" && m.available)?.id ||
           list.find(m => m.available)?.id ||
           list[0]?.id ||
@@ -2776,9 +3669,10 @@ export default function Home() {
   }, []);
 
   const showAuthGate = authRequired && authChecked && !currentUser;
-  const uiBase = typeof window !== "undefined" ? window.location.origin : "";
-  const googleLoginUrl = SERVER_URL
-    ? `${SERVER_URL}/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`
+  const uiBase = typeof window !== "undefined" ? String(window.location.origin || "").trim() : "";
+  const googleLoginBase = String(SERVER_URL || "").trim().replace(/\/$/, "");
+  const googleLoginUrl = googleLoginBase
+    ? `${googleLoginBase}/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`
     : `/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`;
 
   if (authRequired && !authChecked) {
@@ -3872,6 +4766,15 @@ export default function Home() {
     reader.readAsDataURL(file);
   }
 
+  const conversationUi = deriveConversationUiState({
+    micEnabled,
+    voiceMode,
+    textOnly,
+    micState,
+    micStatus,
+    ttsStatus
+  });
+
     return (
       <div
         className="app-shell"
@@ -3929,20 +4832,62 @@ export default function Home() {
               ? "Aika is listening. Right-click to hide."
               : "Double-click to start listening. Right-click to hide."}
           >
+            <div className="avatar-stage-topbar">
+              <div className="avatar-stage-copy">
+                <span className="avatar-stage-kicker">AIKA Nocturne</span>
+                <strong>{conversationUi.label}</strong>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(14, 8, 14, 0.62)",
+                    color: "#f5d7df"
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setActiveTab("settings");
+                    setSettingsTab("avatar");
+                  }}
+                >
+                  Avatar Settings
+                </button>
+                <button
+                  type="button"
+                  className="avatar-stage-mic"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleMic();
+                  }}
+                >
+                  {conversationUi.actionLabel}
+                </button>
+              </div>
+            </div>
             <div className="avatar-float-shell">
               <AikaAvatar
+                className="avatar-stage-canvas"
                 mood={behavior?.emotion || Emotion.NEUTRAL}
                 isTalking={ttsStatus === "playing" || behavior?.speaking}
                 talkIntensity={ttsStatus === "playing" ? Math.max(0.12, ttsLevel) : (behavior?.intensity ?? 0.35)}
                 isListening={micState === "listening"}
+                lipsyncSequence={avatarLipsync?.sequence || null}
+                lipsyncStartTimeMs={avatarLipsync?.startedAtMs || 0}
+                engineHint={avatarModels.find(m => m.id === avatarModelId)?.engine}
                 modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
+                portraitConfig={avatarModels.find(m => m.id === avatarModelId)?.portraitConfig}
                 fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
                 pngSet={avatarModels.find(m => m.id === avatarModelId)?.pngSet}
                 backgroundSrc={AVATAR_BACKGROUNDS.find(bg => bg.id === avatarBackground)?.src}
+                avatarAppearance={avatarLook}
+                avatarMotion={lenoreRuntimeMotion}
               />
             </div>
             <div className="avatar-float-hint">
-              {micState === "listening" ? "Listening · Right-click to hide" : "Double-click to listen · Right-click to hide"}
+              {conversationUi.detail}
             </div>
           </div>
         )}
@@ -4175,7 +5120,7 @@ export default function Home() {
             <button
               onClick={() => {
                 setActiveTab("settings");
-                setSettingsTab("connections");
+                setSettingsTab("avatar");
               }}
               style={{
                 padding: "8px 12px",
@@ -4260,6 +5205,7 @@ export default function Home() {
                 { key: "skills", label: "Skills" },
                 { key: "trading", label: "Trading" },
                 { key: "appearance", label: "Appearance" },
+                { key: "avatar", label: "Avatar" },
                 { key: "voice", label: "Voice" },
                 { key: "aika", label: "AIKA" },
                 { key: "legacy", label: "Legacy" }
@@ -5123,6 +6069,331 @@ export default function Home() {
             </div>
           )}
 
+          {activeTab === "settings" && settingsTab === "avatar" && (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                Avatar Look
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280", maxWidth: 760 }}>
+                Lenore wardrobe and styling controls. These map only to the real removable pieces in the purchased asset: hair, jacket, wrap, gloves, lingerie top, lingerie bottoms, stockings, boots, choker, and piercing.
+              </div>
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Style preset
+                  <select
+                    value={avatarLook.preset}
+                    onChange={(e) => setAvatarLook({ ...avatarLook, ...LENORE_LOOK_PRESETS[e.target.value], preset: e.target.value })}
+                    style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                  >
+                    {LENORE_PRESET_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: 11, color: "#6b7280" }}>
+                    {LENORE_PRESET_OPTIONS.find((option) => option.value === avatarLook.preset)?.description || ""}
+                  </span>
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Camera frame
+                  <select
+                    value={avatarLook.cameraFrame}
+                    onChange={(e) => setAvatarLook(prev => ({ ...prev, cameraFrame: e.target.value }))}
+                    style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                  >
+                    {LENORE_FRAME_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: 11, color: "#6b7280" }}>
+                    {LENORE_FRAME_OPTIONS.find((option) => option.value === avatarLook.cameraFrame)?.description || ""}
+                  </span>
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Hair color
+                  <input type="color" value={avatarLook.hairColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, hairColor: e.target.value }))} />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Skin tone
+                  <input type="color" value={avatarLook.skinColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, skinColor: e.target.value }))} />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Lip color
+                  <input type="color" value={avatarLook.lipColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, lipColor: e.target.value }))} />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Outfit color
+                  <input type="color" value={avatarLook.outfitColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, outfitColor: e.target.value }))} />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Accent color
+                  <input type="color" value={avatarLook.accentColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, accentColor: e.target.value }))} />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Eye drama: {avatarLook.eyeGlow.toFixed(2)}
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={avatarLook.eyeGlow}
+                    onChange={(e) => setAvatarLook(prev => ({ ...prev, eyeGlow: Number(e.target.value) }))}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                  Matte finish: {avatarLook.matte.toFixed(2)}
+                  <input
+                    type="range"
+                    min={0.4}
+                    max={1}
+                    step={0.01}
+                    value={avatarLook.matte}
+                    onChange={(e) => setAvatarLook(prev => ({ ...prev, matte: Number(e.target.value) }))}
+                  />
+                </label>
+              </div>
+              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+                {LENORE_WARDROBE_ITEMS.map(([key, label]) => (
+                  <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(avatarLook[key])}
+                      onChange={(e) => setAvatarLook(prev => ({ ...prev, [key]: e.target.checked }))}
+                    />
+                    Show {label}
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => setAvatarLook(LENORE_LOOK_DEFAULTS)}
+                  style={{ padding: "8px 12px", borderRadius: 8 }}
+                >
+                  Reset Look
+                </button>
+                <div style={{ fontSize: 12, color: "#6b7280", alignSelf: "center" }}>
+                  If the current model is not Lenore, these controls still apply but have less effect.
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                  Saved Looks
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280", maxWidth: 760 }}>
+                  Save the current full Lenore look and motion setup into named slots, then switch instantly during review or live use.
+                </div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {avatarLookSlots.map((slot, index) => (
+                    (() => {
+                      const frameMeta = getLenoreFrameMeta(slot.look?.cameraFrame);
+                      const clipMeta = getLenoreMotionMeta(slot.motion?.clipName || "auto");
+                      const choreographyMeta = getLenoreChoreographyMeta(slot.motion?.choreographyPreset || "auto");
+                      const active =
+                        JSON.stringify({ ...LENORE_LOOK_DEFAULTS, ...(slot.look || {}) }) === JSON.stringify(avatarLook) &&
+                        JSON.stringify({ ...LENORE_MOTION_DEFAULTS, ...(slot.motion || {}) }) === JSON.stringify(avatarMotion);
+                      return (
+                        <div
+                          key={slot.id}
+                          style={{
+                            display: "grid",
+                            gap: 10,
+                            gridTemplateColumns: "minmax(0, 1fr) auto",
+                            alignItems: "stretch",
+                            border: active ? "1px solid var(--accent)" : "1px solid var(--panel-border)",
+                            borderRadius: 12,
+                            padding: 10,
+                            background: "var(--panel-bg)"
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              gridTemplateColumns: "92px minmax(0, 1fr)",
+                              alignItems: "center"
+                            }}
+                          >
+                            <button
+                              onClick={() => {
+                                setAvatarLook({ ...LENORE_LOOK_DEFAULTS, ...(slot.look || {}) });
+                                setAvatarMotion({ ...LENORE_MOTION_DEFAULTS, ...(slot.motion || {}) });
+                              }}
+                              aria-label={`Apply ${slot.name} look`}
+                              title={`Apply ${slot.name} look`}
+                              style={{
+                                width: 92,
+                                height: 116,
+                                borderRadius: 10,
+                                overflow: "hidden",
+                                position: "relative",
+                                background: `linear-gradient(180deg, ${slot.look?.accentColor || "#5b1025"} 0%, ${slot.look?.outfitColor || "#12070f"} 38%, #0f0710 100%)`,
+                                border: "1px solid rgba(255,255,255,0.08)"
+                              }}
+                            >
+                              <div style={{ position: "absolute", inset: "10px 14px auto", height: 24, borderRadius: 999, background: slot.look?.hairColor || "#09050a", opacity: 0.96 }} />
+                              <div style={{ position: "absolute", inset: "28px 22px auto", height: 34, borderRadius: "18px 18px 12px 12px", background: slot.look?.skinColor || "#f3d9e2" }} />
+                              <div style={{ position: "absolute", inset: "48px 40px auto", height: 6, borderRadius: 999, background: slot.look?.lipColor || "#5b0c22" }} />
+                              <div style={{ position: "absolute", left: 20, right: 20, bottom: 16, top: 68, borderRadius: "26px 26px 12px 12px", background: slot.look?.outfitColor || "#12070f", boxShadow: `0 0 0 2px ${slot.look?.accentColor || "#5b1025"}33 inset` }} />
+                              <div style={{ position: "absolute", left: 8, right: 8, bottom: 8, fontSize: 10, color: "#f6dfe7", textAlign: "center", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                                {frameMeta?.label || "Waist"}
+                              </div>
+                            </button>
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <input
+                                value={slot.name}
+                                onChange={(e) =>
+                                  setAvatarLookSlots((prev) =>
+                                    prev.map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, name: e.target.value } : item
+                                    )
+                                  )
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid var(--panel-border-strong)" }}
+                              />
+                              <div style={{ fontSize: 11, color: "#6b7280" }}>
+                                {LENORE_PRESET_OPTIONS.find((option) => option.value === (slot.look?.preset || ""))?.label || "Custom look"}
+                              </div>
+                              <div style={{ fontSize: 11, color: "#6b7280" }}>
+                                Frame: {frameMeta?.label || "Waist"} | Motion: {clipMeta?.label || "Auto"}
+                              </div>
+                              <div style={{ fontSize: 11, color: "#6b7280" }}>
+                                Choreo: {choreographyMeta?.label || "Auto"}
+                              </div>
+                              <div style={{ fontSize: 11, color: active ? "var(--accent)" : "#6b7280" }}>
+                                {active ? "Live slot" : "Click preview to apply"}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() =>
+                              setAvatarLookSlots((prev) =>
+                                prev.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? {
+                                        ...item,
+                                        look: { ...avatarLook },
+                                        motion: { ...avatarMotion }
+                                      }
+                                    : item
+                                )
+                              )
+                            }
+                            style={{ padding: "8px 12px", borderRadius: 8 }}
+                          >
+                            Save Current
+                          </button>
+                        </div>
+                      );
+                    })()
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                  Motion
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280", maxWidth: 760 }}>
+                  Controls for Lenore's embedded body-motion clip and live idle behavior. Auto mode now chooses between the composed hostess pose and the source body-performance clip based on what AIKA is saying and how she is saying it.
+                </div>
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(avatarMotion.playClip)}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, playClip: e.target.checked }))}
+                    />
+                    Play embedded body motion
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    Motion clip
+                    <select
+                      value={avatarMotion.clipName || "auto"}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, clipName: e.target.value }))}
+                      style={{ padding: "8px 10px", borderRadius: 10 }}
+                    >
+                      {LENORE_MOTION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>
+                      {LENORE_MOTION_OPTIONS.find((option) => option.value === (avatarMotion.clipName || "auto"))?.description || ""}
+                    </span>
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    Choreography preset
+                    <select
+                      value={avatarMotion.choreographyPreset || "auto"}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, choreographyPreset: e.target.value }))}
+                      style={{ padding: "8px 10px", borderRadius: 10 }}
+                    >
+                      {LENORE_CHOREOGRAPHY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>
+                      {LENORE_CHOREOGRAPHY_OPTIONS.find((option) => option.value === (avatarMotion.choreographyPreset || "auto"))?.description || ""}
+                    </span>
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    Motion speed: {avatarMotion.clipSpeed.toFixed(2)}
+                    <input
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={0.01}
+                      value={avatarMotion.clipSpeed}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, clipSpeed: Number(e.target.value) }))}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    Motion weight: {avatarMotion.clipWeight.toFixed(2)}
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={avatarMotion.clipWeight}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, clipWeight: Number(e.target.value) }))}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    Idle head motion: {avatarMotion.idleHead.toFixed(2)}
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={avatarMotion.idleHead}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, idleHead: Number(e.target.value) }))}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    Talking head motion: {avatarMotion.talkHead.toFixed(2)}
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={avatarMotion.talkHead}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, talkHead: Number(e.target.value) }))}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    Body sway: {avatarMotion.bodySway.toFixed(2)}
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={avatarMotion.bodySway}
+                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, bodySway: Number(e.target.value) }))}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === "settings" && settingsTab === "voice" && (
             <div style={{ display: "grid", gap: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
@@ -5175,6 +6446,9 @@ export default function Home() {
                       onChange={(e) => setTtsSettings(s => ({ ...s, style: e.target.value }))}
                       style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                     >
+                      <option value="nocturne_hostess">nocturne_hostess</option>
+                      <option value="nocturne_velvet">nocturne_velvet</option>
+                      <option value="nocturne_command">nocturne_command</option>
                       <option value="brat_baddy">brat_baddy</option>
                       <option value="brat_soft">brat_soft</option>
                       <option value="brat_firm">brat_firm</option>
@@ -5188,6 +6462,7 @@ export default function Home() {
                       style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                     >
                       <option value="">default</option>
+                      <option value="openai">openai</option>
                       <option value="gptsovits">gptsovits</option>
                       <option value="piper">piper</option>
                     </select>
@@ -5274,6 +6549,25 @@ export default function Home() {
                       </label>
                       <div style={{ fontSize: 11, color: "#6b7280" }}>
                         Place Piper .onnx + .onnx.json files in `apps/server/piper_voices`.
+                      </div>
+                    </>
+                  ) : (ttsSettings.engine || statusInfo?.tts?.engine) === "openai" ? (
+                    <>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                        OpenAI Voice
+                        <select
+                          value={ttsSettings.voice.name || ""}
+                          onChange={(e) => setTtsSettings(s => ({ ...s, voice: { ...s.voice, name: e.target.value } }))}
+                          style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
+                        >
+                          <option value="">style default</option>
+                          {availableVoices.map(v => (
+                            <option key={v.id} value={v.id}>{v.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        OpenAI TTS uses the style preset plus prompt text to shape delivery.
                       </div>
                     </>
                   ) : (
@@ -5565,6 +6859,9 @@ export default function Home() {
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
                     Piper: {statusInfo?.tts?.engines?.piper?.enabled ? (statusInfo?.tts?.engines?.piper?.ready ? "Ready" : "Missing voices") : "Inactive"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    OpenAI TTS: {statusInfo?.tts?.engines?.openai?.enabled ? (statusInfo?.tts?.engines?.openai?.configured ? "Ready" : "Missing key") : "Inactive"}
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>Model: {statusInfo?.openai?.model || "-"}</div>
                 </div>
@@ -6430,7 +7727,7 @@ export default function Home() {
               background: micEnabled && micState === "listening" ? "var(--accent-3)" : "var(--text-muted)",
               display: "inline-block"
             }} />
-            {micEnabled ? (micState === "listening" ? "Mic active" : "Mic idle") : "Mic off"}
+            {conversationUi.chip}
           </div>
           <button
             onClick={toggleMic}
@@ -6441,9 +7738,9 @@ export default function Home() {
               border: micEnabled && micState === "listening" ? "1px solid var(--accent)" : "1px solid var(--panel-border-strong)",
               background: micEnabled && micState === "listening" ? "var(--chip-bg)" : "var(--panel-bg)"
             }}
-            title={micEnabled && micState === "listening" ? "Stop listening (Space)" : "Start listening (Space)"}
+            title={conversationUi.actionLabel}
           >
-            {micEnabled && micState === "listening" ? "Mic Off" : "Mic On"}
+            {conversationUi.actionLabel}
           </button>
           <button onClick={() => send()} disabled={meetingLock} style={{ padding: "12px 16px", borderRadius: 12 }}>
             Send
@@ -6541,15 +7838,14 @@ export default function Home() {
               Mic error: {micError}
             </div>
           )}
-          <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-            {micStatus}
+          <div style={{ color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
+            Conversation: {conversationUi.label}
           </div>
           <div style={{ color: "#6b7280", fontSize: 12 }}>
-            Voice: {ttsStatus}
+            {conversationUi.detail}
           </div>
-          <div style={{ color: "#6b7280", fontSize: 12 }}>{ttsEngineOnline === true ? "GPT-SoVITS: online" : ttsEngineOnline === false ? "GPT-SoVITS: offline" : "GPT-SoVITS: unknown"}</div>
           <div style={{ color: "#6b7280", fontSize: 12 }}>
-            {audioUnlocked ? "Audio Enabled" : "Audio Locked (click once to enable)"} 
+            {audioUnlocked ? "Audio ready" : "Click Enable Audio once"} 
           </div>
           {ttsError && (
             <div style={{ color: "#b91c1c", fontSize: 12 }}>
@@ -6571,9 +7867,9 @@ export default function Home() {
               TTS warnings: {ttsWarnings.join(", ")}
             </div>
           )}
-          {micState === "idle" && voiceMode && (
+          {micState === "idle" && voiceMode && !assistantTurnActiveRef.current && (
             <div style={{ color: "#1f2937", fontSize: 12, fontWeight: 600 }}>
-              Click Mic to continue
+              {conversationUi.detail}
             </div>
           )}
           <div style={{ color: "#6b7280", fontSize: 12 }}>
@@ -6790,33 +8086,93 @@ export default function Home() {
 
         .avatar-float {
           position: fixed;
-          right: 22px;
-          bottom: 22px;
-          width: min(240px, 40vw);
+          top: 74px;
+          right: 18px;
+          bottom: 18px;
+          width: clamp(420px, 34vw, 640px);
           z-index: 60;
           display: grid;
-          gap: 6px;
-          justify-items: center;
-          cursor: pointer;
+          grid-template-rows: auto 1fr auto;
+          gap: 10px;
+          cursor: default;
           user-select: none;
+        }
+
+        .avatar-stage-topbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 14px;
+          border-radius: 18px;
+          border: 1px solid rgba(226, 177, 186, 0.26);
+          background:
+            linear-gradient(180deg, rgba(39, 15, 27, 0.92), rgba(13, 10, 19, 0.9)),
+            radial-gradient(circle at top, rgba(220, 73, 112, 0.16), transparent 55%);
+          box-shadow: 0 16px 38px rgba(9, 6, 12, 0.38);
+          backdrop-filter: blur(16px);
+        }
+
+        .avatar-stage-copy {
+          display: grid;
+          gap: 2px;
+        }
+
+        .avatar-stage-kicker {
+          font-size: 10px;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          color: #e8b6c0;
+        }
+
+        .avatar-stage-copy strong {
+          font-size: 14px;
+          color: #f7edf0;
+          font-weight: 700;
+        }
+
+        .avatar-stage-mic {
+          padding: 10px 14px;
+          border-radius: 999px;
+          border: 1px solid rgba(239, 149, 172, 0.45);
+          background: linear-gradient(180deg, rgba(137, 22, 44, 0.88), rgba(78, 10, 28, 0.92));
+          color: #fff5f7;
+          font-weight: 700;
+          letter-spacing: 0.02em;
         }
 
         .avatar-float-shell {
           width: 100%;
-          filter: drop-shadow(0 18px 32px rgba(15, 23, 42, 0.25));
-          animation: avatarBob 5.6s ease-in-out infinite;
+          height: 100%;
+          padding: 18px 16px 10px;
+          border-radius: 26px;
+          border: 1px solid rgba(233, 186, 198, 0.22);
+          background:
+            radial-gradient(circle at 50% 18%, rgba(248, 218, 224, 0.15), transparent 24%),
+            radial-gradient(circle at 50% 100%, rgba(113, 12, 40, 0.3), transparent 42%),
+            linear-gradient(180deg, rgba(20, 13, 20, 0.98), rgba(9, 7, 14, 0.98));
+          box-shadow:
+            0 34px 60px rgba(6, 4, 10, 0.6),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06);
+          overflow: hidden;
+        }
+
+        .avatar-stage-canvas {
+          height: 100%;
+          min-height: min(82vh, 960px);
+          max-width: none !important;
+          filter: drop-shadow(0 32px 40px rgba(0, 0, 0, 0.35));
         }
 
         .avatar-float-hint {
-          font-size: 10px;
-          color: var(--text-muted);
-          background: rgba(15, 23, 42, 0.6);
-          padding: 4px 8px;
-          border-radius: 999px;
-          border: 1px solid rgba(148, 163, 184, 0.4);
-          backdrop-filter: blur(8px);
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
+          font-size: 11px;
+          color: #dec6cf;
+          background: rgba(18, 12, 20, 0.82);
+          padding: 8px 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(233, 186, 198, 0.2);
+          backdrop-filter: blur(10px);
+          letter-spacing: 0.02em;
         }
 
         .avatar-show-button {
@@ -6831,16 +8187,6 @@ export default function Home() {
           border: 1px solid rgba(148, 163, 184, 0.4);
           font-size: 11px;
           letter-spacing: 0.03em;
-        }
-
-        @keyframes avatarBob {
-          0%,
-          100% {
-            transform: translateY(0);
-          }
-          50% {
-            transform: translateY(-8px);
-          }
         }
 
         .side-panel {
@@ -6928,6 +8274,19 @@ export default function Home() {
         }
 
         @media (max-width: 1100px) {
+          .avatar-float {
+            position: relative;
+            top: auto;
+            right: auto;
+            bottom: auto;
+            width: min(100%, 480px);
+            margin: 76px auto 18px;
+          }
+
+          .avatar-stage-canvas {
+            min-height: 520px;
+          }
+
           html,
           body,
           #__next {
@@ -6978,6 +8337,9 @@ async function requestMicStream(constraints) {
   if (reason) throw new Error(reason);
   return navigator.mediaDevices.getUserMedia(constraints);
 }
+
+
+
 
 
 

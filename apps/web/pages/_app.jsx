@@ -1,3 +1,4 @@
+import Head from "next/head";
 import { useEffect } from "react";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.brown.css";
@@ -21,5 +22,14 @@ export default function App({ Component, pageProps }) {
   useEffect(() => {
     patchFetchCredentials();
   }, []);
-  return <Component {...pageProps} />;
+  return (
+    <>
+      <Head>
+        <link rel="icon" type="image/png" href="/assets/aika/portraits/nocturne-human/favicon.png" />
+        <link rel="preload" as="script" href="/vendor/draco/draco_decoder.js" />
+        <link rel="preload" as="fetch" href="/vendor/draco/draco_decoder.wasm" crossOrigin="anonymous" />
+      </Head>
+      <Component {...pageProps} />
+    </>
+  );
 }

@@ -2,7 +2,6 @@
   "name": "@myaika/web",
   "version": "0.0.1",
   "private": true,
-  "type": "module",
   "scripts": {
     "dev": "next dev -p 3000",
     "dev:wizard": "next dev -H 127.0.0.1 -p 3105",
@@ -11,6 +10,7 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@met4citizen/talkinghead": "^1.7.0",
     "@myaika/shared": "0.0.1",
     "chess.js": "^1.4.0",
     "chessground": "^9.2.1",
