@@ -148,6 +148,12 @@ import { createWatchItemFromTemplate, observeWatchItem, listWatchtowerItems, loa
 import { buildDigestByType, recordDigest } from "./src/aika/digestEngine.js";
 import { getBootSequence, completeBootSequence } from "./src/aika/boot.js";
 import { handleBootFlow, shouldHandleBootFlow } from "./src/aika/bootFlow.js";
+import { advanceAffectState, buildAffectPromptBlock, normalizeAffectState } from "./src/aika/affectModel.js";
+import { executeCoreCapabilityRequest } from "./src/aika/coreCapabilityRouter.js";
+import { executeExecutionCapabilityRequest } from "./src/aika/executionCapabilityRouter.js";
+import { executeMixedCapabilityRequest } from "./src/aika/mixedCapabilityRouter.js";
+import { executeActionFollowUpRequest } from "./src/aika/actionFollowUpRouter.js";
+import { appendCapabilityHintsToReply } from "./src/aika/capabilityReplyHints.js";
 import { ensureDigestTasks } from "./src/aika/scheduler.js";
 import { routeAikaCommand } from "./src/aika/commandRouter.js";
 import { combineChunks, transcribeAudio, splitAudioForTranscription } from "./recordings/processor.js";
@@ -716,8 +722,10 @@ const BUILT_IN_AVATAR_MODELS = [
   {
     id: "aika_nocturne_3d",
     label: "AIKA Nocturne (3D)",
-    modelUrl: fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-ultra-draco.glb"))
-      ? "/assets/aika/3d/external/lenore-runtime-ultra-draco.glb?v=20260416lenore-runtime-ultra-draco"
+    modelUrl: fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-conversation-draco.glb"))
+      ? "/assets/aika/3d/external/lenore-conversation-draco.glb?v=20260419lenore-conversation-phase5b"
+      : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-ultra-draco.glb"))
+      ? "/assets/aika/3d/external/lenore-runtime-ultra-draco.glb?v=20260417lenore-runtime-ultra-draco-phase1b"
       : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-lite-draco.glb"))
       ? "/assets/aika/3d/external/lenore-runtime-lite-draco.glb?v=20260416lenore-runtime-lite-draco"
       : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-runtime-draco.glb"))
@@ -735,6 +743,9 @@ const BUILT_IN_AVATAR_MODELS = [
       : fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore.glb"))
       ? "/assets/aika/3d/external/lenore.glb?v=20260415lenore-rigfix"
       : "/assets/aika/3d/bespoke/nocturne-bespoke.glb?v=20260415b",
+    reviewModelUrl: fs.existsSync(path.join(webPublicDir, "assets", "aika", "3d", "external", "lenore-review-draco.glb"))
+      ? "/assets/aika/3d/external/lenore-review-draco.glb?v=20260419lenore-review-phase5b"
+      : "",
     fallbackPng: "/assets/aika/stage/nocturne-human/base.png",
     thumbnail: "/assets/aika/stage/nocturne-human/base.png",
     source: "built_in",
@@ -1047,6 +1058,25 @@ function buildIntegrationsState(userId = "") {
     state.robinhood.connectedAt = robinhoodStored?.connectedAt || new Date().toISOString();
   }
   return state;
+}
+
+function buildReplyCapabilitySnapshot(userId = "") {
+  const integrations = buildIntegrationsState(userId);
+  const engine = getDefaultTtsEngine();
+  return {
+    voiceReady: Boolean(
+      (engine === "openai" && process.env.OPENAI_API_KEY) ||
+      (engine === "piper" && process.env.PIPER_PYTHON_BIN) ||
+      engine === "gptsovits"
+    ),
+    emailReady: Boolean(integrations.gmail?.connected || integrations.outlook?.connected || integrations.microsoft?.connected),
+    calendarReady: Boolean(integrations.google_docs?.connected || integrations.outlook?.connected || integrations.microsoft?.connected),
+    weatherReady: true,
+    searchReady: Boolean(process.env.OPENAI_API_KEY),
+    telegramReady: Boolean(integrations.telegram?.connected),
+    whatsappReady: Boolean(integrations.whatsapp?.connected),
+    smsReady: Boolean(integrations.messages?.connected)
+  };
 }
 
 function buildConnections(userId = "") {
@@ -1441,6 +1471,16 @@ function extractResponseText(response) {
     }
   }
   return parts.join("\n").trim();
+}
+
+function stripTrailingJsonBlock(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .replace(/\{[^{}]*"emotion"[^{}]*\}\s*$/i, "")
+    .trim();
 }
 
 function extractJsonArray(text) {
@@ -2249,11 +2289,26 @@ function parseWeatherLocation(userText, fallbackLocation = null) {
   return normalizeLocation(fallbackLocation || process.env.DEFAULT_WEATHER_LOCATION || "");
 }
 
+function parseWeatherLocationForOrchestration(userText, fallbackLocation = null) {
+  const text = String(userText || "").trim();
+  const explicitWeatherLocation = /\b(?:weather|forecast|temperature)\s+(?:in|at|for)\s+[a-z0-9 ,.'-]{2,}/i.test(text);
+  const embeddedSearch = /\b(?:google search|chatgpt search|search(?: the)? web for|look up|find online)\b/i.test(text);
+  if (embeddedSearch && !explicitWeatherLocation) {
+    return "";
+  }
+  const weatherClause = embeddedSearch
+    ? text.split(/\s+(?:and\s+)?(?=(?:google search|chatgpt search|search(?: the)? web for|look up|find online)\b)/i)[0]
+    : text;
+  return parseWeatherLocation(weatherClause, fallbackLocation);
+}
+
 function parseWebQuery(userText) {
   const text = String(userText || "").trim();
-  let m = text.match(/^(?:search(?: the)? web for|look up|find online)\s+(.+)$/i);
+  let m = text.match(/^(?:search(?: the)? web for|google search|chatgpt search|look up|find online)\s+(.+)$/i);
   if (m?.[1]) return m[1].trim();
   m = text.match(/^google\s+(.+)$/i);
+  if (m?.[1]) return m[1].trim();
+  m = text.match(/^chatgpt\s+search\s+(.+)$/i);
   if (m?.[1]) return m[1].trim();
   return null;
 }
@@ -3409,13 +3464,30 @@ app.post("/chat", async (req, res) => {
       }
     };
     const sendAssistantReply = (text, behavior = makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }), extra = {}) => {
+      const capabilityContext = appendCapabilityHintsToReply(
+        text,
+        extra,
+        buildReplyCapabilitySnapshot(getUserId(req))
+      );
+      const finalText = capabilityContext.text;
+      if (extra?.affect) {
+        try {
+          updateAssistantProfile(getUserId(req), {
+            preferences: {
+              aikaAffect: extra.affect
+            }
+          });
+        } catch (err) {
+          console.warn("AFFECT PROFILE UPDATE ERROR:", err?.message || err);
+        }
+      }
       addMemoryIndexed({
         role: "assistant",
-        content: text,
+        content: finalText,
         tags: "reply"
       });
-      recordThreadMessage("assistant", text);
-      return res.json({ text, behavior, ...extra });
+      recordThreadMessage("assistant", finalText);
+      return res.json({ text: finalText, behavior, capabilityHints: capabilityContext.capabilityHints, ...extra });
     };
 
     if (isStopPhrase(userText)) {
@@ -3541,6 +3613,120 @@ app.post("/chat", async (req, res) => {
       );
     }
 
+    const actionFollowUpOutcome = await executeActionFollowUpRequest({
+      text: userText,
+      context: {
+        channel,
+        senderId,
+        senderName,
+        chatId,
+        threadId: resolvedThreadId,
+        recordingId,
+        userId: getUserId(req),
+        sessionId: req.aikaSessionId,
+        workspaceId: getWorkspaceId(req),
+        timezone: profile?.timezone || "",
+        publicBaseUrl: (process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`)
+      },
+      deps: { toolExecutor: executor }
+    });
+    if (actionFollowUpOutcome?.handled) {
+      return sendAssistantReply(
+        actionFollowUpOutcome.reply,
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.4 }),
+        {
+          action: actionFollowUpOutcome.action || null,
+          actionResult: actionFollowUpOutcome.actionResult || null,
+          approval: actionFollowUpOutcome.approval || null,
+          followUp: actionFollowUpOutcome.data || null
+        }
+      );
+    }
+
+    const mixedCapabilityOutcome = await executeMixedCapabilityRequest({
+      text: userText,
+      context: {
+        channel,
+        senderId,
+        senderName,
+        chatId,
+        threadId: resolvedThreadId,
+        recordingId,
+        userId: getUserId(req),
+        sessionId: req.aikaSessionId,
+        workspaceId: getWorkspaceId(req),
+        timezone: profile?.timezone || "",
+        homeLocation: getStoredHomeLocation(db),
+        publicBaseUrl: (process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`)
+      },
+      deps: {
+        toolExecutor: executor,
+        handleEmail: ({ text, userId }) => handleEmailQuery({ text, userId }),
+        handleCalendar: ({ text, userId, timezone }) => handleCalendarQuery({ text, userId, timezone }),
+        handleWeather: async ({ text, homeLocation }) => {
+          const location = parseWeatherLocationForOrchestration(text, homeLocation);
+          if (!location) {
+            return {
+              text: "I can do weather once I know your location. Tell me your city once, then ask for weather again."
+            };
+          }
+          try {
+            const weather = await fetchCurrentWeather(location);
+            return { text: formatWeatherText(weather), data: weather };
+          } catch (err) {
+            return {
+              text: `I couldn't fetch weather for "${location}" right now (${err?.message || "weather_failed"}).`
+            };
+          }
+        },
+        searchWeb: async (query) => {
+          const result = await searchWeb(query, 5);
+          return { text: formatSearchResults(result), data: result };
+        }
+      }
+    });
+    if (mixedCapabilityOutcome?.handled) {
+      return sendAssistantReply(
+        mixedCapabilityOutcome.reply,
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.42 }),
+        {
+          orchestrated: true,
+          approvals: mixedCapabilityOutcome.approvals || [],
+          orchestration: mixedCapabilityOutcome.data || null,
+          capabilities: mixedCapabilityOutcome.data?.capabilities || []
+        }
+      );
+    }
+
+    const executionCapabilityOutcome = await executeExecutionCapabilityRequest({
+      text: userText,
+      context: {
+        channel,
+        senderId,
+        senderName,
+        chatId,
+        threadId: resolvedThreadId,
+        recordingId,
+        userId: getUserId(req),
+        sessionId: req.aikaSessionId,
+        workspaceId: getWorkspaceId(req),
+        timezone: profile?.timezone || "",
+        publicBaseUrl: (process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`)
+      },
+      deps: { toolExecutor: executor }
+    });
+    if (executionCapabilityOutcome?.handled) {
+      return sendAssistantReply(
+        executionCapabilityOutcome.reply,
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.42 }),
+        {
+          orchestrated: true,
+          approvals: executionCapabilityOutcome.approvals || [],
+          orchestration: executionCapabilityOutcome.data || null
+        }
+      );
+    }
+
     const aikaOutcome = await routeAikaCommand({
       text: userText,
       context: {
@@ -3567,6 +3753,48 @@ app.post("/chat", async (req, res) => {
       );
     }
 
+    const coreCapabilityOutcome = await executeCoreCapabilityRequest({
+      text: userText,
+      userId: getUserId(req),
+      timezone: profile?.timezone || "",
+      homeLocation: getStoredHomeLocation(db),
+      deps: {
+        handleEmail: ({ text, userId }) => handleEmailQuery({ text, userId }),
+        handleCalendar: ({ text, userId, timezone }) => handleCalendarQuery({ text, userId, timezone }),
+        handleWeather: async ({ text, homeLocation }) => {
+          const location = parseWeatherLocationForOrchestration(text, homeLocation);
+          if (!location) {
+            return {
+              text: "I can do weather once I know your location. Tell me your city once, then ask for weather again."
+            };
+          }
+          try {
+            const weather = await fetchCurrentWeather(location);
+            return { text: formatWeatherText(weather), data: weather };
+          } catch (err) {
+            return {
+              text: `I couldn't fetch weather for "${location}" right now (${err?.message || "weather_failed"}).`
+            };
+          }
+        },
+        searchWeb: async (query) => {
+          const result = await searchWeb(query, 5);
+          return { text: formatSearchResults(result), data: result };
+        }
+      }
+    });
+    if (coreCapabilityOutcome?.handled) {
+      return sendAssistantReply(
+        coreCapabilityOutcome.reply,
+        makeBehavior({ emotion: Emotion.NEUTRAL, intensity: 0.42 }),
+        {
+          orchestrated: true,
+          capabilities: coreCapabilityOutcome.capabilities,
+          orchestration: coreCapabilityOutcome.data || null
+        }
+      );
+    }
+
     const actionOutcome = await handleActionIntent({
       text: userText,
       context: {
@@ -3579,6 +3807,7 @@ app.post("/chat", async (req, res) => {
         userId: getUserId(req),
         sessionId: req.aikaSessionId,
         workspaceId: getWorkspaceId(req),
+        timezone: profile?.timezone || "",
         publicBaseUrl: (process.env.PUBLIC_SERVER_URL || process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`)
       },
       deps: { toolExecutor: executor }
@@ -3905,6 +4134,10 @@ app.post("/chat", async (req, res) => {
         content: String(m.content || "")
       }));
 
+    const previousAffect = normalizeAffectState(profile?.preferences?.aikaAffect);
+    const affectTurn = advanceAffectState(previousAffect, userText);
+    const affectPrompt = buildAffectPromptBlock(affectTurn.state);
+
     const systemPrompt = `
 You are ${persona.name}.
 
@@ -3926,11 +4159,8 @@ INSTRUCTIONS:
 - Avoid canned assistant phrasing, onboarding tone, or sterile customer-service language
 - Do not use emojis
 - Reply in English unless the user explicitly asks for another language
-- At the END, output a JSON object on its own line:
-  {
-    "emotion": one of ${Object.values(Emotion).join(", ")},
-    "intensity": number between 0 and 1
-  }
+
+${affectPrompt}
 `.trim();
 
     let rawText = "";
@@ -3979,59 +4209,14 @@ User: ${userText}`
       return res.status(502).json({ error: "empty_model_response", detail: JSON.stringify(summary) });
     }
 
-    const lines = rawText
-      .split("\n")
-      .map(l => l.trim())
-      .filter(Boolean);
-
-    let behavior = inferBehaviorFromText(userText);
-    let replyText = rawText;
-
-    // Attempt to parse JSON anywhere in the response (model doesn't always put it on its own line)
-    const jsonMatches = [...rawText.matchAll(/\{[^{}]*"emotion"[^{}]*\}/gi)];
-    if (jsonMatches.length) {
-      const lastMatch = jsonMatches[jsonMatches.length - 1][0];
-      try {
-        const parsed = JSON.parse(lastMatch);
-        behavior = makeBehavior({
-          emotion: parsed.emotion || behavior.emotion,
-          intensity:
-            typeof parsed.intensity === "number"
-              ? parsed.intensity
-              : behavior.intensity,
-          speaking: false
-        });
-        replyText = rawText
-          .replace(lastMatch, "")
-          .replace(/```json/gi, "")
-          .replace(/```/g, "")
-          .trim();
-      } catch {
-        // fall back silently
-      }
-    } else {
-      // Attempt to parse final-line JSON
-      const lastLine = lines[lines.length - 1];
-      if (lastLine && lastLine.startsWith("{") && lastLine.endsWith("}")) {
-        try {
-          const parsed = JSON.parse(lastLine);
-          behavior = makeBehavior({
-            emotion: parsed.emotion || behavior.emotion,
-            intensity:
-              typeof parsed.intensity === "number"
-                ? parsed.intensity
-                : behavior.intensity,
-            speaking: false
-          });
-          replyText = lines.slice(0, -1).join("\n");
-        } catch {
-          // fall back silently
-        }
-      }
-    }
+    const behavior = affectTurn.behavior;
+    const replyText = stripTrailingJsonBlock(rawText);
 
     // Save assistant reply
-    return sendAssistantReply(replyText, behavior);
+    return sendAssistantReply(replyText, behavior, {
+      affect: affectTurn.state,
+      affectMeta: affectTurn.meta
+    });
   } catch (err) {
     console.error("CHAT ERROR:", err);
     res.status(500).json({ error: "chat_failed" });

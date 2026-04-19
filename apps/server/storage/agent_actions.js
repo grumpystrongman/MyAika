@@ -43,6 +43,18 @@ export function listAgentActions(recordingId) {
   }));
 }
 
+export function listRecentAgentActionsForUser(requestedBy = "local", limit = 10) {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT * FROM agent_actions WHERE requested_by = ? ORDER BY created_at DESC LIMIT ?`
+  ).all(requestedBy, Number(limit || 10));
+  return rows.map(row => ({
+    ...row,
+    input_json: safeJsonParse(row.input_json, {}),
+    output_json: safeJsonParse(row.output_json, {})
+  }));
+}
+
 export function deleteAgentActionsForRecording(recordingId) {
   const db = getDb();
   db.prepare(`DELETE FROM agent_actions WHERE recording_id = ?`).run(recordingId);

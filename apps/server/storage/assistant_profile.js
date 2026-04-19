@@ -37,26 +37,33 @@ function defaultPreferences() {
     },
     identity: {
       workEmail: "",
-      personalEmail: ""
+      personalEmail: "",
+      phoneNumber: "",
+      smsNumber: "",
+      whatsappNumber: "",
+      telegramChatId: ""
     },
+    contacts: [],
     appearance: {
       theme: "aurora",
       appBackground: "",
       avatarBackground: "none",
       avatarModelId: "aika_nocturne_3d",
+      lenoreRuntimeStateVersion: 7,
       avatarLook: {
-        preset: "goth_hostess",
-        cameraFrame: "waist",
-        hairColor: "#09050a",
-        skinColor: "#f3d9e2",
-        lipColor: "#5b0c22",
-        outfitColor: "#12070f",
-        accentColor: "#5b1025",
-        eyeGlow: 0.7,
-        matte: 0.88,
+        preset: "formal_dark",
+        cameraFrame: "bust",
+        hairColor: "#0a080c",
+        skinColor: "#efd5dd",
+        lipColor: "#4d091d",
+        outfitColor: "#120b14",
+        accentColor: "#2c1627",
+        eyeGlow: 0.5,
+        matte: 0.94,
+        showHostessGown: false,
         showHair: true,
-        showJacket: false,
-        showWrap: false,
+        showJacket: true,
+        showWrap: true,
         showGloves: true,
         showTop: true,
         showBottoms: true,
@@ -66,15 +73,125 @@ function defaultPreferences() {
         showPiercing: true
       },
       avatarMotion: {
-        playClip: true,
-        clipName: "auto",
-        clipSpeed: 0.85,
-        clipWeight: 1,
-        idleHead: 0.35,
-        talkHead: 0.2,
-        bodySway: 0.2,
-        choreographyPreset: "auto"
-      }
+        playClip: false,
+        clipName: "runtime_pose",
+        clipSpeed: 0.75,
+        clipWeight: 0,
+        idleHead: 0.28,
+        talkHead: 0.16,
+        bodySway: 0.1,
+        choreographyPreset: "quiet_poise"
+      },
+      avatarLookSlots: [
+        {
+          id: "hostess",
+          name: "Hostess",
+          look: {
+            preset: "goth_hostess",
+            cameraFrame: "bust",
+            hairColor: "#09050a",
+            skinColor: "#f3d9e2",
+            lipColor: "#5b0c22",
+            outfitColor: "#12070f",
+            accentColor: "#5b1025",
+            eyeGlow: 0.7,
+            matte: 0.9,
+            showHostessGown: false,
+            showHair: true,
+            showJacket: true,
+            showWrap: false,
+            showGloves: true,
+            showTop: true,
+            showBottoms: true,
+            showStockings: true,
+            showBoots: true,
+            showChoker: true,
+            showPiercing: true
+          },
+          motion: {
+            playClip: false,
+            clipName: "runtime_pose",
+            clipSpeed: 0.75,
+            clipWeight: 0,
+            idleHead: 0.28,
+            talkHead: 0.16,
+            bodySway: 0.1,
+            choreographyPreset: "quiet_poise"
+          }
+        },
+        {
+          id: "entrance",
+          name: "Entrance",
+          look: {
+            preset: "stage_entrance",
+            cameraFrame: "bust",
+            hairColor: "#070408",
+            skinColor: "#f2d7e0",
+            lipColor: "#581022",
+            outfitColor: "#11070f",
+            accentColor: "#6f1432",
+            eyeGlow: 0.74,
+            matte: 0.9,
+            showHostessGown: false,
+            showHair: true,
+            showJacket: true,
+            showWrap: false,
+            showGloves: true,
+            showTop: true,
+            showBottoms: true,
+            showStockings: true,
+            showBoots: true,
+            showChoker: true,
+            showPiercing: true
+          },
+          motion: {
+            playClip: false,
+            clipName: "runtime_pose",
+            clipSpeed: 0.75,
+            clipWeight: 0,
+            idleHead: 0.24,
+            talkHead: 0.14,
+            bodySway: 0.08,
+            choreographyPreset: "command_presence"
+          }
+        },
+        {
+          id: "formal",
+          name: "Formal",
+          look: {
+            preset: "formal_dark",
+            cameraFrame: "bust",
+            hairColor: "#0a080c",
+            skinColor: "#efd5dd",
+            lipColor: "#4d091d",
+            outfitColor: "#120b14",
+            accentColor: "#2c1627",
+            eyeGlow: 0.5,
+            matte: 0.94,
+            showHostessGown: false,
+            showHair: true,
+            showJacket: true,
+            showWrap: true,
+            showGloves: true,
+            showTop: true,
+            showBottoms: true,
+            showStockings: true,
+            showBoots: true,
+            showChoker: true,
+            showPiercing: true
+          },
+          motion: {
+            playClip: false,
+            clipName: "runtime_pose",
+            clipSpeed: 0.75,
+            clipWeight: 0,
+            idleHead: 0.22,
+            talkHead: 0.14,
+            bodySway: 0.08,
+            choreographyPreset: "quiet_poise"
+          }
+        }
+      ]
     },
     audio: {
       sttSilenceMs: 2200,
@@ -83,6 +200,31 @@ function defaultPreferences() {
     voice: {
       promptText: "",
       settings: defaultVoiceSettings("")
+    },
+    aikaAffect: {
+      version: 1,
+      turnCount: 0,
+      rapport: 0.44,
+      user: {
+        valence: 0,
+        arousal: 0.34,
+        distress: 0,
+        frustration: 0,
+        warmth: 0.18,
+        trust: 0.44,
+        playfulness: 0.1,
+        taskFocus: 0.24,
+        confidence: 0.4
+      },
+      assistant: {
+        empathyMode: "steady",
+        responseMode: "balanced",
+        emotion: "neutral",
+        intensity: 0.38
+      },
+      labels: [],
+      summary: "steady neutral",
+      updatedAt: null
     },
     rag: {
       defaultModel: DEFAULT_RAG_MODEL,
@@ -200,21 +342,88 @@ function mapRow(row, userId) {
   }
   const storedAvatarLook = preferences?.appearance?.avatarLook || {};
   const storedPreset = String(storedAvatarLook.preset || "").trim().toLowerCase();
-  const looksLikeOldLenorePreset =
-    (storedPreset === "goth_hostess" || storedPreset === "velvet_reveal") &&
-    storedAvatarLook.showJacket === false &&
-    storedAvatarLook.showWrap === false &&
-    storedAvatarLook.showGloves === false;
-  if (looksLikeOldLenorePreset) {
+  const storedLenoreRuntimeStateVersion = Number(preferences?.appearance?.lenoreRuntimeStateVersion || 0);
+  const lenoreLookNeedsStabilization =
+    ["goth_hostess", "velvet_reveal", "after_hours", "nude"].includes(storedPreset) ||
+    storedAvatarLook.showJacket === false ||
+    storedAvatarLook.showTop === false ||
+    storedAvatarLook.showBottoms === false;
+  if (lenoreLookNeedsStabilization) {
     preferences = mergePreferences(preferences, {
       appearance: {
         avatarLook: {
+          preset: "formal_dark",
+          cameraFrame: "bust",
+          showHostessGown: false,
+          showJacket: true,
           showWrap: true,
-          showGloves: storedPreset === "goth_hostess" ? true : false
+          showGloves: true,
+          showTop: true,
+          showBottoms: true
+        },
+        avatarMotion: {
+          playClip: false,
+          clipName: "runtime_pose",
+          clipWeight: 0,
+          choreographyPreset: "quiet_poise"
         }
       }
     });
   }
+  if (storedLenoreRuntimeStateVersion < 7) {
+    preferences = mergePreferences(preferences, {
+      appearance: {
+        lenoreRuntimeStateVersion: 7,
+        avatarLook: {
+          preset: "formal_dark",
+          cameraFrame: "bust",
+          hairColor: "#0a080c",
+          skinColor: "#efd5dd",
+          lipColor: "#4d091d",
+          outfitColor: "#120b14",
+          accentColor: "#2c1627",
+          eyeGlow: 0.5,
+          matte: 0.94,
+          showHostessGown: false,
+          showHair: true,
+          showJacket: true,
+          showWrap: true,
+          showGloves: true,
+          showTop: true,
+          showBottoms: true,
+          showStockings: true,
+          showBoots: true,
+          showChoker: true,
+          showPiercing: true
+        },
+        avatarMotion: {
+          playClip: false,
+          clipName: "runtime_pose",
+          clipSpeed: 0.75,
+          clipWeight: 0,
+          idleHead: 0.22,
+          talkHead: 0.14,
+          bodySway: 0.08,
+          choreographyPreset: "quiet_poise",
+          empathyMode: "steady",
+          responseClass: "neutral",
+          motionIntensity: 0.45,
+          idleState: "paused"
+        }
+      }
+    });
+  }
+  preferences = mergePreferences(preferences, {
+    appearance: {
+      avatarMotion: {
+        playClip: false,
+        clipName: "runtime_pose",
+        clipWeight: 0,
+        choreographyPreset: "quiet_poise"
+      },
+      avatarLookSlots: defaults.preferences.appearance.avatarLookSlots
+    }
+  });
   const storedVoiceName = String(preferences?.voice?.settings?.voice?.name || "").trim().toLowerCase();
   const preferredVoiceNames = new Set(["marin", "shimmer", "cedar"]);
   if (process.env.OPENAI_API_KEY && (!preferredVoiceNames.has(storedVoiceName) || storedVoiceName === "coral")) {

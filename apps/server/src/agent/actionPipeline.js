@@ -1,7 +1,7 @@
 ﻿import { routeIntent, buildMissingPrompt } from "./intentRouter.js";
 import { executeActionRequest } from "./actionExecutor.js";
 import { createAgentAction } from "../../storage/agent_actions.js";
-import { getAssistantProfile } from "../../storage/assistant_profile.js";
+import { resolveEmailTarget, resolveMessagingTarget } from "./contactResolution.js";
 
 function summarizeResult(actionType, result) {
   if (!result) return "";
@@ -14,6 +14,16 @@ function summarizeResult(actionType, result) {
   }
   if (actionType.startsWith("messaging.")) {
     return "Message queued.";
+  }
+  if (actionType === "calendar.proposeHold") {
+    const summary = result?.summary || result?.hold?.title || "calendar hold";
+    if (result?.status === "created" && result?.htmlLink) {
+      return `Calendar hold created for ${summary}. ${result.htmlLink}`;
+    }
+    if (result?.status === "draft") {
+      return `Draft calendar hold created for ${summary}.`;
+    }
+    return `Calendar hold prepared for ${summary}.`;
   }
   if (actionType === "email.send") {
     const recipients = Array.isArray(result?.to) ? result.to.join(", ") : "";
@@ -84,6 +94,7 @@ function defaultReplyForAction(actionType) {
   if (actionType === "record_meeting.resume") return "Resuming the meeting recording.";
   if (actionType === "meeting.resummarize") return "Refreshing the meeting summary now.";
   if (actionType === "email.send") return "Sending the email now.";
+  if (actionType === "calendar.proposeHold") return "Creating the calendar hold now.";
   return "Working on it now.";
 }
 
@@ -100,16 +111,7 @@ function buildErrorReply(err, retryable) {
 }
 
 function resolveEmailAlias(alias, userId) {
-  const normalized = String(alias || "").trim().toLowerCase();
-  if (!normalized) return "";
-  const profile = getAssistantProfile(userId || "local");
-  const identity = profile?.preferences?.identity || {};
-  const workEmail = String(identity.workEmail || "").trim();
-  const personalEmail = String(identity.personalEmail || "").trim();
-  if (normalized === "work") return workEmail;
-  if (normalized === "personal") return personalEmail;
-  if (normalized === "self") return workEmail || personalEmail;
-  return "";
+  return resolveEmailTarget({ alias, userId }).value || "";
 }
 
 export async function handleActionIntent({ text, context = {}, deps = {} } = {}) {
@@ -126,14 +128,19 @@ export async function handleActionIntent({ text, context = {}, deps = {} } = {})
     action.params = { ...(action.params || {}), chatId: String(context.chatId) };
     missingSet.delete("chatId");
   }
+  if (action.type === "calendar.proposeHold" && !action.params?.timezone && context?.timezone) {
+    action.params = { ...(action.params || {}), timezone: String(context.timezone) };
+    missingSet.delete("timezone");
+  }
   if (action.type?.startsWith("meeting.") && !action.params?.recordingId && context?.recordingId) {
     action.params = { ...(action.params || {}), recordingId: String(context.recordingId) };
     missingSet.delete("recordingId");
   }
   if (action.type === "email.send") {
     const alias = action.params?.toAlias;
-    if (alias && (!Array.isArray(action.params?.sendTo) || action.params.sendTo.length === 0)) {
-      const resolved = resolveEmailAlias(alias, requestedBy);
+    const recipientLabel = action.params?.recipientLabel || "";
+    if ((alias || recipientLabel) && (!Array.isArray(action.params?.sendTo) || action.params.sendTo.length === 0)) {
+      const resolved = resolveEmailTarget({ alias, label: recipientLabel, userId: requestedBy }).value || resolveEmailAlias(alias, requestedBy);
       if (resolved) {
         action.params = {
           ...(action.params || {}),
@@ -145,12 +152,51 @@ export async function handleActionIntent({ text, context = {}, deps = {} } = {})
         missingSet.add("to");
         missingReplyOverride = alias === "work"
           ? "I don't have your work email yet. Tell me the address or add it in Settings -> Connections -> Email identity."
-          : "I don't have your email address yet. Tell me the address or add it in Settings -> Connections -> Email identity.";
+          : recipientLabel
+            ? `I don't have an email target saved for ${recipientLabel}. Tell me the address or add that contact to your assistant profile.`
+            : "I don't have your email address yet. Tell me the address or add it in Settings -> Connections -> Email identity.";
       }
     }
     if (action.params?.toAlias) {
       delete action.params.toAlias;
     }
+    if (action.params?.recipientLabel) {
+      delete action.params.recipientLabel;
+    }
+  }
+  if (["messaging.telegramSend", "messaging.whatsapp.send", "messaging.sms.send"].includes(action.type)) {
+    const platform = action.type === "messaging.telegramSend"
+      ? "telegram"
+      : action.type === "messaging.whatsapp.send"
+        ? "whatsapp"
+        : "sms";
+    const destinationKey = platform === "telegram" ? "chatId" : "to";
+    const destination = String(action.params?.[destinationKey] || "").trim();
+    const alias = String(action.params?.toAlias || "").trim();
+    const recipientLabel = String(action.params?.recipientLabel || "").trim();
+    if (!destination && (alias || recipientLabel)) {
+      const resolved = resolveMessagingTarget({
+        userId: requestedBy,
+        platform,
+        alias,
+        label: recipientLabel,
+        context
+      });
+      if (resolved?.ok && resolved.value) {
+        action.params = {
+          ...(action.params || {}),
+          [destinationKey]: resolved.value
+        };
+        missingSet.delete(destinationKey);
+      } else {
+        missingSet.add(destinationKey);
+        const noun = platform === "telegram" ? "Telegram chat ID" : platform === "whatsapp" ? "WhatsApp number" : "SMS number";
+        const label = recipientLabel || alias || "that contact";
+        missingReplyOverride = `I don't have a saved ${noun.toLowerCase()} for ${label}. Tell me the ${noun.toLowerCase()} or add that contact to your assistant profile.`;
+      }
+    }
+    if (action.params?.toAlias) delete action.params.toAlias;
+    if (action.params?.recipientLabel) delete action.params.recipientLabel;
   }
   const missing = Array.from(missingSet);
   action.missing = missing;

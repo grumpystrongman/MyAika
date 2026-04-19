@@ -1,7 +1,19 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-const repoRoot = path.resolve(process.cwd(), "..", "..");
+function isTestEnv() {
+  return process.env.NODE_ENV === "test" || process.argv.includes("--test") || process.env.AIKA_TEST_MODE === "1";
+}
+
+function resolveRepoRoot() {
+  const override = process.env.AIKA_REPO_ROOT || "";
+  if (override) return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
+  if (isTestEnv()) return path.join(os.tmpdir(), "aika_test_repo");
+  return path.resolve(process.cwd(), "..", "..");
+}
+
+const repoRoot = resolveRepoRoot();
 const dataDir = path.join(repoRoot, "data");
 const storePath = path.join(dataDir, "agent_action_runs.json");
 

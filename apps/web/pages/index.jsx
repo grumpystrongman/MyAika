@@ -11,6 +11,15 @@ import FirefliesPanel from "../src/components/FirefliesPanel";
 import SafetyPanel from "../src/components/SafetyPanel";
 import TradingPanel from "../src/components/TradingPanel";
 import GuidePanel from "../src/components/GuidePanel";
+import {
+  buildAssistantShellCapabilities,
+  summarizePendingApprovals
+} from "../src/assistantShellStatus";
+import {
+  formatApprovalStatusLabel,
+  summarizeApprovalExecution,
+  summarizeAssistantOrchestration
+} from "../src/assistantOrchestration";
 
 function isLocalhostUrl(value) {
   if (!value) return false;
@@ -50,18 +59,19 @@ const LEGACY_AVATAR_IDS = new Set([
 ]);
 
 const LENORE_LOOK_DEFAULTS = {
-  preset: "goth_hostess",
-  cameraFrame: "waist",
-  hairColor: "#09050a",
-  skinColor: "#f3d9e2",
-  lipColor: "#5b0c22",
-  outfitColor: "#12070f",
-  accentColor: "#5b1025",
-  eyeGlow: 0.7,
-  matte: 0.88,
+  preset: "formal_dark",
+  cameraFrame: "bust",
+  hairColor: "#0a080c",
+  skinColor: "#efd5dd",
+  lipColor: "#4d091d",
+  outfitColor: "#120b14",
+  accentColor: "#2c1627",
+  eyeGlow: 0.5,
+  matte: 0.94,
+  showHostessGown: false,
   showHair: true,
-  showJacket: false,
-  showWrap: false,
+  showJacket: true,
+  showWrap: true,
   showGloves: true,
   showTop: true,
   showBottoms: true,
@@ -72,24 +82,27 @@ const LENORE_LOOK_DEFAULTS = {
 };
 
 const LENORE_MOTION_DEFAULTS = {
-  playClip: true,
-  clipName: "auto",
-  clipSpeed: 0.85,
-  clipWeight: 1,
-  idleHead: 0.35,
-  talkHead: 0.2,
-  bodySway: 0.2,
-  choreographyPreset: "auto",
+  playClip: false,
+  clipName: "runtime_pose",
+  clipSpeed: 0.75,
+  clipWeight: 0,
+  idleHead: 0.28,
+  talkHead: 0.16,
+  bodySway: 0.1,
+  choreographyPreset: "quiet_poise",
+  empathyMode: "steady",
   responseClass: "neutral",
-  motionIntensity: 0.45
+  motionIntensity: 0.45,
+  idleState: "paused"
 };
 
 const LENORE_LOOK_PRESETS = {
   goth_hostess: {
     preset: "goth_hostess",
-    cameraFrame: "waist",
+    cameraFrame: "bust",
+    showHostessGown: false,
     showHair: true,
-    showJacket: false,
+    showJacket: true,
     showWrap: false,
     showGloves: true,
     showTop: true,
@@ -108,7 +121,8 @@ const LENORE_LOOK_PRESETS = {
   },
   stage_entrance: {
     preset: "stage_entrance",
-    cameraFrame: "waist",
+    cameraFrame: "bust",
+    showHostessGown: false,
     showHair: true,
     showJacket: true,
     showWrap: false,
@@ -130,6 +144,7 @@ const LENORE_LOOK_PRESETS = {
   velvet_reveal: {
     preset: "velvet_reveal",
     cameraFrame: "waist",
+    showHostessGown: false,
     showHair: true,
     showJacket: false,
     showWrap: false,
@@ -151,6 +166,7 @@ const LENORE_LOOK_PRESETS = {
   after_hours: {
     preset: "after_hours",
     cameraFrame: "waist",
+    showHostessGown: false,
     showHair: true,
     showJacket: false,
     showWrap: false,
@@ -171,7 +187,8 @@ const LENORE_LOOK_PRESETS = {
   },
   formal_dark: {
     preset: "formal_dark",
-    cameraFrame: "waist",
+    cameraFrame: "bust",
+    showHostessGown: false,
     showHair: true,
     showJacket: true,
     showWrap: true,
@@ -193,6 +210,7 @@ const LENORE_LOOK_PRESETS = {
   nude: {
     preset: "nude",
     cameraFrame: "full",
+    showHostessGown: false,
     showHair: true,
     showJacket: false,
     showWrap: false,
@@ -213,13 +231,19 @@ const LENORE_LOOK_PRESETS = {
   }
 };
 
+const LENORE_SUPPORTED_PRESETS = new Set(["formal_dark", "stage_entrance", "goth_hostess"]);
+const LENORE_UNSUPPORTED_PRESET_REASON = "Disabled in the stable conversation runtime because the purchased asset exposes a broken left upper-arm seam when outerwear is removed.";
+const LENORE_REQUIRED_LOOK_KEYS = new Set(["showJacket", "showTop", "showBottoms"]);
+const LENORE_UNSUPPORTED_MOTION_REASON = "Disabled in the stable conversation runtime because the imported source-body motion is not production-safe.";
+const LENORE_UNSUPPORTED_FRAME_REASON = "Disabled in the stable conversation runtime because the purchased asset is only production-safe in portrait and bust framing.";
+
 const LENORE_PRESET_OPTIONS = [
-  { value: "goth_hostess", label: "Goth Hostess", description: "Corseted hostess look with gloves, stockings, boots, and spikes." },
+  { value: "goth_hostess", label: "Goth Hostess", description: "Corseted hostess silhouette with jacket, gloves, stockings, boots, and spikes." },
   { value: "stage_entrance", label: "Stage Entrance", description: "Outerwear silhouette with jacket, gloves, and full dark stage styling." },
-  { value: "velvet_reveal", label: "Velvet Reveal", description: "Lingerie-forward reveal with stockings, boots, and jewelry." },
-  { value: "after_hours", label: "After Hours", description: "Minimal late-night look using only the core lingerie set and jewelry." },
+  { value: "velvet_reveal", label: "Velvet Reveal", description: "Lingerie-forward reveal with stockings, boots, and jewelry.", disabled: true, disabledReason: LENORE_UNSUPPORTED_PRESET_REASON },
+  { value: "after_hours", label: "After Hours", description: "Minimal late-night look using only the core lingerie set and jewelry.", disabled: true, disabledReason: LENORE_UNSUPPORTED_PRESET_REASON },
   { value: "formal_dark", label: "Formal Dark", description: "Fully dressed dark look with jacket, wrap, gloves, and boots." },
-  { value: "nude", label: "Nude", description: "All removable clothing hidden." }
+  { value: "nude", label: "Nude", description: "All removable clothing hidden.", disabled: true, disabledReason: LENORE_UNSUPPORTED_PRESET_REASON }
 ];
 
 const LENORE_WARDROBE_ITEMS = [
@@ -236,33 +260,35 @@ const LENORE_WARDROBE_ITEMS = [
 ];
 
 const LENORE_MOTION_OPTIONS = [
-  { value: "auto", label: "Auto", description: "Lets AIKA pick pose or embedded motion based on tone and response." },
+  { value: "auto", label: "Auto", description: "Stable authored hostess states for paused, listening, thinking, and speaking." },
   { value: "runtime_pose", label: "Hostess pose", description: "Composed hostess framing with restrained movement." },
-  { value: "source_motion", label: "Source motion", description: "Uses Lenore's imported embedded body-performance clip." }
+  { value: "source_motion", label: "Source motion", description: "Uses Lenore's imported embedded body-performance clip.", disabled: true, disabledReason: LENORE_UNSUPPORTED_MOTION_REASON }
 ];
 
 const LENORE_FRAME_OPTIONS = [
   { value: "portrait", label: "Portrait", description: "Face and shoulders for close lip-sync review." },
   { value: "bust", label: "Bust", description: "Head to upper torso with more costume detail." },
-  { value: "waist", label: "Waist", description: "Default hostess framing for conversation." },
-  { value: "three_quarter", label: "Three-quarter", description: "Shows most of the body without full-body distance." },
-  { value: "full", label: "Full body", description: "Full-body review framing." }
+  { value: "waist", label: "Waist", description: "Default hostess framing for conversation.", disabled: true, disabledReason: LENORE_UNSUPPORTED_FRAME_REASON },
+  { value: "three_quarter", label: "Three-quarter", description: "Shows most of the body without full-body distance.", disabled: true, disabledReason: LENORE_UNSUPPORTED_FRAME_REASON },
+  { value: "full", label: "Full body", description: "Full-body review framing.", disabled: true, disabledReason: LENORE_UNSUPPORTED_FRAME_REASON }
 ];
 
 const LENORE_CHOREOGRAPHY_OPTIONS = [
   { value: "auto", label: "Auto", description: "Lets response tone bias the hostess movement automatically." },
-  { value: "velvet_tease", label: "Velvet Tease", description: "More flirtatious shoulder and head play over the active motion." },
+  { value: "velvet_tease", label: "Velvet Tease", description: "More flirtatious shoulder and head play over the active motion.", disabled: true, disabledReason: LENORE_UNSUPPORTED_MOTION_REASON },
   { value: "command_presence", label: "Command Presence", description: "Composed, restrained authority with firmer posture." },
   { value: "soft_reassure", label: "Soft Reassure", description: "Gentler supportive posture with softer arm phrasing." },
   { value: "quiet_poise", label: "Quiet Poise", description: "Minimal poised motion for calm presence." },
-  { value: "source_driven", label: "Source Driven", description: "Favor the imported source-body performance whenever possible." }
+  { value: "source_driven", label: "Source Driven", description: "Favor the imported source-body performance whenever possible.", disabled: true, disabledReason: LENORE_UNSUPPORTED_MOTION_REASON }
 ];
 
+const LENORE_RUNTIME_STATE_VERSION = 7;
+
 const LENORE_LOOK_SLOT_DEFAULTS = [
-  { id: "hostess", name: "Hostess", look: { ...LENORE_LOOK_PRESETS.goth_hostess }, motion: { ...LENORE_MOTION_DEFAULTS, choreographyPreset: "auto" } },
-  { id: "entrance", name: "Entrance", look: { ...LENORE_LOOK_PRESETS.stage_entrance }, motion: { ...LENORE_MOTION_DEFAULTS, clipName: "runtime_pose", choreographyPreset: "command_presence" } },
-  { id: "reveal", name: "Reveal", look: { ...LENORE_LOOK_PRESETS.velvet_reveal }, motion: { ...LENORE_MOTION_DEFAULTS, clipName: "source_motion", clipSpeed: 0.92, choreographyPreset: "velvet_tease" } },
-  { id: "formal", name: "Formal", look: { ...LENORE_LOOK_PRESETS.formal_dark }, motion: { ...LENORE_MOTION_DEFAULTS, clipName: "runtime_pose", bodySway: 0.14, choreographyPreset: "quiet_poise" } }
+  { id: "hostess", name: "Hostess", look: { ...LENORE_LOOK_PRESETS.goth_hostess }, motion: { ...LENORE_MOTION_DEFAULTS, choreographyPreset: "quiet_poise" } },
+  { id: "entrance", name: "Entrance", look: { ...LENORE_LOOK_PRESETS.stage_entrance }, motion: { ...LENORE_MOTION_DEFAULTS, choreographyPreset: "command_presence" } },
+  { id: "formal", name: "Formal", look: { ...LENORE_LOOK_PRESETS.formal_dark }, motion: { ...LENORE_MOTION_DEFAULTS, choreographyPreset: "quiet_poise" } },
+  { id: "listen", name: "Listening", look: { ...LENORE_LOOK_PRESETS.formal_dark, cameraFrame: "bust" }, motion: { ...LENORE_MOTION_DEFAULTS, choreographyPreset: "soft_reassure", idleHead: 0.32, talkHead: 0.14 } }
 ];
 
 const THINKING_CUES = [
@@ -713,9 +739,11 @@ function classifyLenoreResponse(text, behavior) {
   return "neutral";
 }
 
-function deriveLenoreRuntimeMotion(baseMotion, behavior, assistantText, ttsStatus, micState, micStatus, conversationEnabled) {
-  const next = { ...baseMotion };
-  const responseClass = classifyLenoreResponse(assistantText, behavior);
+function deriveLenoreRuntimeMotion(baseMotion, behavior, assistantText, ttsStatus, micState, micStatus, conversationEnabled, affectState) {
+  const next = sanitizeLenoreMotion({ ...baseMotion });
+  let responseClass = classifyLenoreResponse(assistantText, behavior);
+  const affectResponseMode = String(affectState?.assistant?.responseMode || "").toLowerCase();
+  const affectEmpathyMode = String(affectState?.assistant?.empathyMode || "").toLowerCase();
   const emotion = String(behavior?.emotion || "").toLowerCase();
   const choreographyPreset = String(baseMotion?.choreographyPreset || "auto").toLowerCase();
   const intensity = Number.isFinite(behavior?.intensity) ? behavior.intensity : 0.35;
@@ -723,18 +751,13 @@ function deriveLenoreRuntimeMotion(baseMotion, behavior, assistantText, ttsStatu
   const listening = micState === "listening";
 
   next.responseClass = responseClass;
-  next.choreographyPreset = choreographyPreset;
+  next.empathyMode = affectEmpathyMode || "steady";
+  next.choreographyPreset = ["command_presence", "soft_reassure", "quiet_poise"].includes(choreographyPreset) ? choreographyPreset : "quiet_poise";
   next.motionIntensity = Number((0.35 + intensity * 0.85).toFixed(2));
   next.idleState = inferLenoreIdleState({ ttsStatus, micState, micStatus, conversationEnabled });
-  if (!speaking && ["paused", "ready", "listening", "thinking"].includes(next.idleState)) {
-    next.clipName = "runtime_pose";
-  }
-
-  if ((responseClass === "teasing" || responseClass === "playful" || responseClass === "surprised") && next.clipName === "auto") {
-    next.clipName = "source_motion";
-  } else if ((responseClass === "directive" || responseClass === "executive" || responseClass === "reflective") && next.clipName === "auto") {
-    next.clipName = "runtime_pose";
-  }
+  next.clipName = "runtime_pose";
+  next.playClip = false;
+  next.clipWeight = 0;
 
   if (responseClass === "teasing") {
     next.clipSpeed = Math.min(1.05, baseMotion.clipSpeed + 0.08);
@@ -765,35 +788,22 @@ function deriveLenoreRuntimeMotion(baseMotion, behavior, assistantText, ttsStatu
     next.bodySway = Math.min(0.32, baseMotion.bodySway + 0.02);
   }
 
-  if (choreographyPreset === "velvet_tease") {
-    if (next.clipName === "auto") next.clipName = "source_motion";
-    next.clipSpeed = Math.min(1.08, next.clipSpeed + 0.06);
-    next.idleHead = Math.min(0.72, next.idleHead + 0.08);
-    next.talkHead = Math.min(0.76, next.talkHead + 0.14);
-    next.bodySway = Math.min(0.58, next.bodySway + 0.12);
-  } else if (choreographyPreset === "command_presence") {
-    if (next.clipName === "auto") next.clipName = "runtime_pose";
+  if (choreographyPreset === "command_presence") {
     next.clipSpeed = Math.max(0.7, next.clipSpeed - 0.06);
     next.idleHead = Math.max(0.16, next.idleHead - 0.1);
     next.talkHead = Math.max(0.16, next.talkHead - 0.04);
     next.bodySway = Math.max(0.06, next.bodySway - 0.1);
   } else if (choreographyPreset === "soft_reassure") {
-    if (next.clipName === "auto") next.clipName = "runtime_pose";
     next.clipSpeed = Math.max(0.72, next.clipSpeed - 0.04);
     next.idleHead = Math.min(0.68, next.idleHead + 0.08);
     next.talkHead = Math.min(0.58, next.talkHead + 0.04);
     next.bodySway = Math.max(0.08, next.bodySway - 0.02);
   } else if (choreographyPreset === "quiet_poise") {
-    if (next.clipName === "auto") next.clipName = "runtime_pose";
     next.clipSpeed = Math.max(0.66, next.clipSpeed - 0.08);
     next.clipWeight = Math.max(0.72, next.clipWeight - 0.08);
     next.idleHead = Math.max(0.14, next.idleHead - 0.12);
     next.talkHead = Math.max(0.12, next.talkHead - 0.08);
     next.bodySway = Math.max(0.04, next.bodySway - 0.12);
-  } else if (choreographyPreset === "source_driven") {
-    if (next.clipName === "auto") next.clipName = "source_motion";
-    next.clipSpeed = Math.min(1.12, next.clipSpeed + 0.04);
-    next.bodySway = Math.min(0.62, next.bodySway + 0.08);
   }
 
   if (listening) {
@@ -807,7 +817,77 @@ function deriveLenoreRuntimeMotion(baseMotion, behavior, assistantText, ttsStatu
     next.bodySway = Math.max(0.08, next.bodySway - 0.06);
   }
 
+  if (["reassure", "affirm"].includes(affectResponseMode)) {
+    responseClass = "comfort";
+    next.responseClass = responseClass;
+    next.choreographyPreset = "soft_reassure";
+    next.idleHead = Math.min(0.62, Math.max(next.idleHead, 0.24));
+    next.bodySway = Math.max(0.08, Math.min(next.bodySway, 0.18));
+  } else if (["plan", "clarify"].includes(affectResponseMode)) {
+    responseClass = "executive";
+    next.responseClass = responseClass;
+    next.choreographyPreset = "command_presence";
+    next.bodySway = Math.max(0.06, Math.min(next.bodySway, 0.14));
+  } else if (affectResponseMode === "reflect") {
+    responseClass = "reflective";
+    next.responseClass = responseClass;
+  } else if (affectResponseMode === "banter") {
+    responseClass = "teasing";
+    next.responseClass = responseClass;
+  }
+
   return next;
+}
+
+function sanitizeLenoreLook(input = {}) {
+  const next = {
+    ...LENORE_LOOK_DEFAULTS,
+    ...(input || {})
+  };
+  const preset = String(next.preset || LENORE_LOOK_DEFAULTS.preset).trim().toLowerCase();
+  next.preset = LENORE_SUPPORTED_PRESETS.has(preset) ? preset : LENORE_LOOK_DEFAULTS.preset;
+  next.cameraFrame = ["portrait", "bust"].includes(String(next.cameraFrame || "").toLowerCase())
+    ? String(next.cameraFrame).toLowerCase()
+    : LENORE_LOOK_DEFAULTS.cameraFrame;
+  next.showHostessGown = false;
+  next.showJacket = true;
+  next.showWrap = next.showWrap !== false;
+  next.showTop = true;
+  next.showBottoms = true;
+  next.showGloves = next.showGloves !== false;
+  next.showStockings = next.showStockings !== false;
+  next.showBoots = next.showBoots !== false;
+  next.eyeGlow = Math.max(0, Math.min(1, Number(next.eyeGlow ?? LENORE_LOOK_DEFAULTS.eyeGlow)));
+  next.matte = Math.max(0.4, Math.min(1, Number(next.matte ?? LENORE_LOOK_DEFAULTS.matte)));
+  return next;
+}
+
+function sanitizeLenoreMotion(input = {}) {
+  const next = {
+    ...LENORE_MOTION_DEFAULTS,
+    ...(input || {})
+  };
+  next.playClip = false;
+  next.clipName = "runtime_pose";
+  next.clipSpeed = Math.max(0.65, Math.min(1, Number(next.clipSpeed ?? LENORE_MOTION_DEFAULTS.clipSpeed)));
+  next.clipWeight = 0;
+  next.idleHead = Math.max(0.1, Math.min(0.5, Number(next.idleHead ?? LENORE_MOTION_DEFAULTS.idleHead)));
+  next.talkHead = Math.max(0.1, Math.min(0.42, Number(next.talkHead ?? LENORE_MOTION_DEFAULTS.talkHead)));
+  next.bodySway = Math.max(0.04, Math.min(0.22, Number(next.bodySway ?? LENORE_MOTION_DEFAULTS.bodySway)));
+  next.empathyMode = String(next.empathyMode || LENORE_MOTION_DEFAULTS.empathyMode || "steady").trim().toLowerCase() || (LENORE_MOTION_DEFAULTS.empathyMode || "steady");
+  const choreographyPreset = String(next.choreographyPreset || LENORE_MOTION_DEFAULTS.choreographyPreset).trim().toLowerCase();
+  next.choreographyPreset = ["auto", "quiet_poise", "command_presence", "soft_reassure"].includes(choreographyPreset)
+    ? choreographyPreset
+    : LENORE_MOTION_DEFAULTS.choreographyPreset;
+  return next;
+}
+
+function stableJson(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
 }
 
 function normalizeLenoreLookSlots(input) {
@@ -822,22 +902,23 @@ function normalizeLenoreLookSlots(input) {
     return {
       id: String(slot?.id || base.id || `slot_${index + 1}`),
       name: String(slot?.name || base.name || `Look ${index + 1}`),
-      look: {
+      look: sanitizeLenoreLook({
         ...LENORE_LOOK_DEFAULTS,
         ...(base.look || {}),
         ...(slot?.look || {})
-      },
-      motion: {
+      }),
+      motion: sanitizeLenoreMotion({
         ...LENORE_MOTION_DEFAULTS,
         ...(base.motion || {}),
         ...(slot?.motion || {})
-      }
+      })
     };
   });
 }
 
 function getLenoreFrameMeta(frame) {
-  return LENORE_FRAME_OPTIONS.find((option) => option.value === frame) || LENORE_FRAME_OPTIONS.find((option) => option.value === "waist");
+  const selected = LENORE_FRAME_OPTIONS.find((option) => option.value === frame && !option.disabled);
+  return selected || LENORE_FRAME_OPTIONS.find((option) => option.value === "portrait");
 }
 
 function getLenoreMotionMeta(clipName) {
@@ -1353,6 +1434,8 @@ export default function Home() {
   const [toolApproval, setToolApproval] = useState(null);
   const [toolApprovalStatus, setToolApprovalStatus] = useState("");
   const [chatApprovalStatus, setChatApprovalStatus] = useState({});
+  const [shellApprovals, setShellApprovals] = useState([]);
+  const [shellApprovalStatus, setShellApprovalStatus] = useState({});
   const [toolHistory, setToolHistory] = useState([]);
   const [toolHistoryError, setToolHistoryError] = useState("");
   const [aikaModules, setAikaModules] = useState([]);
@@ -1383,8 +1466,8 @@ export default function Home() {
   const [connectModal, setConnectModal] = useState(null);
   const [avatarModels, setAvatarModels] = useState([]);
   const [avatarModelId, setAvatarModelId] = useState("aika_nocturne_3d");
-  const [avatarLook, setAvatarLook] = useState(LENORE_LOOK_DEFAULTS);
-  const [avatarMotion, setAvatarMotion] = useState(LENORE_MOTION_DEFAULTS);
+  const [avatarLook, setAvatarLook] = useState(() => sanitizeLenoreLook(LENORE_LOOK_DEFAULTS));
+  const [avatarMotion, setAvatarMotion] = useState(() => sanitizeLenoreMotion(LENORE_MOTION_DEFAULTS));
   const [avatarLookSlots, setAvatarLookSlots] = useState(() => normalizeLenoreLookSlots(LENORE_LOOK_SLOT_DEFAULTS));
   const [avatarModelOverride, setAvatarModelOverride] = useState("");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -1451,6 +1534,7 @@ export default function Home() {
     }
   ]);
   const [behavior, setBehavior] = useState({ emotion: Emotion.NEUTRAL, intensity: 0.35, speaking: false });
+  const [affectState, setAffectState] = useState(null);
   const [micState, setMicState] = useState("idle"); // idle | listening | error | unsupported
   const [micError, setMicError] = useState("");
   const [micLevel, setMicLevel] = useState(0);
@@ -1540,8 +1624,8 @@ export default function Home() {
   const [currentAvatarSpeechText, setCurrentAvatarSpeechText] = useState("");
   const conversationEnabled = Boolean(micEnabled && voiceMode && !textOnly);
   const lenoreRuntimeMotion = useMemo(
-    () => deriveLenoreRuntimeMotion(avatarMotion, behavior, currentAvatarSpeechText || lastAssistantText, ttsStatus, micState, micStatus, conversationEnabled),
-    [avatarMotion, behavior, currentAvatarSpeechText, lastAssistantText, ttsStatus, micState, micStatus, conversationEnabled]
+    () => deriveLenoreRuntimeMotion(avatarMotion, behavior, currentAvatarSpeechText || lastAssistantText, ttsStatus, micState, micStatus, conversationEnabled, affectState),
+    [avatarMotion, behavior, currentAvatarSpeechText, lastAssistantText, ttsStatus, micState, micStatus, conversationEnabled, affectState]
   );
   const [ttsSettings, setTtsSettings] = useState({
     style: "nocturne_hostess",
@@ -1587,8 +1671,8 @@ export default function Home() {
         appBackground,
         avatarBackground,
         avatarModelId,
-        avatarLook,
-        avatarMotion,
+        avatarLook: sanitizeLenoreLook(avatarLook),
+        avatarMotion: sanitizeLenoreMotion(avatarMotion),
         avatarLookSlots
       },
       audio: {
@@ -1615,6 +1699,7 @@ export default function Home() {
 
   async function persistPreferences(nextPrefs) {
     if (!SERVER_URL) return;
+    if (typeof navigator !== "undefined" && navigator.webdriver) return;
     try {
       const resp = await fetch(`${SERVER_URL}/api/assistant/profile`, {
         method: "PUT",
@@ -1636,6 +1721,7 @@ export default function Home() {
 
   function schedulePreferenceSave(nextPrefs) {
     if (!assistantProfileLoaded) return;
+    if (typeof navigator !== "undefined" && navigator.webdriver) return;
     const payload = JSON.stringify(nextPrefs || {});
     if (payload === lastSavedPrefsRef.current) return;
     if (profileSaveTimerRef.current) clearTimeout(profileSaveTimerRef.current);
@@ -1658,6 +1744,21 @@ export default function Home() {
           return;
         }
         let prefs = profile.preferences || {};
+        const stableAvatarLook = sanitizeLenoreLook({
+          ...LENORE_LOOK_DEFAULTS,
+          ...(prefs.appearance?.avatarLook || {})
+        });
+        const stableAvatarMotion = sanitizeLenoreMotion({
+          ...LENORE_MOTION_DEFAULTS,
+          ...(prefs.appearance?.avatarMotion || {})
+        });
+        const stableAvatarLookSlots = normalizeLenoreLookSlots(prefs.appearance?.avatarLookSlots || LENORE_LOOK_SLOT_DEFAULTS);
+        const currentAvatarStateVersion = Number(prefs.appearance?.lenoreRuntimeStateVersion || 0);
+        const needsLenoreStateUpgrade =
+          currentAvatarStateVersion < LENORE_RUNTIME_STATE_VERSION ||
+          stableJson(stableAvatarLook) !== stableJson(prefs.appearance?.avatarLook || {}) ||
+          stableJson(stableAvatarMotion) !== stableJson(prefs.appearance?.avatarMotion || {}) ||
+          stableJson(stableAvatarLookSlots) !== stableJson(prefs.appearance?.avatarLookSlots || []);
         const shouldMigrate = !profile.createdAt;
         if (shouldMigrate) {
           const legacy = readLegacyPreferences();
@@ -1685,20 +1786,32 @@ export default function Home() {
           };
         }
 
+        if (needsLenoreStateUpgrade) {
+          prefs = {
+            ...prefs,
+            appearance: {
+              ...(prefs.appearance || {}),
+              lenoreRuntimeStateVersion: LENORE_RUNTIME_STATE_VERSION,
+              avatarLook: stableAvatarLook,
+              avatarMotion: stableAvatarMotion,
+              avatarLookSlots: stableAvatarLookSlots
+            }
+          };
+        }
+
         setAssistantProfile({ ...profile, preferences: prefs });
         setAssistantProfileError("");
+        setAffectState(prefs.aikaAffect || null);
         setThemeId(prefs.appearance?.theme || "aurora");
         setAppBackground(prefs.appearance?.appBackground || "");
         setAvatarBackground(prefs.appearance?.avatarBackground || "none");
         setAvatarLook({
-          ...LENORE_LOOK_DEFAULTS,
-          ...(prefs.appearance?.avatarLook || {})
+          ...stableAvatarLook
         });
         setAvatarMotion({
-          ...LENORE_MOTION_DEFAULTS,
-          ...(prefs.appearance?.avatarMotion || {})
+          ...stableAvatarMotion
         });
-        setAvatarLookSlots(normalizeLenoreLookSlots(prefs.appearance?.avatarLookSlots || LENORE_LOOK_SLOT_DEFAULTS));
+        setAvatarLookSlots(stableAvatarLookSlots);
         if (avatarModelOverride) {
           setAvatarModelId(avatarModelOverride);
         } else if (prefs.appearance?.avatarModelId) {
@@ -1730,7 +1843,7 @@ export default function Home() {
         setPersonalEmail(prefs.identity?.personalEmail || "");
         lastSavedPrefsRef.current = JSON.stringify(prefs || {});
         setAssistantProfileLoaded(true);
-        if (shouldMigrate) {
+        if (shouldMigrate || needsLenoreStateUpgrade) {
           persistPreferences(prefs);
         }
       } catch (err) {
@@ -1769,6 +1882,27 @@ export default function Home() {
   ]);
 
   useEffect(() => {
+    const next = sanitizeLenoreLook(avatarLook);
+    if (stableJson(next) !== stableJson(avatarLook)) {
+      setAvatarLook(next);
+    }
+  }, [avatarLook]);
+
+  useEffect(() => {
+    const next = sanitizeLenoreMotion(avatarMotion);
+    if (stableJson(next) !== stableJson(avatarMotion)) {
+      setAvatarMotion(next);
+    }
+  }, [avatarMotion]);
+
+  useEffect(() => {
+    const next = normalizeLenoreLookSlots(avatarLookSlots);
+    if (stableJson(next) !== stableJson(avatarLookSlots)) {
+      setAvatarLookSlots(next);
+    }
+  }, [avatarLookSlots]);
+
+  useEffect(() => {
     const interval = setInterval(async () => {
       const current = logRef.current || [];
       const pending = current.filter(item => item.actionMeta?.idempotencyKey && ["running", "client_required", "approval_required"].includes(item.actionMeta.status));
@@ -1798,20 +1932,24 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    loadShellApprovals();
     const interval = setInterval(async () => {
       const current = logRef.current || [];
       const tracked = current.filter(item => item.approval?.id);
-      if (!tracked.length) return;
       let approvals = [];
       try {
         const response = await fetch(`${SERVER_URL}/api/approvals`);
         if (!response.ok) return;
         const data = await response.json();
         approvals = Array.isArray(data?.approvals) ? data.approvals : [];
+        setShellApprovals(approvals.filter(item => {
+          const status = String(item?.status || "").toLowerCase();
+          return status === "pending" || status === "approved";
+        }));
       } catch {
         return;
       }
-      if (!approvals.length) return;
+      if (!tracked.length || !approvals.length) return;
       const approvalMap = new Map(approvals.map(item => [item.id, item]));
       setLog(prev => prev.map(item => {
         const approvalId = item.approval?.id;
@@ -2047,7 +2185,15 @@ export default function Home() {
       setChatError(data.error || "empty_reply");
     }
     const b = data.behavior || behavior;
-    const messageApproval = data?.approval || null;
+    if (data?.affect) {
+      setAffectState(data.affect);
+    }
+    const messageApprovals = Array.isArray(data?.approvals)
+      ? data.approvals.filter(Boolean)
+      : data?.approval
+        ? [data.approval]
+        : [];
+    const messageApproval = messageApprovals[0] || null;
     if (messageApproval?.id) {
       setToolApproval(messageApproval);
       setToolApprovalStatus("Approval required from recent chat response.");
@@ -2075,9 +2221,12 @@ export default function Home() {
         memoryNote,
         actionMeta,
         approval: messageApproval,
+        approvals: messageApprovals,
+        orchestration: data?.orchestration || null,
         protocol: data?.aika?.protocol || null,
         laneResult: data?.aika?.laneResult || null,
         moduleResult: data?.aika?.moduleResult || null,
+        approvalExecutions: [],
         approvalExecution: null
       }
     ]);
@@ -3674,6 +3823,28 @@ export default function Home() {
   const googleLoginUrl = googleLoginBase
     ? `${googleLoginBase}/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`
     : `/api/auth/google/connect?ui_base=${encodeURIComponent(uiBase)}`;
+  const shellCapabilities = useMemo(
+    () => buildAssistantShellCapabilities({ integrations, statusInfo }),
+    [integrations, statusInfo]
+  );
+  const shellApprovalSummary = useMemo(
+    () => summarizePendingApprovals(shellApprovals, 4),
+    [shellApprovals]
+  );
+  const shellReadyCount = shellCapabilities.filter(item => item.state === "ready").length;
+  const shellNeedsAttentionCount = shellCapabilities.length - shellReadyCount;
+
+  function openShellCapabilityAction(action) {
+    if (action === "connections") {
+      setActiveTab("settings");
+      setSettingsTab("connections");
+      return;
+    }
+    if (action === "voice") {
+      setActiveTab("settings");
+      setSettingsTab("voice");
+    }
+  }
 
   if (authRequired && !authChecked) {
     return (
@@ -4549,6 +4720,98 @@ export default function Home() {
     return { endpoint, data };
   }
 
+  function getMessageApprovals(message) {
+    const approvals = Array.isArray(message?.approvals) ? message.approvals.filter(Boolean) : [];
+    if (approvals.length) return approvals;
+    return message?.approval ? [message.approval] : [];
+  }
+
+  function getMessageApprovalExecution(message, approvalId) {
+    const entries = Array.isArray(message?.approvalExecutions) ? message.approvalExecutions : [];
+    return entries.find(item => item?.approvalId === approvalId) || null;
+  }
+
+  function replaceMessageApproval(message, approvalId, nextApproval, executionData = null) {
+    const approvals = getMessageApprovals(message);
+    if (!approvals.length) return message;
+    const nextApprovals = approvals.map(item => (item.id === approvalId ? nextApproval : item));
+    const primaryApproval = nextApprovals[0] || null;
+    const nextExecutions = Array.isArray(message?.approvalExecutions) ? [...message.approvalExecutions] : [];
+    if (executionData) {
+      const executionEntry = { approvalId, ...executionData };
+      const existingIndex = nextExecutions.findIndex(item => item?.approvalId === approvalId);
+      if (existingIndex >= 0) nextExecutions[existingIndex] = executionEntry;
+      else nextExecutions.push(executionEntry);
+    }
+    return {
+      ...message,
+      approval: primaryApproval,
+      approvals: nextApprovals,
+      approvalExecutions: nextExecutions,
+      ...(executionData ? { approvalExecution: executionData } : {})
+    };
+  }
+
+  async function loadShellApprovals() {
+    try {
+      const response = await fetch(`${SERVER_URL}/api/approvals`);
+      if (!response.ok) return [];
+      const data = await response.json();
+      const approvals = Array.isArray(data?.approvals) ? data.approvals : [];
+      const actionable = approvals.filter(item => {
+        const status = String(item?.status || "").toLowerCase();
+        return status === "pending" || status === "approved";
+      });
+      setShellApprovals(actionable);
+      return actionable;
+    } catch {
+      return [];
+    }
+  }
+
+  function syncApprovalAcrossUi(approvalId, nextApproval, executionData = null) {
+    const nextStatus = String(nextApproval?.status || "").toLowerCase();
+    const relatedMessageIds = (logRef.current || [])
+      .filter(item => getMessageApprovals(item).some(entry => entry.id === approvalId))
+      .map(item => item.id)
+      .filter(Boolean);
+    setShellApprovals(prev => {
+      const remaining = prev.filter(item => item.id !== approvalId);
+      return nextStatus === "pending" || nextStatus === "approved"
+        ? [nextApproval, ...remaining]
+        : remaining;
+    });
+    setLog(prev => prev.map(item => {
+      const approvals = getMessageApprovals(item);
+      if (!approvals.some(entry => entry.id === approvalId)) return item;
+      return replaceMessageApproval(item, approvalId, nextApproval, executionData);
+    }));
+    if (toolApproval?.id === approvalId) {
+      if (nextStatus === "executed" || nextStatus === "denied" || nextStatus === "rejected") {
+        setToolApproval(null);
+      } else {
+        setToolApproval(nextApproval);
+      }
+    }
+    if (relatedMessageIds.length) {
+      const statusText =
+        nextStatus === "approved"
+          ? "Approved. Ready to execute."
+          : nextStatus === "executed"
+            ? "Approved action executed."
+            : nextStatus === "denied" || nextStatus === "rejected"
+              ? "Approval denied."
+              : "";
+      if (statusText) {
+        setChatApprovalStatus(prev => {
+          const next = { ...prev };
+          for (const messageId of relatedMessageIds) next[messageId] = statusText;
+          return next;
+        });
+      }
+    }
+  }
+
   async function updateToolApproval(action, token) {
     if (!toolApproval?.id) return;
     setToolApprovalStatus("");
@@ -4572,15 +4835,19 @@ export default function Home() {
         setToolApprovalStatus(endpoint === "approve" ? "Approved. Ready to execute." : "Approval denied.");
       }
       await refreshToolHistory();
+      await loadShellApprovals();
     } catch (err) {
       setToolApprovalStatus(err?.message || "approval_update_failed");
     }
   }
 
-  async function updateChatApproval(messageId, action) {
+  async function updateChatApproval(messageId, action, approvalId = "") {
     if (!messageId) return;
     const message = (logRef.current || []).find(item => item.id === messageId);
-    const approval = message?.approval || null;
+    const messageApprovals = getMessageApprovals(message);
+    const approval = approvalId
+      ? messageApprovals.find(item => item.id === approvalId) || null
+      : (message?.approval || messageApprovals[0] || null);
     if (!approval?.id) return;
     setChatApprovalStatus(prev => ({ ...prev, [messageId]: "" }));
     try {
@@ -4589,7 +4856,7 @@ export default function Home() {
         const executedApproval = { ...approval, status: "executed" };
         setLog(prev => prev.map(item => (
           item.id === messageId
-            ? { ...item, approval: executedApproval, approvalExecution: data }
+            ? replaceMessageApproval(item, approval.id, executedApproval, data)
             : item
         )));
         if (toolApproval?.id === approval.id) {
@@ -4611,7 +4878,7 @@ export default function Home() {
         };
         setLog(prev => prev.map(item => (
           item.id === messageId
-            ? { ...item, approval: nextApproval }
+            ? replaceMessageApproval(item, approval.id, nextApproval)
             : item
         )));
         if (toolApproval?.id === approval.id) {
@@ -4624,8 +4891,45 @@ export default function Home() {
         }));
       }
       await refreshToolHistory();
+      await loadShellApprovals();
     } catch (err) {
       setChatApprovalStatus(prev => ({ ...prev, [messageId]: err?.message || "approval_update_failed" }));
+    }
+  }
+
+  async function updateShellApproval(approvalId, action) {
+    if (!approvalId) return;
+    const approval = (shellApprovals || []).find(item => item.id === approvalId);
+    if (!approval?.id) return;
+    setShellApprovalStatus(prev => ({ ...prev, [approvalId]: "" }));
+    try {
+      const { endpoint, data } = await performApprovalAction(approval, action);
+      if (endpoint === "execute") {
+        const executedApproval = { ...approval, status: "executed" };
+        syncApprovalAcrossUi(approval.id, executedApproval, data);
+        setShellApprovalStatus(prev => ({ ...prev, [approvalId]: "Executed." }));
+      } else {
+        const returnedApproval = data?.approval || null;
+        const nextApproval = returnedApproval
+          ? {
+            ...approval,
+            ...returnedApproval,
+            approvalContext: returnedApproval?.approvalContext || approval?.approvalContext || null
+          }
+          : {
+            ...approval,
+            status: endpoint === "approve" ? "approved" : "denied"
+          };
+        syncApprovalAcrossUi(approval.id, nextApproval);
+        setShellApprovalStatus(prev => ({
+          ...prev,
+          [approvalId]: endpoint === "approve" ? "Approved. Ready to execute." : "Denied."
+        }));
+      }
+      await refreshToolHistory();
+      await loadShellApprovals();
+    } catch (err) {
+      setShellApprovalStatus(prev => ({ ...prev, [approvalId]: err?.message || "approval_update_failed" }));
     }
   }
 
@@ -4821,16 +5125,6 @@ export default function Home() {
         {!avatarHidden && (
           <div
             className="avatar-float"
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setAvatarHidden(true);
-            }}
-            onDoubleClick={() => {
-              if (micState !== "listening") toggleMic();
-            }}
-            title={micState === "listening"
-              ? "Aika is listening. Right-click to hide."
-              : "Double-click to start listening. Right-click to hide."}
           >
             <div className="avatar-stage-topbar">
               <div className="avatar-stage-copy">
@@ -4857,6 +5151,22 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(14, 8, 14, 0.62)",
+                    color: "#f5d7df"
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setAvatarHidden(true);
+                  }}
+                >
+                  Hide
+                </button>
+                <button
+                  type="button"
                   className="avatar-stage-mic"
                   onClick={(event) => {
                     event.stopPropagation();
@@ -4878,6 +5188,7 @@ export default function Home() {
                 lipsyncStartTimeMs={avatarLipsync?.startedAtMs || 0}
                 engineHint={avatarModels.find(m => m.id === avatarModelId)?.engine}
                 modelUrl={avatarModels.find(m => m.id === avatarModelId)?.modelUrl}
+                reviewModelUrl={avatarModels.find(m => m.id === avatarModelId)?.reviewModelUrl}
                 portraitConfig={avatarModels.find(m => m.id === avatarModelId)?.portraitConfig}
                 fallbackPng={avatarModels.find(m => m.id === avatarModelId)?.fallbackPng}
                 pngSet={avatarModels.find(m => m.id === avatarModelId)?.pngSet}
@@ -6075,58 +6386,64 @@ export default function Home() {
                 Avatar Look
               </div>
               <div style={{ fontSize: 12, color: "#6b7280", maxWidth: 760 }}>
-                Lenore wardrobe and styling controls. These map only to the real removable pieces in the purchased asset: hair, jacket, wrap, gloves, lingerie top, lingerie bottoms, stockings, boots, choker, and piercing.
+                Lenore wardrobe and styling controls. Phase 1 is locked to the combinations that render cleanly in the purchased conversation runtime. Reveal and nude variants stay disabled until the source asset is repaired.
               </div>
               <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Style preset
                   <select
                     value={avatarLook.preset}
-                    onChange={(e) => setAvatarLook({ ...avatarLook, ...LENORE_LOOK_PRESETS[e.target.value], preset: e.target.value })}
+                    onChange={(e) => setAvatarLook(sanitizeLenoreLook({ ...avatarLook, ...LENORE_LOOK_PRESETS[e.target.value], preset: e.target.value }))}
                     style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                   >
                     {LENORE_PRESET_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                      <option key={option.value} value={option.value} disabled={Boolean(option.disabled)}>{option.label}</option>
                     ))}
                   </select>
                   <span style={{ fontSize: 11, color: "#6b7280" }}>
                     {LENORE_PRESET_OPTIONS.find((option) => option.value === avatarLook.preset)?.description || ""}
+                  </span>
+                  <span style={{ fontSize: 11, color: "#8b5cf6" }}>
+                    {LENORE_PRESET_OPTIONS.find((option) => option.value === avatarLook.preset)?.disabledReason || ""}
                   </span>
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Camera frame
                   <select
                     value={avatarLook.cameraFrame}
-                    onChange={(e) => setAvatarLook(prev => ({ ...prev, cameraFrame: e.target.value }))}
+                    onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, cameraFrame: e.target.value }))}
                     style={{ padding: 6, borderRadius: 6, border: "1px solid var(--panel-border-strong)" }}
                   >
                     {LENORE_FRAME_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                      <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
                     ))}
                   </select>
                   <span style={{ fontSize: 11, color: "#6b7280" }}>
                     {LENORE_FRAME_OPTIONS.find((option) => option.value === avatarLook.cameraFrame)?.description || ""}
                   </span>
+                  <span style={{ fontSize: 11, color: "#8b5cf6" }}>
+                    {LENORE_FRAME_OPTIONS.find((option) => option.value === avatarLook.cameraFrame)?.disabledReason || ""}
+                  </span>
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Hair color
-                  <input type="color" value={avatarLook.hairColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, hairColor: e.target.value }))} />
+                  <input type="color" value={avatarLook.hairColor} onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, hairColor: e.target.value }))} />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Skin tone
-                  <input type="color" value={avatarLook.skinColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, skinColor: e.target.value }))} />
+                  <input type="color" value={avatarLook.skinColor} onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, skinColor: e.target.value }))} />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Lip color
-                  <input type="color" value={avatarLook.lipColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, lipColor: e.target.value }))} />
+                  <input type="color" value={avatarLook.lipColor} onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, lipColor: e.target.value }))} />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Outfit color
-                  <input type="color" value={avatarLook.outfitColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, outfitColor: e.target.value }))} />
+                  <input type="color" value={avatarLook.outfitColor} onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, outfitColor: e.target.value }))} />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Accent color
-                  <input type="color" value={avatarLook.accentColor} onChange={(e) => setAvatarLook(prev => ({ ...prev, accentColor: e.target.value }))} />
+                  <input type="color" value={avatarLook.accentColor} onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, accentColor: e.target.value }))} />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                   Eye drama: {avatarLook.eyeGlow.toFixed(2)}
@@ -6136,7 +6453,7 @@ export default function Home() {
                     max={1}
                     step={0.01}
                     value={avatarLook.eyeGlow}
-                    onChange={(e) => setAvatarLook(prev => ({ ...prev, eyeGlow: Number(e.target.value) }))}
+                    onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, eyeGlow: Number(e.target.value) }))}
                   />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
@@ -6147,31 +6464,32 @@ export default function Home() {
                     max={1}
                     step={0.01}
                     value={avatarLook.matte}
-                    onChange={(e) => setAvatarLook(prev => ({ ...prev, matte: Number(e.target.value) }))}
+                    onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, matte: Number(e.target.value) }))}
                   />
                 </label>
               </div>
               <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-                {LENORE_WARDROBE_ITEMS.map(([key, label]) => (
+                  {LENORE_WARDROBE_ITEMS.map(([key, label]) => (
                   <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
                     <input
                       type="checkbox"
-                      checked={Boolean(avatarLook[key])}
-                      onChange={(e) => setAvatarLook(prev => ({ ...prev, [key]: e.target.checked }))}
+                      checked={LENORE_REQUIRED_LOOK_KEYS.has(key) ? true : Boolean(avatarLook[key])}
+                      disabled={LENORE_REQUIRED_LOOK_KEYS.has(key)}
+                      onChange={(e) => setAvatarLook(prev => sanitizeLenoreLook({ ...prev, [key]: e.target.checked }))}
                     />
-                    Show {label}
+                    Show {label}{LENORE_REQUIRED_LOOK_KEYS.has(key) ? " (locked for stable runtime)" : ""}
                   </label>
                 ))}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
-                  onClick={() => setAvatarLook(LENORE_LOOK_DEFAULTS)}
+                  onClick={() => setAvatarLook(sanitizeLenoreLook(LENORE_LOOK_DEFAULTS))}
                   style={{ padding: "8px 12px", borderRadius: 8 }}
                 >
                   Reset Look
                 </button>
                 <div style={{ fontSize: 12, color: "#6b7280", alignSelf: "center" }}>
-                  If the current model is not Lenore, these controls still apply but have less effect.
+                  Phase 1 clamps unsupported wardrobe combinations instead of letting the avatar break on screen.
                 </div>
               </div>
               <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
@@ -6214,8 +6532,8 @@ export default function Home() {
                           >
                             <button
                               onClick={() => {
-                                setAvatarLook({ ...LENORE_LOOK_DEFAULTS, ...(slot.look || {}) });
-                                setAvatarMotion({ ...LENORE_MOTION_DEFAULTS, ...(slot.motion || {}) });
+                                setAvatarLook(sanitizeLenoreLook({ ...LENORE_LOOK_DEFAULTS, ...(slot.look || {}) }));
+                                setAvatarMotion(sanitizeLenoreMotion({ ...LENORE_MOTION_DEFAULTS, ...(slot.motion || {}) }));
                               }}
                               aria-label={`Apply ${slot.name} look`}
                               title={`Apply ${slot.name} look`}
@@ -6271,8 +6589,8 @@ export default function Home() {
                                   itemIndex === index
                                     ? {
                                         ...item,
-                                        look: { ...avatarLook },
-                                        motion: { ...avatarMotion }
+                                        look: sanitizeLenoreLook({ ...avatarLook }),
+                                        motion: sanitizeLenoreMotion({ ...avatarMotion })
                                       }
                                     : item
                                 )
@@ -6293,56 +6611,62 @@ export default function Home() {
                   Motion
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280", maxWidth: 760 }}>
-                  Controls for Lenore's embedded body-motion clip and live idle behavior. Auto mode now chooses between the composed hostess pose and the source body-performance clip based on what AIKA is saying and how she is saying it.
+                  Phase 1 uses authored hostess conversation states only. The purchased source-body motion remains disabled until it is production-safe.
                 </div>
                 <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
                     <input
                       type="checkbox"
-                      checked={Boolean(avatarMotion.playClip)}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, playClip: e.target.checked }))}
+                      checked={false}
+                      disabled
                     />
-                    Play embedded body motion
+                    Play embedded body motion (disabled in stable runtime)
                   </label>
                   <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                     Motion clip
                     <select
                       value={avatarMotion.clipName || "auto"}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, clipName: e.target.value }))}
+                      onChange={(e) => setAvatarMotion(prev => sanitizeLenoreMotion({ ...prev, clipName: e.target.value }))}
                       style={{ padding: "8px 10px", borderRadius: 10 }}
                     >
                       {LENORE_MOTION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
+                        <option key={option.value} value={option.value} disabled={Boolean(option.disabled)}>{option.label}</option>
                       ))}
                     </select>
                     <span style={{ fontSize: 11, color: "#6b7280" }}>
                       {LENORE_MOTION_OPTIONS.find((option) => option.value === (avatarMotion.clipName || "auto"))?.description || ""}
+                    </span>
+                    <span style={{ fontSize: 11, color: "#8b5cf6" }}>
+                      {LENORE_MOTION_OPTIONS.find((option) => option.value === (avatarMotion.clipName || "auto"))?.disabledReason || ""}
                     </span>
                   </label>
                   <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                     Choreography preset
                     <select
                       value={avatarMotion.choreographyPreset || "auto"}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, choreographyPreset: e.target.value }))}
+                      onChange={(e) => setAvatarMotion(prev => sanitizeLenoreMotion({ ...prev, choreographyPreset: e.target.value }))}
                       style={{ padding: "8px 10px", borderRadius: 10 }}
                     >
                       {LENORE_CHOREOGRAPHY_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
+                        <option key={option.value} value={option.value} disabled={Boolean(option.disabled)}>{option.label}</option>
                       ))}
                     </select>
                     <span style={{ fontSize: 11, color: "#6b7280" }}>
                       {LENORE_CHOREOGRAPHY_OPTIONS.find((option) => option.value === (avatarMotion.choreographyPreset || "auto"))?.description || ""}
+                    </span>
+                    <span style={{ fontSize: 11, color: "#8b5cf6" }}>
+                      {LENORE_CHOREOGRAPHY_OPTIONS.find((option) => option.value === (avatarMotion.choreographyPreset || "auto"))?.disabledReason || ""}
                     </span>
                   </label>
                   <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                     Motion speed: {avatarMotion.clipSpeed.toFixed(2)}
                     <input
                       type="range"
-                      min={0}
-                      max={2}
+                      min={0.65}
+                      max={1}
                       step={0.01}
                       value={avatarMotion.clipSpeed}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, clipSpeed: Number(e.target.value) }))}
+                      onChange={(e) => setAvatarMotion(prev => sanitizeLenoreMotion({ ...prev, clipSpeed: Number(e.target.value) }))}
                     />
                   </label>
                   <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
@@ -6353,40 +6677,41 @@ export default function Home() {
                       max={1}
                       step={0.01}
                       value={avatarMotion.clipWeight}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, clipWeight: Number(e.target.value) }))}
+                      disabled
+                      onChange={(e) => setAvatarMotion(prev => sanitizeLenoreMotion({ ...prev, clipWeight: Number(e.target.value) }))}
                     />
                   </label>
                   <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                     Idle head motion: {avatarMotion.idleHead.toFixed(2)}
                     <input
                       type="range"
-                      min={0}
-                      max={1}
+                      min={0.1}
+                      max={0.5}
                       step={0.01}
                       value={avatarMotion.idleHead}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, idleHead: Number(e.target.value) }))}
+                      onChange={(e) => setAvatarMotion(prev => sanitizeLenoreMotion({ ...prev, idleHead: Number(e.target.value) }))}
                     />
                   </label>
                   <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                     Talking head motion: {avatarMotion.talkHead.toFixed(2)}
                     <input
                       type="range"
-                      min={0}
-                      max={1}
+                      min={0.1}
+                      max={0.42}
                       step={0.01}
                       value={avatarMotion.talkHead}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, talkHead: Number(e.target.value) }))}
+                      onChange={(e) => setAvatarMotion(prev => sanitizeLenoreMotion({ ...prev, talkHead: Number(e.target.value) }))}
                     />
                   </label>
                   <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
                     Body sway: {avatarMotion.bodySway.toFixed(2)}
                     <input
                       type="range"
-                      min={0}
-                      max={1}
+                      min={0.04}
+                      max={0.22}
                       step={0.01}
                       value={avatarMotion.bodySway}
-                      onChange={(e) => setAvatarMotion(prev => ({ ...prev, bodySway: Number(e.target.value) }))}
+                      onChange={(e) => setAvatarMotion(prev => sanitizeLenoreMotion({ ...prev, bodySway: Number(e.target.value) }))}
                     />
                   </label>
                 </div>
@@ -7534,6 +7859,132 @@ export default function Home() {
           />
         )}
         {activeTab === "chat" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12 }}>
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 14, padding: 12, background: "var(--panel-bg)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Assistant Shell</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {shellReadyCount}/{shellCapabilities.length} capabilities ready
+                    {shellNeedsAttentionCount > 0 ? ` • ${shellNeedsAttentionCount} need setup` : " • ready for combined requests"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setActiveTab("settings");
+                    setSettingsTab("connections");
+                  }}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Manage
+                </button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+                {shellCapabilities.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => item.action && openShellCapabilityAction(item.action)}
+                    style={{
+                      textAlign: "left",
+                      padding: 10,
+                      borderRadius: 10,
+                      border: item.state === "ready" ? "1px solid rgba(16,185,129,0.35)" : "1px solid rgba(245,158,11,0.35)",
+                      background: item.state === "ready" ? "rgba(16,185,129,0.08)" : "rgba(245,158,11,0.08)",
+                      cursor: item.action ? "pointer" : "default"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>{item.label}</div>
+                      <span style={{
+                        fontSize: 10,
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        background: item.state === "ready" ? "rgba(16,185,129,0.16)" : "rgba(245,158,11,0.16)",
+                        color: item.state === "ready" ? "#059669" : "#b45309"
+                      }}>
+                        {item.state === "ready" ? "Ready" : "Setup"}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>{item.detail}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid var(--panel-border)", borderRadius: 14, padding: 12, background: "var(--panel-bg)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Approval Queue</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {shellApprovalSummary.total > 0
+                      ? `${shellApprovalSummary.total} actionable approvals • ${shellApprovalSummary.highRisk} high-risk`
+                      : "No approvals waiting"}
+                  </div>
+                </div>
+                <button onClick={() => setActiveTab("tools")} style={{ padding: "6px 10px", borderRadius: 8 }}>
+                  Open Tools
+                </button>
+              </div>
+              {shellApprovalSummary.items.length === 0 ? (
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  Approvals created by email, calendar, and messaging actions will appear here.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {shellApprovalSummary.items.map(item => {
+                    const ctx = deriveApprovalContext({
+                      approval: item,
+                      protocol: null,
+                      laneResult: null,
+                      prompt: item.humanSummary || ""
+                    });
+                    const approvalStatus = String(item.status || "").toLowerCase();
+                    return (
+                      <div key={item.id} style={{ padding: 10, borderRadius: 10, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg-soft)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>{item.toolName}</div>
+                          <span style={{
+                            fontSize: 10,
+                            padding: "2px 6px",
+                            borderRadius: 999,
+                            background: item.riskLevel === "high" ? "rgba(220,38,38,0.12)" : "rgba(245,158,11,0.12)",
+                            color: item.riskLevel === "high" ? "#b91c1c" : "#b45309"
+                          }}>
+                            {item.riskLevel}
+                          </span>
+                        </div>
+                        <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-primary)" }}>{item.humanSummary}</div>
+                        {ctx.why && <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>{ctx.why}</div>}
+                        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                          {approvalStatus === "pending" && (
+                            <>
+                              <button onClick={() => updateShellApproval(item.id, "approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                                Approve
+                              </button>
+                              <button onClick={() => updateShellApproval(item.id, "deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                                Deny
+                              </button>
+                            </>
+                          )}
+                          {approvalStatus === "approved" && (
+                            <button onClick={() => updateShellApproval(item.id, "execute")} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                              Execute
+                            </button>
+                          )}
+                        </div>
+                        {shellApprovalStatus[item.id] && (
+                          <div style={{ marginTop: 6, fontSize: 11, color: "var(--accent)" }}>{shellApprovalStatus[item.id]}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {activeTab === "chat" && (
         <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--panel-border)", borderRadius: 14, padding: 12, background: "var(--panel-bg)", color: "var(--text-primary)" }}>
           {meetingLock && (
             <div style={{ fontSize: 12, marginBottom: 10, color: "#b45309" }}>
@@ -7571,57 +8022,135 @@ export default function Home() {
                   </div>
                 </details>
               )}
-              {m.approval && (
+              {m.orchestration && (
                 (() => {
-                  const ctx = deriveApprovalContext({
-                    approval: m.approval,
-                    protocol: m.protocol,
-                    laneResult: m.laneResult,
-                    prompt: m.prompt || m.approval?.humanSummary || ""
-                  });
+                  const orchestrationSummary = summarizeAssistantOrchestration(m.orchestration);
+                  if (!orchestrationSummary) return null;
                   return (
                     <div style={{ marginTop: 6, padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg-soft)", fontSize: 12, color: "var(--text-muted)" }}>
-                      <div><b>Approval:</b> {m.approval.id}</div>
-                      <div><b>Status:</b> {formatApprovalStatus(m.approval.status)}</div>
-                      {m.approval.toolName && <div><b>Tool:</b> {m.approval.toolName}</div>}
-                      {m.approval.humanSummary && <div style={{ marginTop: 2 }}><b>Summary:</b> {m.approval.humanSummary}</div>}
-                      {ctx.action && <div><b>Action:</b> {ctx.action}</div>}
-                      {ctx.why && <div><b>Why:</b> {ctx.why}</div>}
-                      {ctx.tool && <div><b>Tool lane:</b> {ctx.tool}</div>}
-                      {ctx.boundary && <div><b>Boundary:</b> {ctx.boundary}</div>}
-                      {ctx.risk && <div><b>Approval Risk:</b> {ctx.risk}</div>}
-                      {ctx.rollback && <div><b>Rollback:</b> {ctx.rollback}</div>}
-                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        {String(m.approval.status || "").toLowerCase() === "pending" && (
-                          <>
-                            <button onClick={() => updateChatApproval(m.id, "approve")} style={{ padding: "4px 8px", borderRadius: 6 }}>
-                              Approve
-                            </button>
-                            <button onClick={() => updateChatApproval(m.id, "deny")} style={{ padding: "4px 8px", borderRadius: 6 }}>
-                              Deny
-                            </button>
-                          </>
-                        )}
-                        {String(m.approval.status || "").toLowerCase() === "approved" && (
-                          <button onClick={() => updateChatApproval(m.id, "execute")} style={{ padding: "4px 8px", borderRadius: 6 }}>
-                            Execute
-                          </button>
-                        )}
-                      </div>
-                      {chatApprovalStatus[m.id] && (
-                        <div style={{ marginTop: 6, color: "var(--accent)" }}>{chatApprovalStatus[m.id]}</div>
+                      <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }}>Orchestration</div>
+                      {orchestrationSummary.reads.length > 0 && (
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Reads</div>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                            {orchestrationSummary.reads.map(item => (
+                              <div
+                                key={item.id}
+                                style={{
+                                  padding: "4px 8px",
+                                  borderRadius: 999,
+                                  border: "1px solid var(--panel-border)",
+                                  background: "rgba(59,130,246,0.08)"
+                                }}
+                              >
+                                {item.label}
+                              </div>
+                            ))}
+                          </div>
+                          {orchestrationSummary.reads.map(item => (
+                            <div key={`${item.id}-clause`} style={{ marginTop: 4 }}>
+                              <b>Query:</b> {item.clause}
+                            </div>
+                          ))}
+                        </div>
                       )}
-                      {m.approvalExecution && (
-                        <details style={{ marginTop: 6 }}>
-                          <summary style={{ cursor: "pointer" }}>Execution result</summary>
-                          <pre style={{ marginTop: 6, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
-{JSON.stringify(m.approvalExecution, null, 2)}
-                          </pre>
-                        </details>
+                      {orchestrationSummary.executions.length > 0 && (
+                        <div>
+                          <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Actions</div>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                            {orchestrationSummary.executions.map(item => (
+                              <div
+                                key={item.id}
+                                style={{
+                                  padding: "4px 8px",
+                                  borderRadius: 999,
+                                  border: "1px solid var(--panel-border)",
+                                  background: "rgba(245,158,11,0.08)"
+                                }}
+                              >
+                                {item.label}
+                              </div>
+                            ))}
+                          </div>
+                          {orchestrationSummary.executions.map(item => (
+                            <div key={`${item.id}-clause`} style={{ marginTop: 4 }}>
+                              <b>Action:</b> {item.clause}
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   );
                 })()
+              )}
+              {getMessageApprovals(m).length > 0 && (
+                <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {getMessageApprovals(m).map((approvalItem, approvalIndex) => {
+                    const ctx = deriveApprovalContext({
+                      approval: approvalItem,
+                      protocol: m.protocol,
+                      laneResult: m.laneResult,
+                      prompt: m.prompt || approvalItem?.humanSummary || ""
+                    });
+                    const approvalStatus = String(approvalItem?.status || "").toLowerCase();
+                    const executionSummary = summarizeApprovalExecution(getMessageApprovalExecution(m, approvalItem.id));
+                    return (
+                      <div key={approvalItem.id || `${m.id}-approval-${approvalIndex}`} style={{ padding: 8, borderRadius: 10, border: "1px solid var(--panel-border-strong)", background: "var(--panel-bg-soft)", fontSize: 12, color: "var(--text-muted)" }}>
+                        <div><b>Approval:</b> {approvalItem.id}</div>
+                        <div><b>Status:</b> {formatApprovalStatusLabel(approvalItem.status)}</div>
+                        {approvalItem.toolName && <div><b>Tool:</b> {approvalItem.toolName}</div>}
+                        {approvalItem.humanSummary && <div style={{ marginTop: 2 }}><b>Summary:</b> {approvalItem.humanSummary}</div>}
+                        {ctx.action && <div><b>Action:</b> {ctx.action}</div>}
+                        {ctx.why && <div><b>Why:</b> {ctx.why}</div>}
+                        {ctx.tool && <div><b>Tool lane:</b> {ctx.tool}</div>}
+                        {ctx.boundary && <div><b>Boundary:</b> {ctx.boundary}</div>}
+                        {ctx.risk && <div><b>Approval Risk:</b> {ctx.risk}</div>}
+                        {ctx.rollback && <div><b>Rollback:</b> {ctx.rollback}</div>}
+                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                          {approvalStatus === "pending" && (
+                            <>
+                              <button onClick={() => updateChatApproval(m.id, "approve", approvalItem.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                                Approve
+                              </button>
+                              <button onClick={() => updateChatApproval(m.id, "deny", approvalItem.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                                Deny
+                              </button>
+                            </>
+                          )}
+                          {approvalStatus === "approved" && (
+                            <button onClick={() => updateChatApproval(m.id, "execute", approvalItem.id)} style={{ padding: "4px 8px", borderRadius: 6 }}>
+                              Execute
+                            </button>
+                          )}
+                        </div>
+                        {executionSummary && (
+                          <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.18)" }}>
+                            <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>Execution result</div>
+                            <div style={{ marginTop: 4 }}><b>Status:</b> {executionSummary.status}</div>
+                            <div style={{ marginTop: 4 }}><b>Summary:</b> {executionSummary.message}</div>
+                            <details style={{ marginTop: 6 }}>
+                              <summary style={{ cursor: "pointer" }}>Raw payload</summary>
+                              <pre style={{ marginTop: 6, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+{JSON.stringify(executionSummary.payload, null, 2)}
+                              </pre>
+                            </details>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {chatApprovalStatus[m.id] && (
+                    <div style={{ color: "var(--accent)" }}>{chatApprovalStatus[m.id]}</div>
+                  )}
+                  {m.approvalExecution && (!Array.isArray(m.approvalExecutions) || m.approvalExecutions.length === 0) && (
+                    <details style={{ marginTop: 2 }}>
+                      <summary style={{ cursor: "pointer" }}>Execution result</summary>
+                      <pre style={{ marginTop: 6, background: "var(--code-bg)", color: "#e5e7eb", padding: 8, borderRadius: 8, fontSize: 11, overflow: "auto" }}>
+{JSON.stringify(m.approvalExecution, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
               )}
               {Array.isArray(m.citations) && m.citations.length > 0 && (
                 <details style={{ marginTop: 6 }}>
@@ -8096,6 +8625,7 @@ export default function Home() {
           gap: 10px;
           cursor: default;
           user-select: none;
+          pointer-events: none;
         }
 
         .avatar-stage-topbar {
@@ -8111,6 +8641,7 @@ export default function Home() {
             radial-gradient(circle at top, rgba(220, 73, 112, 0.16), transparent 55%);
           box-shadow: 0 16px 38px rgba(9, 6, 12, 0.38);
           backdrop-filter: blur(16px);
+          pointer-events: auto;
         }
 
         .avatar-stage-copy {
@@ -8155,6 +8686,7 @@ export default function Home() {
             0 34px 60px rgba(6, 4, 10, 0.6),
             inset 0 1px 0 rgba(255, 255, 255, 0.06);
           overflow: hidden;
+          pointer-events: none;
         }
 
         .avatar-stage-canvas {
@@ -8162,6 +8694,7 @@ export default function Home() {
           min-height: min(82vh, 960px);
           max-width: none !important;
           filter: drop-shadow(0 32px 40px rgba(0, 0, 0, 0.35));
+          pointer-events: none;
         }
 
         .avatar-float-hint {
@@ -8173,6 +8706,7 @@ export default function Home() {
           border: 1px solid rgba(233, 186, 198, 0.2);
           backdrop-filter: blur(10px);
           letter-spacing: 0.02em;
+          pointer-events: none;
         }
 
         .avatar-show-button {

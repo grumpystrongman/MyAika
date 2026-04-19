@@ -135,3 +135,76 @@ test("agent actions: email to work address prompts when missing identity", async
   assert.equal(result.status, "needs_input");
   assert.ok(result.reply.toLowerCase().includes("work email"));
 });
+
+test("agent actions: calendar hold uses context timezone", async () => {
+  let seenParams = null;
+  const stubExecutor = {
+    callTool: async ({ params }) => {
+      seenParams = params;
+      return { status: "ok", data: { status: "draft", hold: { title: params.title } } };
+    }
+  };
+  const result = await handleActionIntent({
+    text: 'Create calendar hold "Review" tomorrow at 3pm for 30 minutes',
+    context: {
+      channel: "web",
+      userId: "local",
+      senderId: makeSenderId("test-calendar-hold"),
+      timezone: "America/New_York"
+    },
+    deps: { toolExecutor: stubExecutor, maxRetries: 0 }
+  });
+  assert.ok(result);
+  assert.equal(result.status, "ok");
+  assert.equal(result.action.type, "calendar.proposeHold");
+  assert.equal(seenParams?.timezone, "America/New_York");
+  assert.equal(seenParams?.title, "Review");
+});
+
+test("agent actions: sms to me resolves stored identity phone", async () => {
+  updateAssistantProfile("local", { preferences: { identity: { phoneNumber: "+15555550123" } } });
+  const result = await handleActionIntent({
+    text: 'Text me "Running late"',
+    context: { channel: "web", userId: "local", senderId: makeSenderId("test-sms-self") },
+    deps: { maxRetries: 0 }
+  });
+  assert.ok(result);
+  assert.equal(result.action.type, "messaging.sms.send");
+  assert.notEqual(result.status, "needs_input");
+});
+
+test("agent actions: whatsapp by contact name resolves from profile contacts", async () => {
+  updateAssistantProfile("local", {
+    preferences: {
+      contacts: [
+        { name: "Sarah", whatsapp: "+15555550124" }
+      ]
+    }
+  });
+  const result = await handleActionIntent({
+    text: 'Send WhatsApp to Sarah "Heading out now"',
+    context: { channel: "web", userId: "local", senderId: makeSenderId("test-whatsapp-contact") },
+    deps: { maxRetries: 0 }
+  });
+  assert.ok(result);
+  assert.equal(result.action.type, "messaging.whatsapp.send");
+  assert.notEqual(result.status, "needs_input");
+});
+
+test("agent actions: telegram by contact name prompts when missing saved chat id", async () => {
+  updateAssistantProfile("local", {
+    preferences: {
+      contacts: [
+        { name: "Nina" }
+      ]
+    }
+  });
+  const result = await handleActionIntent({
+    text: 'Send Telegram to Nina "Ping me when you land"',
+    context: { channel: "web", userId: "local", senderId: makeSenderId("test-telegram-missing-contact") },
+    deps: { maxRetries: 0 }
+  });
+  assert.ok(result);
+  assert.equal(result.status, "needs_input");
+  assert.ok(result.reply.toLowerCase().includes("telegram chat id"));
+});

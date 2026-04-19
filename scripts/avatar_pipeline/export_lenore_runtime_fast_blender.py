@@ -53,16 +53,42 @@ def reset_armature_to_neutral_pose(armature):
     armature.animation_data.action = None
     bpy.context.view_layer.objects.active = armature
     bpy.ops.object.mode_set(mode="POSE")
-    bpy.ops.pose.select_all(action="SELECT")
-    bpy.ops.pose.transforms_clear()
     for pose_bone in armature.pose.bones:
-        pose_bone.matrix_basis.identity()
-        pose_bone.location = (0.0, 0.0, 0.0)
-        if pose_bone.rotation_mode == "QUATERNION":
-            pose_bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
-        else:
-            pose_bone.rotation_euler = (0.0, 0.0, 0.0)
-        pose_bone.scale = (1.0, 1.0, 1.0)
+        if pose_bone.rotation_mode != "QUATERNION":
+            pose_bone.rotation_mode = "XYZ"
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def reset_shape_keys_to_neutral():
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or not obj.data.shape_keys:
+            continue
+        for key_block in obj.data.shape_keys.key_blocks:
+            if key_block.name == "Basis":
+                continue
+            key_block.value = 0.0
+
+
+def apply_conversation_rest_pose(armature):
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="POSE")
+    overrides = {
+        "CC_Base_L_Clavicle": (-0.01, -0.003, -0.05),
+        "CC_Base_R_Clavicle": (-0.01, 0.003, 0.05),
+        "CC_Base_L_Upperarm": (0.06, -0.02, -0.16),
+        "CC_Base_R_Upperarm": (0.06, 0.02, 0.16),
+        "CC_Base_L_Forearm": (0.14, 0.02, 0.03),
+        "CC_Base_R_Forearm": (0.14, -0.02, -0.03),
+        "CC_Base_NeckTwist01": (0.008, 0.004, 0.0),
+        "CC_Base_NeckTwist02": (0.008, 0.004, 0.0),
+        "CC_Base_Head": (0.02, 0.006, 0.0),
+    }
+    for bone_name, rotation in overrides.items():
+        pose_bone = armature.pose.bones.get(bone_name)
+        if not pose_bone:
+            continue
+        pose_bone.rotation_mode = "XYZ"
+        pose_bone.rotation_euler = rotation
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
@@ -70,9 +96,8 @@ def create_pose_clip(name: str, start_frame: int = 1, end_frame: int = 2):
     armature = find_armature()
     if not armature:
         raise RuntimeError("armature_not_found")
-    if armature.animation_data is None:
-        armature.animation_data_create()
     reset_armature_to_neutral_pose(armature)
+    apply_conversation_rest_pose(armature)
     action = bpy.data.actions.new(name)
     armature.animation_data.action = action
     scene = bpy.context.scene
@@ -188,6 +213,7 @@ def main():
 
     bpy.ops.wm.open_mainfile(filepath=str(source_blend))
     bpy.context.scene.frame_set(1)
+    reset_shape_keys_to_neutral()
     action = create_pose_clip("LenoreRuntimePose", 1, 2)
     armature = find_armature()
     if armature and armature.animation_data:

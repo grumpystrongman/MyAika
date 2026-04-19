@@ -16,6 +16,7 @@ type Props = {
   lipsyncStartTimeMs?: number;
   className?: string;
   modelUrl?: string;
+  reviewModelUrl?: string;
   engineHint?: string;
   portraitConfig?: unknown;
   fallbackPng?: string;
@@ -74,6 +75,7 @@ export default function AikaAvatar({
   lipsyncStartTimeMs = 0,
   className,
   modelUrl,
+  reviewModelUrl,
   engineHint,
   portraitConfig,
   fallbackPng,
@@ -215,6 +217,7 @@ export default function AikaAvatar({
         <LenoreAvatar
           className={className}
           modelUrl={modelUrl}
+          reviewModelUrl={reviewModelUrl}
           mood={normalizeMood(mood)}
           isTalking={isTalking}
           talkIntensity={talkIntensity}

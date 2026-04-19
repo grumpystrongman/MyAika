@@ -2,7 +2,7 @@ export default async function handler(req, res) {
   const base = String(
     process.env.AIKA_SERVER_URL
     || process.env.NEXT_PUBLIC_SERVER_URL
-    || "http://127.0.0.1:3512"
+    || "http://127.0.0.1:8787"
   ).trim();
   try {
     const resp = await fetch(`${base}/api/auth/me`, {

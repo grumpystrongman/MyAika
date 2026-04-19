@@ -29,7 +29,20 @@ function extractRecordingId(text) {
 
 function extractEmails(text) {
   const matches = String(text || "").match(/[^\s@]+@[^\s@]+\.[^\s@]+/g);
-  return matches ? Array.from(new Set(matches.map(v => v.trim()))) : [];
+  return matches ? Array.from(new Set(matches.map(v => v.trim().replace(/[,:;]+$/, "")))) : [];
+}
+
+function extractPhones(text) {
+  const matches = String(text || "").match(/\+?\d[\d\s().-]{7,}\d/g);
+  return matches
+    ? Array.from(
+        new Set(
+          matches
+            .map(v => v.replace(/[^\d+]/g, ""))
+            .filter(v => v.length >= 10)
+        )
+      )
+    : [];
 }
 
 function extractSubject(text) {
@@ -44,6 +57,40 @@ function extractRecipientAlias(text) {
   if (/\bemail\s+me\b/.test(lower)) return "self";
   if (/\bto\s+me\b/.test(lower)) return "self";
   if (/\bmyself\b/.test(lower)) return "self";
+  return "";
+}
+
+function extractMessagingRecipientAlias(text) {
+  const lower = String(text || "").toLowerCase();
+  if (/\b(?:text|sms|whatsapp)\s+me\b/.test(lower)) return "self";
+  if (/\btelegram\s+me\b/.test(lower)) return "self";
+  if (/\bto\s+me\b/.test(lower)) return "self";
+  if (/\bmyself\b/.test(lower)) return "self";
+  return "";
+}
+
+function extractMessagingRecipientLabel(text, platform = "") {
+  const raw = normalizeSpace(text);
+  const patterns = platform === "telegram"
+    ? [
+        /\btelegram(?:\s+message)?\s+to\s+([a-z][a-z0-9 .'-]{1,40}?)(?=\s+(?:"|'|chat\b|:)|$)/i,
+        /\bsend\s+telegram\s+([a-z][a-z0-9 .'-]{1,40}?)(?=\s+(?:"|'|chat\b|:)|$)/i
+      ]
+    : platform === "whatsapp"
+      ? [
+          /\bwhats\s?app(?:\s+message)?\s+to\s+([a-z][a-z0-9 .'-]{1,40}?)(?=\s+(?:"|'|:)|$)/i,
+          /\bsend\s+whats\s?app\s+([a-z][a-z0-9 .'-]{1,40}?)(?=\s+(?:"|'|:)|$)/i
+        ]
+      : platform === "sms"
+        ? [
+            /\b(?:sms|text)(?:\s+message)?\s+to\s+([a-z][a-z0-9 .'-]{1,40}?)(?=\s+(?:"|'|:)|$)/i,
+            /\b(?:sms|text)\s+([a-z][a-z0-9 .'-]{1,40}?)(?=\s+(?:"|'|:)|$)/i
+          ]
+        : [];
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    if (match?.[1]) return normalizeSpace(match[1]);
+  }
   return "";
 }
 
@@ -68,6 +115,77 @@ function defaultEmailSubject(text, body) {
   if (/\bfollow[- ]?up\b/.test(lower)) return "Follow-up";
   if (body && body.toLowerCase().startsWith("reminder:")) return "Reminder";
   return "Aika message";
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatLocalIso(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}:00`;
+}
+
+function parseClockTime(token) {
+  const match = String(token || "").trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || 0);
+  const meridiem = String(match[3] || "").toLowerCase();
+  if (meridiem === "pm" && hours < 12) hours += 12;
+  if (meridiem === "am" && hours === 12) hours = 0;
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 23 || minutes > 59) return null;
+  return { hours, minutes };
+}
+
+function buildIsoFromDateAndTime(dateToken, timeToken) {
+  const dateMatch = String(dateToken || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const time = parseClockTime(timeToken);
+  if (!dateMatch || !time) return "";
+  return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T${pad2(time.hours)}:${pad2(time.minutes)}:00`;
+}
+
+function extractCalendarRange(text) {
+  const raw = String(text || "");
+  const quotedTitle = extractQuoted(raw);
+
+  let match = raw.match(/\bfrom\s+(\d{4}-\d{2}-\d{2}[ t]\d{1,2}:\d{2}(?::\d{2})?)\s+to\s+(\d{4}-\d{2}-\d{2}[ t]\d{1,2}:\d{2}(?::\d{2})?)/i);
+  if (match) {
+    return {
+      title: quotedTitle,
+      start: match[1].replace(" ", "T"),
+      end: match[2].replace(" ", "T")
+    };
+  }
+
+  match = raw.match(/\bon\s+(\d{4}-\d{2}-\d{2})\s+from\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+to\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+  if (match) {
+    return {
+      title: quotedTitle,
+      start: buildIsoFromDateAndTime(match[1], match[2]),
+      end: buildIsoFromDateAndTime(match[1], match[3])
+    };
+  }
+
+  match = raw.match(/\b(today|tomorrow)\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)(?:\s+for\s+(\d+)\s*(minutes?|hours?))?/i);
+  if (match) {
+    const start = new Date();
+    if (String(match[1]).toLowerCase() === "tomorrow") start.setDate(start.getDate() + 1);
+    const time = parseClockTime(match[2]);
+    if (time) {
+      start.setHours(time.hours, time.minutes, 0, 0);
+      const end = new Date(start.getTime());
+      const amount = Number(match[3] || 30);
+      const unit = String(match[4] || "minutes").toLowerCase();
+      end.setMinutes(end.getMinutes() + (unit.startsWith("hour") ? amount * 60 : amount));
+      return {
+        title: quotedTitle,
+        start: formatLocalIso(start),
+        end: formatLocalIso(end)
+      };
+    }
+  }
+
+  return { title: quotedTitle, start: "", end: "" };
 }
 
 function buildIntent({ name, actionType, params = {}, missing = [], confidence = 0.6, raw = "", notes = "" } = {}) {
@@ -330,6 +448,10 @@ function parseSendMessage(text) {
     ? "slack"
     : /\btelegram\b/.test(lower)
       ? "telegram"
+      : /\bwhats\s?app\b/.test(lower)
+        ? "whatsapp"
+        : /\b(?:sms|text)\b/.test(lower)
+          ? "sms"
       : /\bdiscord\b/.test(lower)
         ? "discord"
         : "";
@@ -337,6 +459,8 @@ function parseSendMessage(text) {
 
   const message = extractQuoted(raw) || extractAfterColon(raw);
   let destination = "";
+  const alias = extractMessagingRecipientAlias(raw);
+  const recipientLabel = extractMessagingRecipientLabel(raw, platform);
   if (platform === "slack") {
     const channelMatch = raw.match(/#([\w-]+)/);
     const channelLabel = raw.match(/channel\s+([\w-]+)/i);
@@ -344,6 +468,8 @@ function parseSendMessage(text) {
   } else if (platform === "telegram") {
     const chatMatch = raw.match(/chat\s*id\s*(\d+)/i) || raw.match(/chat\s+(\d+)/i);
     destination = chatMatch?.[1] || "";
+  } else if (platform === "whatsapp" || platform === "sms") {
+    destination = extractPhones(raw)[0] || "";
   } else if (platform === "discord") {
     const channelMatch = raw.match(/channel\s*id\s*(\d+)/i) || raw.match(/channel\s+(\d+)/i);
     destination = channelMatch?.[1] || "";
@@ -352,20 +478,40 @@ function parseSendMessage(text) {
   const missing = [];
   if (!message) missing.push("message");
   if (!destination) {
-    missing.push(platform === "slack" ? "channel" : platform === "telegram" ? "chatId" : "channelId");
+    missing.push(
+      platform === "slack"
+        ? "channel"
+        : platform === "telegram"
+          ? "chatId"
+          : platform === "discord"
+            ? "channelId"
+            : "to"
+    );
   }
 
   const actionType = platform === "slack"
     ? "messaging.slackPost"
     : platform === "telegram"
       ? "messaging.telegramSend"
+      : platform === "whatsapp"
+        ? "messaging.whatsapp.send"
+        : platform === "sms"
+          ? "messaging.sms.send"
       : "messaging.discordSend";
 
   const params = platform === "slack"
     ? { channel: destination, message }
     : platform === "telegram"
       ? { chatId: destination, message }
+      : platform === "whatsapp" || platform === "sms"
+        ? { to: destination, text: message }
       : { channelId: destination, message };
+  if (alias && (platform === "whatsapp" || platform === "sms")) {
+    params.toAlias = alias;
+  }
+  if (recipientLabel && (platform === "telegram" || platform === "whatsapp" || platform === "sms")) {
+    params.recipientLabel = recipientLabel;
+  }
 
   return buildIntent({
     name: "send_message",
@@ -373,6 +519,41 @@ function parseSendMessage(text) {
     params,
     missing,
     confidence: 0.75,
+    raw: text
+  });
+}
+
+function parseCalendarHold(text) {
+  const raw = String(text || "").trim();
+  const lower = raw.toLowerCase();
+  const actionVerb = /\b(schedule|create|add|put|book|set up|hold|block)\b/.test(lower);
+  const calendarCue = /\b(calendar|event|appointment|meeting|hold)\b/.test(lower);
+  if (!actionVerb || !calendarCue) return null;
+  if (/\bcheck (?:my )?(?:calendar|schedule)\b/.test(lower)) return null;
+
+  const range = extractCalendarRange(raw);
+  const labelTitle =
+    raw.match(/\b(?:called|titled)\s+["']?([^"']+?)["']?(?=\s+(?:on|from|today|tomorrow)\b|$)/i)?.[1]?.trim() ||
+    raw.match(/\b(?:calendar|event|meeting|hold)\s+for\s+(.+?)(?=\s+(?:on|from|today|tomorrow)\b|$)/i)?.[1]?.trim() ||
+    "";
+  const title = range.title || labelTitle;
+
+  const params = {};
+  const missing = [];
+  if (title) params.title = title;
+  else missing.push("title");
+  if (range.start) params.start = range.start;
+  else missing.push("start");
+  if (range.end) params.end = range.end;
+  else missing.push("end");
+  missing.push("timezone");
+
+  return buildIntent({
+    name: "calendar_hold",
+    actionType: "calendar.proposeHold",
+    params,
+    missing,
+    confidence: 0.72,
     raw: text
   });
 }
@@ -516,6 +697,7 @@ export function routeIntent(text) {
     parseMeetingScheduleFollowup(raw) ||
     parseMeetingCreateTask(raw) ||
     parseMeetingCreateTicket(raw) ||
+    parseCalendarHold(raw) ||
     parseSendEmail(raw) ||
     parseTodo(raw) ||
     parseSendMessage(raw) ||
@@ -533,16 +715,26 @@ export function buildMissingPrompt(intent) {
   }
   if (intent.name === "send_message") {
     const needsMessage = missing.includes("message");
-    const needsChannel = missing.includes("channel") || missing.includes("channelId") || missing.includes("chatId");
+    const needsChannel = missing.includes("channel") || missing.includes("channelId") || missing.includes("chatId") || missing.includes("to");
     if (needsMessage && needsChannel) {
-      return "Tell me the destination (channel/chat ID) and the message text.";
+      return "Tell me the destination and the message text.";
     }
     if (needsChannel) {
-      return "Which channel or chat ID should I send it to?";
+      return "Which destination should I send it to?";
     }
     if (needsMessage) {
       return "What message should I send?";
     }
+  }
+  if (intent.name === "calendar_hold") {
+    const needsTitle = missing.includes("title");
+    const needsTime = missing.includes("start") || missing.includes("end");
+    if (needsTitle && needsTime) {
+      return "What should I call the event, and when should it start and end?";
+    }
+    if (needsTitle) return "What should I call the calendar hold?";
+    if (needsTime) return "When should the calendar hold start and end?";
+    if (missing.includes("timezone")) return "Which timezone should I use for the calendar hold?";
   }
   if (intent.name === "fetch_doc") {
     return "Which doc should I fetch? Share a Google Doc link or document ID.";

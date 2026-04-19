@@ -9,9 +9,9 @@ export default async function handler(req, res) {
   const primaryBase = String(
     process.env.AIKA_SERVER_URL
     || process.env.NEXT_PUBLIC_SERVER_URL
-    || "http://127.0.0.1:3512"
+    || "http://127.0.0.1:8787"
   ).trim();
-  const fallbackBase = "http://127.0.0.1:3512";
+  const fallbackBase = "http://127.0.0.1:8787";
   const bases = Array.from(new Set([primaryBase, fallbackBase]));
   const requestOrigin = getRequestOrigin(req);
   const uiBase = String(req.query?.ui_base || req.query?.uiBase || requestOrigin || "");

@@ -5,21 +5,31 @@ import * as THREE from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import {
+  blendLenoreConversationPose,
+  computeLenoreConversationPose,
+  getLenoreTransitionAlpha
+} from "../avatar/lenoreConversationStates.js";
+import {
+  composeLenoreFaceTargets,
+  getLipsyncTargetsAtElapsed
+} from "../avatar/lenoreFacialPerformance.js";
 
 THREE.Cache.enabled = true;
 
 const DEFAULT_APPEARANCE = {
   cameraFrame: "bust",
-  hairColor: "#09050a",
-  skinColor: "#f3d9e2",
-  lipColor: "#5b0c22",
-  outfitColor: "#12070f",
-  accentColor: "#5b1025",
-  eyeGlow: 0.7,
-  matte: 0.88,
+  hairColor: "#0a080c",
+  skinColor: "#efd5dd",
+  lipColor: "#4d091d",
+  outfitColor: "#120b14",
+  accentColor: "#2c1627",
+  eyeGlow: 0.5,
+  matte: 0.94,
+  showHostessGown: false,
   showHair: true,
-  showJacket: false,
-  showWrap: false,
+  showJacket: true,
+  showWrap: true,
   showGloves: true,
   showTop: true,
   showBottoms: true,
@@ -30,60 +40,71 @@ const DEFAULT_APPEARANCE = {
 };
 
 const DEFAULT_MOTION = {
-  playClip: true,
-  clipName: "auto",
-  clipSpeed: 0.85,
-  clipWeight: 1,
-  idleHead: 0.35,
-  talkHead: 0.2,
-  bodySway: 0.2,
-  choreographyPreset: "auto",
+  playClip: false,
+  clipName: "runtime_pose",
+  clipSpeed: 0.75,
+  clipWeight: 0,
+  idleHead: 0.28,
+  talkHead: 0.16,
+  bodySway: 0.1,
+  choreographyPreset: "quiet_poise",
+  empathyMode: "steady",
   responseClass: "neutral",
   motionIntensity: 0.45,
   idleState: "paused"
 };
 
-const GENERIC_BLENDSHAPE_MAP = {
-  jawOpen: {
-    Mouth_Lips_Jaw_Adjust: 0.82,
-    Mouth_Open: 0.34,
-    V_Open: 0.28
-  },
-  mouthOpen: {
-    Mouth_Open: 0.92,
-    Mouth_Lips_Part: 0.46,
-    V_Open: 0.7
-  },
-  mouthPucker: {
-    Mouth_Pucker: 0.92,
-    Mouth_Pucker_Open: 0.68,
-    V_Tight_O: 0.78
-  },
-  mouthFunnel: {
-    Mouth_Pucker_Open: 0.9,
-    Mouth_Pucker: 0.56,
-    V_Tight_O: 0.76
-  },
-  mouthSmile: {
-    Mouth_Smile: 0.82,
-    Mouth_Widen: 0.42,
-    V_Wide: 0.45
-  },
-  mouthFrown: {
-    Mouth_Frown: 0.7,
-    Mouth_Down: 0.32
-  },
-  browInnerUp: {
-    Brow_Raise_Inner_Left: 0.68,
-    Brow_Raise_Inner_Right: 0.68
-  },
-  browDownLeft: {
-    Brow_Drop_Left: 0.72
-  },
-  browDownRight: {
-    Brow_Drop_Right: 0.72
-  }
-};
+const SAFE_FRAME_SET = new Set(["portrait", "bust"]);
+const SAFE_HEAD_TARGETS = new Set([
+  "Eye_Blink_Left",
+  "Eye_Blink_Right",
+  "Eye_Blink_L",
+  "Eye_Blink_R",
+  "Eye_Close_L",
+  "Eye_Close_R",
+  "Eye_Squint_Left",
+  "Eye_Squint_Right",
+  "Brow_Raise_Outer_Left",
+  "Brow_Raise_Outer_Right",
+  "Brow_Raise_Inner_Left",
+  "Brow_Raise_Inner_Right",
+  "Brow_Drop_Left",
+  "Brow_Drop_Right",
+  "Cheek_Raise_L",
+  "Cheek_Raise_R",
+  "Mouth_Open",
+  "Mouth_Lips_Part",
+  "Mouth_Lips_Tight",
+  "Mouth_Pucker",
+  "Mouth_Pucker_Open",
+  "Mouth_Widen",
+  "Mouth_Smile",
+  "Mouth_Frown",
+  "Mouth_Bottom_Lip_Bite",
+  "Mouth_Top_Lip_Up"
+]);
+const SAFE_BROW_TARGETS = new Set([
+  "Eye_Blink_Left",
+  "Eye_Blink_Right",
+  "Eye_Blink_L",
+  "Eye_Blink_R",
+  "Eye_Close_L",
+  "Eye_Close_R",
+  "Eye_Squint_Left",
+  "Eye_Squint_Right",
+  "Brow_Raise_Outer_Left",
+  "Brow_Raise_Outer_Right",
+  "Brow_Raise_Inner_Left",
+  "Brow_Raise_Inner_Right",
+  "Brow_Drop_Left",
+  "Brow_Drop_Right",
+  "Cheek_Raise_L",
+  "Cheek_Raise_R"
+]);
+const SAFE_TONGUE_TARGETS = new Set(["V_Tongue_Out", "V_Tongue_up"]);
+
+const SUPPORTED_PRESETS = new Set(["formal_dark", "stage_entrance", "goth_hostess"]);
+const SUPPORTED_CHOREOGRAPHY_PRESETS = new Set(["auto", "quiet_poise", "command_presence", "soft_reassure"]);
 
 function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
@@ -91,89 +112,51 @@ function clamp(value, min = 0, max = 1) {
 
 function normalizeAppearance(input) {
   const next = { ...DEFAULT_APPEARANCE, ...(input || {}) };
+  const preset = String(next.preset || "formal_dark").trim().toLowerCase();
   const frame = String(next.cameraFrame || DEFAULT_APPEARANCE.cameraFrame).toLowerCase();
-  next.cameraFrame = ["portrait", "bust", "waist", "three_quarter", "full"].includes(frame) ? frame : DEFAULT_APPEARANCE.cameraFrame;
+  next.preset = SUPPORTED_PRESETS.has(preset) ? preset : "formal_dark";
+  next.cameraFrame = SAFE_FRAME_SET.has(frame) ? frame : DEFAULT_APPEARANCE.cameraFrame;
   next.eyeGlow = clamp(Number(next.eyeGlow ?? DEFAULT_APPEARANCE.eyeGlow), 0, 1);
   next.matte = clamp(Number(next.matte ?? DEFAULT_APPEARANCE.matte), 0.4, 1);
+  next.showHostessGown = false;
+  // The purchased Lenore conversation runtime has an exposed left upper-arm seam when the jacket is hidden.
+  // Clamp unstable reveal combinations until the asset is repaired.
+  next.showJacket = true;
+  next.showTop = true;
+  next.showBottoms = true;
+  next.showGloves = next.showGloves !== false;
+  next.showStockings = next.showStockings !== false;
+  next.showBoots = next.showBoots !== false;
   return next;
 }
 
 function normalizeMotion(input) {
   const next = { ...DEFAULT_MOTION, ...(input || {}) };
-  next.clipName = String(next.clipName || DEFAULT_MOTION.clipName).trim().toLowerCase() || DEFAULT_MOTION.clipName;
-  next.clipSpeed = clamp(Number(next.clipSpeed ?? DEFAULT_MOTION.clipSpeed), 0, 2);
-  next.clipWeight = clamp(Number(next.clipWeight ?? DEFAULT_MOTION.clipWeight), 0, 1);
+  const choreographyPreset = String(next.choreographyPreset || DEFAULT_MOTION.choreographyPreset).trim().toLowerCase();
+  next.clipName = "runtime_pose";
+  next.clipSpeed = clamp(Number(next.clipSpeed ?? DEFAULT_MOTION.clipSpeed), 0.5, 1.2);
+  next.clipWeight = 0;
   next.idleHead = clamp(Number(next.idleHead ?? DEFAULT_MOTION.idleHead), 0, 1);
   next.talkHead = clamp(Number(next.talkHead ?? DEFAULT_MOTION.talkHead), 0, 1);
   next.bodySway = clamp(Number(next.bodySway ?? DEFAULT_MOTION.bodySway), 0, 1);
-  next.choreographyPreset = String(next.choreographyPreset || DEFAULT_MOTION.choreographyPreset).trim().toLowerCase() || DEFAULT_MOTION.choreographyPreset;
+  next.choreographyPreset = SUPPORTED_CHOREOGRAPHY_PRESETS.has(choreographyPreset) ? choreographyPreset : DEFAULT_MOTION.choreographyPreset;
+  next.empathyMode = String(next.empathyMode || DEFAULT_MOTION.empathyMode).trim().toLowerCase() || DEFAULT_MOTION.empathyMode;
   next.motionIntensity = clamp(Number(next.motionIntensity ?? DEFAULT_MOTION.motionIntensity), 0, 1.5);
   next.responseClass = String(next.responseClass || DEFAULT_MOTION.responseClass).trim().toLowerCase() || DEFAULT_MOTION.responseClass;
   next.idleState = String(next.idleState || DEFAULT_MOTION.idleState).trim().toLowerCase() || DEFAULT_MOTION.idleState;
-  next.playClip = Boolean(next.playClip);
+  next.playClip = false;
   return next;
 }
 
 function resolvePreferredClipName(animations = [], runtime) {
-  if (!animations.length) return "";
-  const poseClip = animations.find((clip) => /lenoreruntimepose/i.test(clip.name));
-  const sourceMotion = animations.find((clip) => /^armature\|.*tempmotion/i.test(clip.name) || /tempmotion/i.test(clip.name));
-  const clipName = String(runtime?.motion?.clipName || "auto").toLowerCase();
-  const choreographyPreset = String(runtime?.motion?.choreographyPreset || "auto").toLowerCase();
-  const responseClass = String(runtime?.motion?.responseClass || "neutral").toLowerCase();
-  const idleState = String(runtime?.motion?.idleState || "paused").toLowerCase();
-  const isRestState = ["paused", "ready", "listening", "thinking"].includes(idleState) && !runtime?.isTalking;
-  if (isRestState && poseClip) return poseClip.name;
-  if (clipName === "runtime_pose" && poseClip) return poseClip.name;
-  if (clipName === "source_motion" && sourceMotion) return sourceMotion.name;
-  if (clipName === "auto") {
-    if (choreographyPreset === "source_driven" && sourceMotion) return sourceMotion.name;
-    if (["command_presence", "quiet_poise", "soft_reassure"].includes(choreographyPreset) && poseClip) return poseClip.name;
-    if (choreographyPreset === "velvet_tease" && sourceMotion) return sourceMotion.name;
-    if (
-      (
-        runtime?.isTalking ||
-        runtime?.mood === "happy" ||
-        runtime?.mood === "teasing" ||
-        runtime?.mood === "surprised" ||
-        ["teasing", "playful", "surprised"].includes(responseClass)
-      ) &&
-      sourceMotion
-    ) {
-      return sourceMotion.name;
-    }
-    if (["directive", "executive", "reflective", "comfort", "question"].includes(responseClass) && poseClip) {
-      return poseClip.name;
-    }
-    if (poseClip) return poseClip.name;
-  }
-  return poseClip?.name || sourceMotion?.name || animations[0]?.name || "";
+  return "";
 }
 
 function resolveMotionState(animations = [], runtime) {
-  const idleState = String(runtime.motion.idleState || "paused").toLowerCase();
-  const requestedClipName = runtime.motion.playClip ? resolvePreferredClipName(animations, runtime) : "";
-  const requestedClipKind = /lenoreruntimepose/i.test(requestedClipName)
-    ? "runtime_pose"
-    : /tempmotion/i.test(requestedClipName)
-      ? "source_motion"
-      : requestedClipName
-        ? "other"
-        : "none";
-  const isRestState = ["paused", "ready", "listening", "thinking"].includes(idleState) && !runtime.isTalking;
-  // The imported Lenore scene pose is a cleaner hostess rest than the exported runtime clip.
-  // Keep the scene's neutral pose in rest/hostess states and reserve clip playback for source motion.
-  const selectedClipName =
-    requestedClipKind === "runtime_pose" || isRestState
-      ? ""
-      : requestedClipName;
-  const clipKind =
-    requestedClipKind === "runtime_pose" || isRestState
-      ? "runtime_pose"
-      : requestedClipKind;
-
-  let clipSpeed = runtime.motion.clipSpeed;
-  let clipWeight = runtime.motion.clipWeight;
+  const clipKind = "authored_state";
+  const selectedClipName = "";
+  let clipSpeed = 0;
+  let clipWeight = 0;
   let idleHead = runtime.motion.idleHead;
   let talkHead = runtime.motion.talkHead;
   let bodySway = runtime.motion.bodySway;
@@ -181,25 +164,9 @@ function resolveMotionState(animations = [], runtime) {
   const responseClass = String(runtime.motion.responseClass || "neutral");
   const motionIntensity = clamp(Number(runtime.motion.motionIntensity ?? 0.45), 0, 1.5);
 
-  if (clipKind === "runtime_pose") {
-    clipSpeed = 1;
-    clipWeight = Math.min(1, clipWeight * 0.95);
-    idleHead *= runtime.isListening ? 1.18 : 1;
-    talkHead *= runtime.isTalking ? 1.2 : 0.85;
-    bodySway *= runtime.isTalking ? 0.7 : 1;
-  } else if (clipKind === "source_motion") {
-    const moodBoost =
-      runtime.mood === "happy" || runtime.mood === "teasing" || runtime.mood === "surprised"
-        ? 1.18
-        : runtime.mood === "thinking" || runtime.mood === "concerned"
-          ? 0.78
-          : 1;
-    clipSpeed *= runtime.isTalking ? 1.08 * moodBoost : runtime.isListening ? 0.82 : 0.92;
-    clipWeight *= runtime.isTalking ? 0.96 : runtime.isListening ? 0.74 : 0.82;
-    idleHead *= 0.35;
-    talkHead *= 0.52;
-    bodySway *= runtime.isTalking ? 0.32 : 0.18;
-  }
+  idleHead *= runtime.isListening ? 1.12 : 1;
+  talkHead *= runtime.isTalking ? 1.16 : 0.88;
+  bodySway *= runtime.isTalking ? 0.72 : 1;
 
   if (responseClass === "teasing") {
     clipSpeed *= 1.05;
@@ -247,10 +214,6 @@ function resolveMotionState(animations = [], runtime) {
     idleHead *= 0.72;
     talkHead *= 0.78;
     bodySway *= 0.62;
-  } else if (choreographyPreset === "source_driven") {
-    clipSpeed *= 1.02;
-    talkHead *= 1.02;
-    bodySway *= 1.04;
   }
 
   clipSpeed *= 0.9 + motionIntensity * 0.22;
@@ -268,180 +231,6 @@ function resolveMotionState(animations = [], runtime) {
   };
 }
 
-function getMoodTargets(runtime) {
-  const responseClass = String(runtime?.motion?.responseClass || "neutral").toLowerCase();
-  if (runtime.mood === "happy") {
-    return {
-      Mouth_Smile: 0.18,
-      Brow_Raise_Outer_Left: 0.08,
-      Brow_Raise_Outer_Right: 0.08,
-      Cheek_Raise_L: 0.06,
-      Cheek_Raise_R: 0.06
-    };
-  }
-  if (runtime.mood === "teasing") {
-    return {
-      Mouth_Smile: 0.15,
-      Mouth_Widen: 0.08,
-      Brow_Raise_Outer_Left: 0.14,
-      Brow_Drop_Right: 0.08,
-      Eye_Squint_Left: 0.04
-    };
-  }
-  if (runtime.mood === "thinking") {
-    return {
-      Brow_Drop_Left: 0.08,
-      Brow_Drop_Right: 0.08,
-      Mouth_Lips_Tight: 0.11
-    };
-  }
-  if (runtime.mood === "concerned") {
-    return {
-      Mouth_Frown: 0.12,
-      Brow_Raise_Inner_Left: 0.07,
-      Brow_Raise_Inner_Right: 0.07
-    };
-  }
-  if (runtime.mood === "surprised") {
-    return {
-      Eye_Wide_Left: 0.12,
-      Eye_Wide_Right: 0.12,
-      Brow_Raise_Outer_Left: 0.1,
-      Brow_Raise_Outer_Right: 0.1
-    };
-  }
-  if (responseClass === "comfort") {
-    return {
-      Mouth_Smile: 0.08,
-      Brow_Raise_Inner_Left: 0.04,
-      Brow_Raise_Inner_Right: 0.04
-    };
-  }
-  if (responseClass === "directive" || responseClass === "executive") {
-    return {
-      Mouth_Lips_Tight: 0.1,
-      Brow_Drop_Left: 0.05,
-      Brow_Drop_Right: 0.05
-    };
-  }
-  if (responseClass === "question") {
-    return {
-      Brow_Raise_Outer_Left: 0.09,
-      Brow_Raise_Outer_Right: 0.04,
-      Mouth_Lips_Part: 0.05
-    };
-  }
-  return {};
-}
-
-function phonemeToTargets(phoneme = "") {
-  const key = String(phoneme || "").toLowerCase().trim();
-  if (["m", "b", "p"].includes(key)) return { Mouth_Plosive: 0.98, V_Explosive: 0.82, Mouth_Lips_Tight: 0.42, Mouth_Lips_Part: 0.02, Mouth_Open: 0.01 };
-  if (["f", "v"].includes(key)) return { V_Dental_Lip: 0.86, Mouth_Bottom_Lip_Bite: 0.68, Mouth_Lips_Part: 0.08, Mouth_Open: 0.03 };
-  if (["o", "u", "w"].includes(key)) return { Mouth_Pucker: 0.58, Mouth_Pucker_Open: 0.62, V_Tight_O: 0.82, Mouth_Lips_Part: 0.16, Mouth_Open: 0.08 };
-  if (["e", "i", "y"].includes(key)) return { Mouth_Widen: 0.54, Mouth_Smile: 0.1, V_Wide: 0.72, Mouth_Lips_Part: 0.18, Mouth_Open: 0.1 };
-  if (["a", "h"].includes(key)) return { Mouth_Open: 0.62, Mouth_Lips_Part: 0.34, V_Open: 0.72, Mouth_Lips_Jaw_Adjust: 0.28 };
-  if (["s", "z"].includes(key)) return { V_Affricate: 0.52, V_Dental_Lip: 0.2, Mouth_Lips_Part: 0.11, Mouth_Open: 0.02, Mouth_Widen: 0.14, Mouth_Top_Lip_Up: 0.08 };
-  if (["ch", "j", "sh"].includes(key)) return { V_Affricate: 0.82, Mouth_Lips_Part: 0.18, Mouth_Open: 0.05, Mouth_Widen: 0.1, Mouth_Pucker_Open: 0.08, Mouth_Top_Lip_Up: 0.04 };
-  if (key === "th") return { V_Dental_Lip: 0.32, Mouth_Top_Lip_Up: 0.24, V_Tongue_Out: 0.48, Mouth_Lips_Part: 0.12, Mouth_Open: 0.04 };
-  if (["n", "l", "d", "t", "r"].includes(key)) return { Mouth_Lips_Part: 0.18, Mouth_Open: 0.08, V_Tongue_up: 0.16, Mouth_Lips_Tight: 0.06 };
-  if (["k", "g", "c", "q"].includes(key)) return { Mouth_Lips_Part: 0.16, Mouth_Open: 0.12, Mouth_Lips_Jaw_Adjust: 0.14 };
-  return {};
-}
-
-function stabilizeMouthTargets(targets = {}) {
-  const next = { ...targets };
-  const pucker = Math.max(next.Mouth_Pucker || 0, next.Mouth_Pucker_Open || 0, next.V_Tight_O || 0);
-  const wide = Math.max(next.Mouth_Widen || 0, next.V_Wide || 0);
-  const plosive = Math.max(next.Mouth_Plosive || 0, next.V_Explosive || 0);
-  const affricate = Math.max(next.V_Affricate || 0, next.V_Dental_Lip || 0);
-
-  if (pucker > 0.4) {
-    next.Mouth_Open = Math.min(next.Mouth_Open || 0, 0.18);
-    next.V_Open = Math.min(next.V_Open || 0, 0.22);
-  }
-  if (wide > 0.4) {
-    next.Mouth_Pucker = Math.min(next.Mouth_Pucker || 0, 0.08);
-    next.Mouth_Pucker_Open = Math.min(next.Mouth_Pucker_Open || 0, 0.12);
-  }
-  if (plosive > 0.35) {
-    next.Mouth_Open = Math.min(next.Mouth_Open || 0, 0.04);
-    next.Mouth_Lips_Part = Math.min(next.Mouth_Lips_Part || 0, 0.08);
-  }
-  if (affricate > 0.35) {
-    next.Mouth_Open = Math.min(next.Mouth_Open || 0, 0.1);
-    next.Mouth_Pucker = Math.min(next.Mouth_Pucker || 0, 0.12);
-  }
-  if ((next.V_Tongue_Out || 0) > 0.2) {
-    next.Mouth_Open = Math.min(next.Mouth_Open || 0, 0.08);
-    next.Mouth_Lips_Part = Math.min(Math.max(next.Mouth_Lips_Part || 0, 0.11), 0.18);
-    next.V_Dental_Lip = Math.min(next.V_Dental_Lip || 0, 0.48);
-  }
-  if ((next.V_Affricate || 0) > 0.45) {
-    next.Mouth_Open = Math.min(next.Mouth_Open || 0, 0.08);
-    next.Mouth_Lips_Part = Math.min(Math.max(next.Mouth_Lips_Part || 0, 0.12), 0.2);
-    next.V_Tongue_Out = Math.min(next.V_Tongue_Out || 0, 0.08);
-    next.Mouth_Top_Lip_Up = Math.max(next.Mouth_Top_Lip_Up || 0, 0.06);
-  }
-  next.Mouth_Open = clamp(next.Mouth_Open || 0, 0, 0.72);
-  next.V_Open = clamp(next.V_Open || 0, 0, 0.8);
-  next.Mouth_Lips_Part = clamp(next.Mouth_Lips_Part || 0, 0, 0.46);
-  next.V_Tongue_Out = clamp(next.V_Tongue_Out || 0, 0, 0.6);
-  next.Mouth_Top_Lip_Up = clamp(next.Mouth_Top_Lip_Up || 0, 0, 0.4);
-  return next;
-}
-
-function mergeTargetMaps(...maps) {
-  const out = {};
-  for (const map of maps) {
-    if (!map) continue;
-    for (const [key, value] of Object.entries(map)) {
-      out[key] = Math.max(out[key] || 0, Number(value) || 0);
-    }
-  }
-  return out;
-}
-
-function scaleTargets(targets, scale = 1) {
-  const out = {};
-  for (const [key, value] of Object.entries(targets || {})) {
-    out[key] = (Number(value) || 0) * scale;
-  }
-  return out;
-}
-
-function blendTargetMaps(fromTargets, toTargets, weight) {
-  const out = {};
-  const keys = new Set([
-    ...Object.keys(fromTargets || {}),
-    ...Object.keys(toTargets || {})
-  ]);
-  for (const key of keys) {
-    const fromValue = fromTargets?.[key] || 0;
-    const toValue = toTargets?.[key] || 0;
-    out[key] = fromValue + (toValue - fromValue) * weight;
-  }
-  return out;
-}
-
-function mapGenericBlendshapesToLenore(blendshapes = {}) {
-  const out = {};
-  for (const [key, value] of Object.entries(blendshapes || {})) {
-    const normalizedKey = String(key || "").trim();
-    const amount = Number(value) || 0;
-    if (!amount) continue;
-    const mapped = GENERIC_BLENDSHAPE_MAP[normalizedKey];
-    if (mapped) {
-      for (const [targetName, targetValue] of Object.entries(mapped)) {
-        out[targetName] = Math.max(out[targetName] || 0, targetValue * amount);
-      }
-      continue;
-    }
-    out[normalizedKey] = Math.max(out[normalizedKey] || 0, amount);
-  }
-  return out;
-}
-
 function applyMorphTargets(dict, influences, targets = {}, mode = "max") {
   for (const [name, value] of Object.entries(targets || {})) {
     const index = dict?.[name];
@@ -453,118 +242,41 @@ function applyMorphTargets(dict, influences, targets = {}, mode = "max") {
   }
 }
 
-function buildCueTargets(cue, talkIntensity = 0.5) {
-  const phonemeTargets = phonemeToTargets(cue?.phoneme || "");
-  const genericTargets = scaleTargets(mapGenericBlendshapesToLenore(cue?.blendshapes || {}), 0.6);
-  const duration = Math.max(40, Number(cue?.duration) || 90);
-  const durationScale = duration < 70 ? 0.82 : duration > 150 ? 1.06 : 0.94;
-  const scale = (0.68 + clamp(talkIntensity, 0, 1) * 0.26) * durationScale;
-  return stabilizeMouthTargets(scaleTargets(mergeTargetMaps(genericTargets, phonemeTargets), scale));
-}
-
-function smoothstep(edge0, edge1, x) {
-  const t = clamp((x - edge0) / Math.max(edge1 - edge0, 0.0001), 0, 1);
-  return t * t * (3 - 2 * t);
-}
-
-function getLipsyncTargetsAtElapsed(lipsyncSequence, elapsedMs, talkIntensity) {
-  const seq = Array.isArray(lipsyncSequence?.sequences) ? lipsyncSequence.sequences : [];
-  if (!seq.length) return null;
-
-  let index = seq.findIndex((item) => elapsedMs < item.time + item.duration);
-  if (index < 0) index = seq.length - 1;
-  const current = seq[index];
-  if (!current) return null;
-  const next = seq[index + 1] || null;
-  const prev = seq[index - 1] || null;
-  const currentTargets = buildCueTargets(current, talkIntensity);
-
-  const currentEnd = current.time + current.duration;
-  const fadeWindow = Math.min(95, Math.max(50, current.duration * 0.42));
-  let currentWeight = 1;
-  let nextWeight = 0;
-
-  if (elapsedMs < current.time) {
-    currentWeight = smoothstep(current.time - fadeWindow, current.time, elapsedMs);
-  } else if (elapsedMs > currentEnd - fadeWindow) {
-    currentWeight = 1 - smoothstep(currentEnd - fadeWindow, currentEnd, elapsedMs);
-  }
-
-  if (next) {
-    const nextTargets = buildCueTargets(next, talkIntensity);
-    if (elapsedMs >= currentEnd - fadeWindow) {
-      nextWeight = smoothstep(currentEnd - fadeWindow, currentEnd + fadeWindow, elapsedMs);
-      return tightenConsonantClusters(
-        blendTargetMaps(
-          scaleTargets(currentTargets, clamp(currentWeight, 0, 1)),
-          scaleTargets(nextTargets, clamp(nextWeight, 0, 1)),
-          0.5
-        ),
-        prev,
-        current,
-        next
-      );
-    }
-  }
-
-  return tightenConsonantClusters(scaleTargets(currentTargets, clamp(currentWeight, 0.25, 1)), prev, current, next);
-}
-
-function getPhonemeFamily(phoneme = "") {
-  const key = String(phoneme || "").toLowerCase().trim();
-  if (["m", "b", "p"].includes(key)) return "plosive";
-  if (["f", "v", "th"].includes(key)) return "dental";
-  if (["ch", "j", "sh", "s", "z"].includes(key)) return "affricate";
-  if (["n", "l", "d", "t", "r", "k", "g", "c", "q"].includes(key)) return "consonant";
-  if (["o", "u", "w"].includes(key)) return "rounded";
-  if (["e", "i", "y"].includes(key)) return "wide";
-  if (["a", "h"].includes(key)) return "open";
-  return "other";
-}
-
-function tightenConsonantClusters(targets, prevCue, currentCue, nextCue) {
-  const next = { ...(targets || {}) };
-  const currentFamily = getPhonemeFamily(currentCue?.phoneme);
-  const prevFamily = getPhonemeFamily(prevCue?.phoneme);
-  const nextFamily = getPhonemeFamily(nextCue?.phoneme);
-  const currentDuration = Number(currentCue?.duration) || 90;
-  const nextGap = nextCue ? Math.max(0, Number(nextCue.time || 0) - (Number(currentCue?.time || 0) + currentDuration)) : 999;
-  const prevGap = prevCue ? Math.max(0, Number(currentCue?.time || 0) - (Number(prevCue.time || 0) + (Number(prevCue.duration) || 90))) : 999;
-  const isConsonant = ["plosive", "dental", "affricate", "consonant"].includes(currentFamily);
-  const isCluster =
-    isConsonant &&
-    (
-      (["plosive", "dental", "affricate", "consonant"].includes(prevFamily) && prevGap < 70) ||
-      (["plosive", "dental", "affricate", "consonant"].includes(nextFamily) && nextGap < 70) ||
-      currentDuration < 72
-    );
-  if (!isCluster) return next;
-
-  next.Mouth_Open = Math.min(next.Mouth_Open || 0, 0.1);
-  next.V_Open = Math.min(next.V_Open || 0, 0.16);
-  next.Mouth_Lips_Jaw_Adjust = Math.min(next.Mouth_Lips_Jaw_Adjust || 0, 0.18);
-  next.Mouth_Lips_Part = Math.min(Math.max(next.Mouth_Lips_Part || 0, 0.1), 0.22);
-
-  if (currentFamily === "plosive") {
-    next.Mouth_Lips_Tight = Math.max(next.Mouth_Lips_Tight || 0, 0.42);
-    next.Mouth_Plosive = Math.max(next.Mouth_Plosive || 0, 0.86);
-  } else if (currentFamily === "dental") {
-    next.V_Dental_Lip = Math.max(next.V_Dental_Lip || 0, 0.6);
-    if (String(currentCue?.phoneme || "").toLowerCase() === "th") {
-      next.V_Tongue_Out = Math.max(next.V_Tongue_Out || 0, 0.38);
-      next.Mouth_Top_Lip_Up = Math.max(next.Mouth_Top_Lip_Up || 0, 0.16);
-      next.Mouth_Bottom_Lip_Bite = Math.min(next.Mouth_Bottom_Lip_Bite || 0, 0.12);
-      next.Mouth_Lips_Part = Math.min(Math.max(next.Mouth_Lips_Part || 0, 0.12), 0.18);
-    } else {
-      next.Mouth_Bottom_Lip_Bite = Math.max(next.Mouth_Bottom_Lip_Bite || 0, 0.32);
-    }
-  } else if (currentFamily === "affricate") {
-    next.V_Affricate = Math.max(next.V_Affricate || 0, 0.7);
-    next.Mouth_Widen = Math.max(next.Mouth_Widen || 0, 0.12);
-    next.V_Tongue_Out = Math.min(next.V_Tongue_Out || 0, 0.05);
-    next.Mouth_Top_Lip_Up = Math.max(next.Mouth_Top_Lip_Up || 0, 0.08);
+function filterTargetsByPrefix(targets = {}, prefixes = []) {
+  const next = {};
+  for (const [key, value] of Object.entries(targets || {})) {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) next[key] = value;
   }
   return next;
+}
+
+function filterTargetsToAllowedSet(targets = {}, allowed = new Set()) {
+  const next = {};
+  for (const [key, value] of Object.entries(targets || {})) {
+    if (!allowed.has(key)) continue;
+    next[key] = Number(value) || 0;
+  }
+  return next;
+}
+
+function scaleTargetMap(targets = {}, scale = 1) {
+  const next = {};
+  for (const [key, value] of Object.entries(targets || {})) {
+    next[key] = (Number(value) || 0) * scale;
+  }
+  return next;
+}
+
+function categorizeMorphMesh(node) {
+  const meshName = String(node?.name || "");
+  const materialNames = (Array.isArray(node?.material) ? node.material : [node?.material])
+    .map((material) => String(material?.name || ""));
+  const label = `${meshName} ${materialNames.join(" ")}`.toLowerCase();
+  if (meshName === "CC_Base_Tongue") return "tongue";
+  if (meshName === "Eyebrow") return "brow";
+  if (meshName === "CC_Base_Body_6" || label.includes("std_eyelash")) return "lash";
+  if (meshName === "CC_Base_Body_1" || label.includes("std_skin_head")) return "head";
+  return null;
 }
 
 function boneMatches(node, names) {
@@ -579,28 +291,28 @@ function isFbxModelUrl(modelUrl = "") {
 function getFrameConfig(frame, size) {
   const configs = {
     portrait: {
-      height: size.y * 0.48,
-      headroom: size.y * 0.08,
-      width: size.x * 0.26,
-      minDistance: 1.45
+      height: size.y * 0.22,
+      headroom: size.y * 0.07,
+      width: size.x * 0.18,
+      minDistance: 1.1
     },
     bust: {
-      height: size.y * 0.62,
-      headroom: size.y * 0.06,
-      width: size.x * 0.34,
-      minDistance: 1.65
+      height: size.y * 0.3,
+      headroom: size.y * 0.065,
+      width: size.x * 0.22,
+      minDistance: 1.22
     },
     waist: {
-      height: size.y * 0.82,
-      headroom: size.y * 0.045,
-      width: size.x * 0.46,
-      minDistance: 1.95
+      height: size.y * 0.5,
+      headroom: size.y * 0.04,
+      width: size.x * 0.3,
+      minDistance: 1.48
     },
     three_quarter: {
-      height: size.y * 0.94,
+      height: size.y * 0.82,
       headroom: size.y * 0.04,
-      width: size.x * 0.56,
-      minDistance: 2.18
+      width: size.x * 0.46,
+      minDistance: 1.92
     },
     full: {
       height: size.y * 1.08,
@@ -612,154 +324,26 @@ function getFrameConfig(frame, size) {
   return configs[frame] || configs.bust;
 }
 
-function getHostessChoreography(runtime, t, motionState) {
-  const responseClass = String(runtime.motion.responseClass || "neutral").toLowerCase();
-  const idleState = String(runtime.motion.idleState || "paused").toLowerCase();
-  const choreographyPreset = String(runtime.motion.choreographyPreset || "auto").toLowerCase();
-  const intensity = clamp(Number(runtime.motion.motionIntensity ?? 0.45), 0, 1.5);
-  const talkWeight = runtime.isTalking ? 1 : 0;
-  const listenWeight = runtime.isListening ? 1 : 0;
-  const base = {
-    hipsY: Math.sin(t * 0.58) * 0.02,
-    neckX: -0.012 + Math.sin(t * 1.05) * 0.006,
-    neckY: Math.sin(t * 0.76) * 0.018,
-    headX: Math.sin(t * 0.94) * 0.014 + listenWeight * 0.014 + talkWeight * 0.01,
-    headY: Math.sin(t * 0.68) * 0.028 + talkWeight * Math.sin(t * 1.9) * 0.01,
-    headZ: Math.sin(t * 0.5) * 0.008,
-    leftShoulderZ: -0.022 + Math.sin(t * 0.72) * 0.01,
-    rightShoulderZ: 0.022 - Math.sin(t * 0.66) * 0.01,
-    leftArmZ: -0.03,
-    rightArmZ: 0.03,
-    leftForeArmZ: -0.02,
-    rightForeArmZ: 0.02
-  };
-
-  if (responseClass === "teasing") {
-    base.headZ += 0.018;
-    base.headY += 0.016;
-    base.leftShoulderZ += 0.018;
-    base.rightShoulderZ -= 0.008;
-    base.leftArmZ -= 0.035;
-    base.leftForeArmZ -= 0.05;
-  } else if (responseClass === "comfort") {
-    base.neckX += 0.01;
-    base.headX += 0.014;
-    base.leftArmZ += 0.018;
-    base.rightArmZ -= 0.018;
-    base.leftForeArmZ += 0.028;
-    base.rightForeArmZ -= 0.028;
-  } else if (responseClass === "directive" || responseClass === "executive") {
-    base.hipsY *= 0.55;
-    base.headY *= 0.55;
-    base.headZ *= 0.2;
-    base.leftShoulderZ -= 0.012;
-    base.rightShoulderZ += 0.012;
-    base.leftArmZ += 0.012;
-    base.rightArmZ -= 0.012;
-  } else if (responseClass === "reflective" || responseClass === "question") {
-    base.neckX -= 0.008;
-    base.headY += 0.01;
-    base.headZ += 0.008;
-    base.leftShoulderZ += 0.01;
-  } else if (responseClass === "surprised" || responseClass === "playful") {
-    base.headX += 0.012;
-    base.headY += 0.014;
-    base.leftShoulderZ += 0.008;
-    base.rightShoulderZ -= 0.008;
-  }
-
-  if (choreographyPreset === "velvet_tease") {
-    base.headZ += 0.026;
-    base.headY += 0.012;
-    base.leftShoulderZ += 0.022;
-    base.leftArmZ -= 0.042;
-    base.leftForeArmZ -= 0.058;
-  } else if (choreographyPreset === "command_presence") {
-    base.hipsY *= 0.45;
-    base.headZ *= 0.18;
-    base.leftShoulderZ -= 0.016;
-    base.rightShoulderZ += 0.016;
-    base.leftArmZ += 0.014;
-    base.rightArmZ -= 0.014;
-  } else if (choreographyPreset === "soft_reassure") {
-    base.neckX += 0.014;
-    base.headX += 0.016;
-    base.leftArmZ += 0.024;
-    base.rightArmZ -= 0.024;
-    base.leftForeArmZ += 0.032;
-    base.rightForeArmZ -= 0.032;
-  } else if (choreographyPreset === "quiet_poise") {
-    base.hipsY *= 0.22;
-    base.headY *= 0.4;
-    base.headZ *= 0.24;
-    base.leftShoulderZ = -0.014;
-    base.rightShoulderZ = 0.014;
-    base.leftArmZ = -0.018;
-    base.rightArmZ = 0.018;
-  } else if (choreographyPreset === "source_driven") {
-    base.headY += Math.sin(t * 1.2) * 0.008;
-    base.leftShoulderZ += 0.008;
-    base.rightShoulderZ -= 0.008;
-  }
-
-  if (idleState === "paused") {
-    const invite = (Math.sin(t * 0.42) + 1) * 0.5;
-    base.hipsY = Math.sin(t * 0.62) * 0.014;
-    base.neckX = -0.014 + Math.sin(t * 0.44) * 0.008;
-    base.neckY = Math.sin(t * 0.48) * 0.016;
-    base.headX = 0.02 + Math.sin(t * 0.6) * 0.02;
-    base.headY = Math.sin(t * 0.44) * 0.024;
-    base.headZ = 0.012 + Math.sin(t * 0.38) * 0.01;
-    base.leftShoulderZ = -0.018 + invite * 0.01;
-    base.rightShoulderZ = 0.018 - invite * 0.01;
-    base.leftArmZ = -0.012 - invite * 0.008;
-    base.rightArmZ = 0.012 + invite * 0.008;
-    base.leftForeArmZ = -0.012 - invite * 0.012;
-    base.rightForeArmZ = 0.012 + invite * 0.012;
-  } else if (idleState === "ready") {
-    base.hipsY *= 0.55;
-    base.headX = base.headX * 0.75 + 0.008;
-    base.headY *= 0.66;
-    base.headZ += 0.006;
-    base.leftShoulderZ *= 0.78;
-    base.rightShoulderZ *= 0.78;
-    base.leftForeArmZ -= 0.01;
-    base.rightForeArmZ += 0.01;
-  } else if (idleState === "listening") {
-    base.neckX += 0.02;
-    base.headX += 0.024;
-    base.headY += 0.01;
-    base.leftShoulderZ += 0.014;
-    base.rightShoulderZ -= 0.014;
-    base.leftArmZ -= 0.02;
-    base.rightArmZ += 0.02;
-  } else if (idleState === "thinking") {
-    base.hipsY *= 0.3;
-    base.neckX -= 0.014;
-    base.headY += 0.018;
-    base.headZ += 0.012;
-    base.leftShoulderZ += 0.01;
-    base.leftForeArmZ -= 0.022;
-  } else if (idleState === "speaking") {
-    base.headX += 0.01;
-    base.headY += Math.sin(t * 1.75) * 0.014;
-    base.leftShoulderZ += 0.012;
-    base.rightShoulderZ -= 0.008;
-  }
-
-  const clipOverlay = motionState.clipKind === "source_motion" ? 0.32 : motionState.clipKind === "runtime_pose" ? 0.72 : 1;
-  const scale = (0.92 + intensity * 0.1) * clipOverlay;
-  for (const key of Object.keys(base)) base[key] *= scale;
-
-  if (["paused", "ready", "listening", "thinking"].includes(idleState) && !runtime.isTalking) {
-    base.leftShoulderZ -= 1.02;
-    base.rightShoulderZ += 1.02;
-    base.leftArmZ -= 1.34;
-    base.rightArmZ += 1.34;
-    base.leftForeArmZ -= 0.18;
-    base.rightForeArmZ += 0.18;
-  }
-  return base;
+function applyCameraFrame(camera, bounds, frame) {
+  if (!camera || !bounds?.size || !bounds?.center || !bounds?.box) return;
+  const { size, center, box } = bounds;
+  const frameConfig = getFrameConfig(frame, size);
+  const maxY = box.max.y;
+  const minY = box.min.y;
+  const targetHeight = frameConfig.height;
+  const headroom = frameConfig.headroom;
+  const targetTop = maxY + headroom;
+  const targetBottom = frame === "full" ? minY - size.y * 0.03 : targetTop - targetHeight;
+  const focusY = (targetTop + targetBottom) / 2;
+  const fovRadians = THREE.MathUtils.degToRad(camera.fov);
+  const fitDistanceY = ((targetTop - targetBottom) / 2) / Math.tan(fovRadians / 2);
+  const horizontalTan = Math.tan((fovRadians * camera.aspect) / 2);
+  const widthForFit = frameConfig.width;
+  const fitDistanceX = widthForFit / Math.max(horizontalTan, 0.1);
+  const distance = Math.max(fitDistanceY, fitDistanceX, frameConfig.minDistance);
+  camera.position.set(center.x, focusY, center.z + distance);
+  camera.lookAt(center.x, focusY, center.z);
+  camera.updateProjectionMatrix();
 }
 
 function normalizeSceneTransform(root, isFbx) {
@@ -793,20 +377,160 @@ function normalizeSceneTransform(root, isFbx) {
   return { box, size, center };
 }
 
+function buildHostessAttire(bounds, appearance) {
+  const { box, size, center } = bounds;
+  const group = new THREE.Group();
+  group.name = "LenoreHostessAttire";
+  group.position.set(center.x, 0, center.z);
+
+  const outfitMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(appearance.outfitColor),
+    roughness: 0.9,
+    metalness: 0.02,
+    side: THREE.DoubleSide
+  });
+  const accentMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(appearance.accentColor),
+    roughness: 0.62,
+    metalness: 0.14,
+    side: THREE.DoubleSide
+  });
+
+  const shoulderRadius = Math.max(size.x * 0.16, 0.2);
+  const bodiceTopRadius = Math.max(size.x * 0.18, 0.22);
+  const bodiceBottomRadius = Math.max(size.x * 0.14, 0.17);
+  const hemRadius = Math.max(size.x * 0.26, 0.34);
+  const shoulderBandHeight = Math.max(size.y * 0.075, 0.12);
+  const bodiceHeight = Math.max(size.y * 0.24, 0.38);
+  const skirtHeight = Math.max(size.y * 0.52, 0.98);
+  const shouldersY = box.max.y - size.y * 0.23;
+  const bodiceY = shouldersY - bodiceHeight * 0.52;
+  const skirtY = bodiceY - bodiceHeight * 0.48 - skirtHeight * 0.48 + 0.02;
+
+  const shoulderBand = new THREE.Mesh(
+    new THREE.CylinderGeometry(shoulderRadius * 1.04, shoulderRadius * 1.08, shoulderBandHeight, 28, 1, true),
+    outfitMaterial
+  );
+  shoulderBand.position.set(0, shouldersY, 0);
+
+  const bodice = new THREE.Mesh(
+    new THREE.CylinderGeometry(bodiceTopRadius, bodiceBottomRadius, bodiceHeight, 30, 1, true),
+    outfitMaterial
+  );
+  bodice.position.set(0, bodiceY, 0);
+
+  const skirt = new THREE.Mesh(
+    new THREE.CylinderGeometry(bodiceBottomRadius * 1.02, hemRadius, skirtHeight, 32, 1, true),
+    outfitMaterial
+  );
+  skirt.position.set(0, skirtY, 0);
+
+  const neckline = new THREE.Mesh(
+    new THREE.TorusGeometry(shoulderRadius * 0.96, 0.016, 12, 44),
+    accentMaterial
+  );
+  neckline.rotation.x = Math.PI / 2;
+  neckline.position.set(0, shouldersY + shoulderBandHeight * 0.02, 0.006);
+
+  const waistBand = new THREE.Mesh(
+    new THREE.TorusGeometry(bodiceBottomRadius * 1.03, 0.016, 10, 40),
+    accentMaterial
+  );
+  waistBand.rotation.x = Math.PI / 2;
+  waistBand.position.set(0, bodiceY - bodiceHeight * 0.44, 0);
+
+  const sleeveUpperL = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.066, 1, 18, 1, true), outfitMaterial);
+  const sleeveLowerL = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.052, 1, 18, 1, true), outfitMaterial);
+  const sleeveUpperR = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.066, 1, 18, 1, true), outfitMaterial);
+  const sleeveLowerR = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.052, 1, 18, 1, true), outfitMaterial);
+
+  for (const mesh of [shoulderBand, bodice, skirt, neckline, waistBand, sleeveUpperL, sleeveLowerL, sleeveUpperR, sleeveLowerR]) {
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 2;
+    if (mesh.material && "polygonOffset" in mesh.material) {
+      mesh.material.polygonOffset = true;
+      mesh.material.polygonOffsetFactor = -2;
+      mesh.material.polygonOffsetUnits = -2;
+    }
+    group.add(mesh);
+  }
+
+  group.visible = appearance.showHostessGown !== false;
+  return {
+    group,
+    materials: { outfitMaterial, accentMaterial },
+    meshes: { shoulderBand, bodice, skirt, neckline, waistBand, sleeveUpperL, sleeveLowerL, sleeveUpperR, sleeveLowerR }
+  };
+}
+
+function alignCylinderToPoints(mesh, start, end, radiusScale = 1) {
+  if (!mesh || !start || !end) return;
+  const vec = new THREE.Vector3().subVectors(end, start);
+  const length = Math.max(vec.length(), 0.001);
+  mesh.position.copy(start).addScaledVector(vec, 0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vec.clone().normalize());
+  mesh.scale.set(radiusScale, length, radiusScale);
+}
+
+function updateHostessAttire(attire, appearance, bones, root) {
+  if (!attire?.group) return;
+  attire.group.visible = appearance.showHostessGown !== false;
+  const frame = String(appearance.cameraFrame || "bust").toLowerCase();
+  const showSkirt = !["portrait", "bust"].includes(frame);
+  const showWaistBand = frame !== "portrait";
+  if (attire.meshes?.waistBand) attire.meshes.waistBand.visible = attire.group.visible && showWaistBand;
+  if (attire.meshes?.shoulderBand) attire.meshes.shoulderBand.visible = attire.group.visible;
+  if (attire.meshes?.bodice) attire.meshes.bodice.visible = attire.group.visible;
+  if (attire.meshes?.skirt) attire.meshes.skirt.visible = attire.group.visible && showSkirt;
+  if (attire.meshes?.neckline) attire.meshes.neckline.visible = attire.group.visible;
+  const showSleeves = attire.group.visible;
+  if (attire.meshes?.sleeveUpperL) attire.meshes.sleeveUpperL.visible = showSleeves;
+  if (attire.meshes?.sleeveLowerL) attire.meshes.sleeveLowerL.visible = showSleeves;
+  if (attire.meshes?.sleeveUpperR) attire.meshes.sleeveUpperR.visible = showSleeves;
+  if (attire.meshes?.sleeveLowerR) attire.meshes.sleeveLowerR.visible = showSleeves;
+  attire.materials?.outfitMaterial?.color?.set?.(appearance.outfitColor);
+  attire.materials?.accentMaterial?.color?.set?.(appearance.accentColor);
+  if (attire.materials?.outfitMaterial) {
+    attire.materials.outfitMaterial.roughness = 0.84 + appearance.matte * 0.12;
+    attire.materials.outfitMaterial.needsUpdate = true;
+  }
+  if (attire.materials?.accentMaterial) {
+    attire.materials.accentMaterial.roughness = 0.48 + appearance.matte * 0.12;
+    attire.materials.accentMaterial.needsUpdate = true;
+  }
+  if (!showSleeves || !root) return;
+  const toLocal = (bone) => {
+    if (!bone?.getWorldPosition) return null;
+    return root.worldToLocal(bone.getWorldPosition(new THREE.Vector3()));
+  };
+  const leftArm = toLocal(bones?.leftArm);
+  const leftForeArm = toLocal(bones?.leftForeArm);
+  const leftHand = toLocal(bones?.leftHand);
+  const rightArm = toLocal(bones?.rightArm);
+  const rightForeArm = toLocal(bones?.rightForeArm);
+  const rightHand = toLocal(bones?.rightHand);
+  alignCylinderToPoints(attire.meshes?.sleeveUpperL, leftArm, leftForeArm, 0.13);
+  alignCylinderToPoints(attire.meshes?.sleeveLowerL, leftForeArm, leftHand, 0.11);
+  alignCylinderToPoints(attire.meshes?.sleeveUpperR, rightArm, rightForeArm, 0.13);
+  alignCylinderToPoints(attire.meshes?.sleeveLowerR, rightForeArm, rightHand, 0.11);
+}
+
 function applyAppearanceToScene(root, appearance) {
   root.traverse((node) => {
     if (!node.isMesh) return;
     const meshName = String(node.name || "").toLowerCase();
     const materials = Array.isArray(node.material) ? node.material : [node.material];
+    const hostessMode = appearance.showHostessGown !== false;
     node.frustumCulled = false;
     node.castShadow = true;
     node.receiveShadow = true;
     if (meshName.startsWith("hair")) node.visible = appearance.showHair;
-    if (meshName.startsWith("jacket")) node.visible = appearance.showJacket;
-    if (meshName.startsWith("wrap")) node.visible = appearance.showWrap;
-    if (meshName.startsWith("gloves")) node.visible = appearance.showGloves;
-    if (meshName.startsWith("top")) node.visible = appearance.showTop;
-    if (meshName.startsWith("underwear")) node.visible = appearance.showBottoms;
+    if (meshName.startsWith("jacket")) node.visible = hostessMode ? false : appearance.showJacket;
+    if (meshName.startsWith("wrap")) node.visible = hostessMode ? false : appearance.showWrap;
+    if (meshName.startsWith("gloves")) node.visible = hostessMode ? false : appearance.showGloves;
+    if (meshName.startsWith("top")) node.visible = hostessMode ? false : appearance.showTop;
+    if (meshName.startsWith("underwear")) node.visible = hostessMode ? false : appearance.showBottoms;
     if (meshName.startsWith("stockings")) node.visible = appearance.showStockings;
     if (meshName.startsWith("boots")) node.visible = appearance.showBoots;
     if (meshName.startsWith("choker_spikes")) node.visible = appearance.showChoker;
@@ -831,12 +555,17 @@ function applyAppearanceToScene(root, appearance) {
         meshName.startsWith("stockings") ||
         meshName.startsWith("boots") ||
         meshName.startsWith("top") ||
+        meshName.startsWith("choker_spikes") ||
+        meshName.startsWith("piercing") ||
         meshName.startsWith("underwear") ||
         label.includes("jacket") ||
         label.includes("gloves") ||
         label.includes("pantyhose") ||
         label.includes("boots") ||
-        label.includes("top");
+        label.includes("top") ||
+        label.includes("choker") ||
+        label.includes("piercing") ||
+        label.includes("metal");
 
       if ("side" in material) material.side = THREE.DoubleSide;
       if ("shadowSide" in material) material.shadowSide = THREE.DoubleSide;
@@ -844,10 +573,16 @@ function applyAppearanceToScene(root, appearance) {
       if ("depthTest" in material) material.depthTest = true;
       if ("roughness" in material) material.roughness = 0.68 + appearance.matte * 0.24;
       if ("metalness" in material) material.metalness = label.includes("metal") ? 0.3 : 0.02;
-      if ("envMapIntensity" in material) material.envMapIntensity = label.includes("eye") ? 0.3 + appearance.eyeGlow * 0.25 : 0.06;
+      if ("envMapIntensity" in material) material.envMapIntensity = label.includes("eye") ? 0.08 + appearance.eyeGlow * 0.12 : 0.03;
 
       if (isHair) {
         material.color?.set?.(appearance.hairColor);
+        if ("emissive" in material && material.emissive?.set) {
+          material.emissive.set(appearance.hairColor);
+          material.emissive.multiplyScalar(0.02);
+        }
+        if ("emissiveIntensity" in material) material.emissiveIntensity = 0.08;
+        if ("roughness" in material) material.roughness = 0.72 + appearance.matte * 0.16;
         if ("transparent" in material) material.transparent = true;
         if ("alphaTest" in material) material.alphaTest = 0.35;
       } else if (isSkin) {
@@ -883,6 +618,7 @@ function applyAppearanceToScene(root, appearance) {
 export default function LenoreAvatar({
   className,
   modelUrl,
+  reviewModelUrl,
   mood,
   isTalking,
   talkIntensity = 0.5,
@@ -904,9 +640,17 @@ export default function LenoreAvatar({
     rotation: null,
     scale: null
   });
+  const conversationPoseRef = useRef(null);
+  const sceneBoundsRef = useRef({
+    box: null,
+    size: null,
+    center: null
+  });
+  const appliedFrameRef = useRef("");
   const mixerRef = useRef(null);
   const motionActionsRef = useRef(new Map());
   const rootRef = useRef(null);
+  const hostessAttireRef = useRef(null);
   const morphMeshesRef = useRef([]);
   const morphBaseRef = useRef([]);
   const bonesRef = useRef({
@@ -918,7 +662,9 @@ export default function LenoreAvatar({
     leftArm: null,
     rightArm: null,
     leftForeArm: null,
-    rightForeArm: null
+    rightForeArm: null,
+    leftHand: null,
+    rightHand: null
   });
   const boneBaseRef = useRef({});
   const stateRef = useRef({
@@ -935,6 +681,11 @@ export default function LenoreAvatar({
   const [isReady, setIsReady] = useState(false);
   const appearance = useMemo(() => normalizeAppearance(avatarAppearance), [avatarAppearance]);
   const motion = useMemo(() => normalizeMotion(avatarMotion), [avatarMotion]);
+  const activeModelUrl = useMemo(() => {
+    const frame = String(appearance?.cameraFrame || "waist").toLowerCase();
+    const wantsReviewModel = frame === "full";
+    return wantsReviewModel && reviewModelUrl ? reviewModelUrl : modelUrl;
+  }, [appearance?.cameraFrame, modelUrl, reviewModelUrl]);
 
   useEffect(() => {
     stateRef.current = {
@@ -952,7 +703,7 @@ export default function LenoreAvatar({
   useEffect(() => {
     let cancelled = false;
     async function init() {
-      if (!hostRef.current || !modelUrl) return;
+      if (!hostRef.current || !activeModelUrl) return;
       setLoadError("");
       setIsReady(false);
 
@@ -990,8 +741,8 @@ export default function LenoreAvatar({
       scene.add(rim);
 
       try {
-        const isFbx = isFbxModelUrl(modelUrl);
-        const sanitizedModelUrl = String(modelUrl || "");
+        const isFbx = isFbxModelUrl(activeModelUrl);
+        const sanitizedModelUrl = String(activeModelUrl || "");
         const baseUrl = sanitizedModelUrl.replace(/[?#].*$/, "").replace(/[^/]+$/, "");
         let root;
         let animations = [];
@@ -1050,7 +801,9 @@ export default function LenoreAvatar({
           leftArm: null,
           rightArm: null,
           leftForeArm: null,
-          rightForeArm: null
+          rightForeArm: null,
+          leftHand: null,
+          rightHand: null
         };
         root.traverse((node) => {
           if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
@@ -1066,10 +819,21 @@ export default function LenoreAvatar({
             if (boneMatches(node, ["RightArm", "CC_Base_R_Upperarm"])) bones.rightArm = node;
             if (boneMatches(node, ["LeftForeArm", "CC_Base_L_Forearm"])) bones.leftForeArm = node;
             if (boneMatches(node, ["RightForeArm", "CC_Base_R_Forearm"])) bones.rightForeArm = node;
+            if (boneMatches(node, ["LeftHand", "CC_Base_L_Hand"])) bones.leftHand = node;
+            if (boneMatches(node, ["RightHand", "CC_Base_R_Hand"])) bones.rightHand = node;
           }
         });
-        morphMeshesRef.current = morphMeshes;
-        morphBaseRef.current = morphMeshes.map((mesh) => [...mesh.morphTargetInfluences]);
+        const trackedMorphMeshes = morphMeshes
+          .map((mesh) => ({
+            mesh,
+            role: categorizeMorphMesh(mesh)
+          }))
+          .filter((entry) => Boolean(entry.role));
+        morphMeshesRef.current = trackedMorphMeshes;
+        morphBaseRef.current = trackedMorphMeshes.map(({ mesh }) => {
+          const influences = mesh.morphTargetInfluences || [];
+          return Array.from(influences);
+        });
         bonesRef.current = bones;
         boneBaseRef.current = Object.fromEntries(
           Object.entries(bones)
@@ -1089,24 +853,14 @@ export default function LenoreAvatar({
           rotation: root.rotation.clone(),
           scale: root.scale.clone()
         };
+        sceneBoundsRef.current = { box, size, center };
+        hostessAttireRef.current = buildHostessAttire(sceneBoundsRef.current, stateRef.current.appearance);
+        root.add(hostessAttireRef.current.group);
         const cameraFrame = stateRef.current.appearance.cameraFrame || "bust";
-        const frameConfig = getFrameConfig(cameraFrame, size);
-        const maxY = box.max.y;
-        const minY = box.min.y;
-        const targetHeight = frameConfig.height;
-        const headroom = frameConfig.headroom;
-        const targetTop = maxY + headroom;
-        const targetBottom = cameraFrame === "full" ? minY - size.y * 0.03 : targetTop - targetHeight;
-        const focusY = (targetTop + targetBottom) / 2;
-        const fovRadians = THREE.MathUtils.degToRad(camera.fov);
-        const fitDistanceY = ((targetTop - targetBottom) / 2) / Math.tan(fovRadians / 2);
-        const horizontalTan = Math.tan((fovRadians * camera.aspect) / 2);
-        const widthForFit = frameConfig.width;
-        const fitDistanceX = widthForFit / Math.max(horizontalTan, 0.1);
-        const distance = Math.max(fitDistanceY, fitDistanceX, frameConfig.minDistance);
-        camera.position.set(center.x, focusY, center.z + distance);
-        camera.lookAt(center.x, focusY, center.z);
+        applyCameraFrame(camera, sceneBoundsRef.current, cameraFrame);
+        appliedFrameRef.current = cameraFrame;
         applyAppearanceToScene(root, stateRef.current.appearance);
+        updateHostessAttire(hostessAttireRef.current, stateRef.current.appearance, bonesRef.current, root);
         setIsReady(true);
       } catch (error) {
         setLoadError(error?.message || "lenore_load_failed");
@@ -1117,13 +871,22 @@ export default function LenoreAvatar({
       const animate = () => {
         const runtimeBase = stateRef.current;
         let runtime = runtimeBase;
+        let blinkOverride = null;
         if (typeof window !== "undefined" && window.__lenoreDebug?.override) {
           const override = window.__lenoreDebug.override || {};
+          if ("blink" in override) blinkOverride = Number(override.blink);
           runtime = {
             ...runtimeBase,
             ...("mood" in override ? { mood: override.mood } : {}),
             ...("isTalking" in override ? { isTalking: Boolean(override.isTalking) } : {}),
             ...("isListening" in override ? { isListening: Boolean(override.isListening) } : {}),
+            ...("talkIntensity" in override ? { talkIntensity: Number(override.talkIntensity) || runtimeBase.talkIntensity } : {}),
+            ...("lipsyncSequence" in override ? { lipsyncSequence: override.lipsyncSequence } : {}),
+            ...("lipsyncStartTimeMs" in override ? { lipsyncStartTimeMs: Number(override.lipsyncStartTimeMs) || 0 } : {}),
+            appearance: {
+              ...runtimeBase.appearance,
+              ...(override.appearance || {})
+            },
             motion: {
               ...runtimeBase.motion,
               ...(override.motion || {})
@@ -1138,6 +901,12 @@ export default function LenoreAvatar({
         if (!root) return;
 
         applyAppearanceToScene(root, runtime.appearance);
+        updateHostessAttire(hostessAttireRef.current, runtime.appearance, bonesRef.current, root);
+        const cameraFrame = runtime.appearance.cameraFrame || "bust";
+        if (cameraRef.current && sceneBoundsRef.current.size && cameraFrame !== appliedFrameRef.current) {
+          applyCameraFrame(cameraRef.current, sceneBoundsRef.current, cameraFrame);
+          appliedFrameRef.current = cameraFrame;
+        }
         const animationEntries = Array.from(motionActionsRef.current.keys()).map((name) => ({ name }));
         const motionState = resolveMotionState(animationEntries, runtime);
         if (typeof window !== "undefined" && window.__lenoreDebug) {
@@ -1145,6 +914,7 @@ export default function LenoreAvatar({
             selectedClipName: motionState.selectedClipName,
             clipKind: motionState.clipKind,
             choreographyPreset: runtime.motion.choreographyPreset,
+            empathyMode: runtime.motion.empathyMode,
             responseClass: runtime.motion.responseClass,
             motionIntensity: runtime.motion.motionIntensity,
             idleState: runtime.motion.idleState
@@ -1159,153 +929,138 @@ export default function LenoreAvatar({
           bone.scale.copy(base.scale);
         }
         if (motionActionsRef.current.size) {
-          for (const [name, action] of motionActionsRef.current.entries()) {
-            const enabled = Boolean(motionState.selectedClipName) && name === motionState.selectedClipName && motionState.clipWeight > 0.001;
-            if (enabled) {
-              if (!action.isRunning()) action.reset().play();
-              action.enabled = true;
-              action.paused = false;
-              action.setEffectiveWeight(motionState.clipWeight);
-            } else {
-              if (action.isRunning()) action.stop();
-              action.enabled = false;
-              action.paused = true;
-              action.setEffectiveWeight(0);
-            }
+          for (const [, action] of motionActionsRef.current.entries()) {
+            if (action.isRunning()) action.stop();
+            action.enabled = false;
+            action.paused = true;
+            action.setEffectiveWeight(0);
           }
         }
-        if (mixerRef.current && motionActionsRef.current.size && runtime.motion.playClip && motionState.selectedClipName) {
-          mixerRef.current.update(dt * motionState.clipSpeed);
-        }
 
-        const elapsedMs =
-          runtime.isTalking && runtime.lipsyncStartTimeMs
-            ? Math.max(0, performance.now() - runtime.lipsyncStartTimeMs)
-            : 0;
-        const cueTargets =
-          runtime.isTalking && runtime.lipsyncSequence?.sequences?.length && runtime.lipsyncStartTimeMs
-            ? getLipsyncTargetsAtElapsed(runtime.lipsyncSequence, elapsedMs, runtime.talkIntensity)
-            : null;
-
-        for (const mesh of meshes) {
-          if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) continue;
-          const dict = mesh.morphTargetDictionary;
+        for (let i = 0; i < meshes.length; i += 1) {
+          const mesh = meshes[i]?.mesh;
+          if (!mesh?.morphTargetDictionary || !mesh?.morphTargetInfluences) continue;
           const influences = mesh.morphTargetInfluences;
-          const base = morphBaseRef.current[morphMeshesRef.current.indexOf(mesh)] || [];
-          for (const [name, index] of Object.entries(dict)) {
+          const base = morphBaseRef.current[i] || [];
+          for (const [, index] of Object.entries(mesh.morphTargetDictionary)) {
             influences[index] = base[index] ?? 0;
           }
-
-          if (blinkTimer > 3.5) {
-            const blinkValue = Math.max(0, 1 - Math.abs(((blinkTimer - 3.5) / 0.12) - 1));
-            if (dict.Eye_Blink_L != null) influences[dict.Eye_Blink_L] = Math.max(influences[dict.Eye_Blink_L], blinkValue);
-            if (dict.Eye_Blink_R != null) influences[dict.Eye_Blink_R] = Math.max(influences[dict.Eye_Blink_R], blinkValue);
-            if (blinkTimer > 3.74) blinkTimer = 0;
-          }
-
-          applyMorphTargets(dict, influences, getMoodTargets(runtime));
-
-          if (runtime.isListening) {
-            applyMorphTargets(dict, influences, {
-              Brow_Raise_Inner_Left: 0.04,
-              Brow_Raise_Inner_Right: 0.04,
-              Eye_Wide_Left: 0.03,
-              Eye_Wide_Right: 0.03
-            });
-          }
-
-          if (cueTargets) {
-            applyMorphTargets(dict, influences, cueTargets);
-          } else if (runtime.isTalking) {
-            const pulse = (Math.sin(t * 6.3) + 1) * 0.5;
-            const fallbackTargets = {
-              Mouth_Open: 0.05 + pulse * 0.14,
-              Mouth_Lips_Part: 0.06 + pulse * 0.08,
-              V_Open: 0.04 + pulse * 0.12
-            };
-            applyMorphTargets(dict, influences, fallbackTargets);
-          }
         }
 
-        const choreography = getHostessChoreography(runtime, t, motionState);
-        const idleState = String(runtime.motion.idleState || "paused").toLowerCase();
-        const isHostessRestState = ["paused", "ready", "listening", "thinking"].includes(idleState) && !runtime.isTalking;
+        const targetConversation = computeLenoreConversationPose(runtime, motionState, t);
+        const transitionAlpha = getLenoreTransitionAlpha(dt, targetConversation.stateName);
+        const conversationPose = blendLenoreConversationPose(
+          conversationPoseRef.current,
+          targetConversation.pose,
+          transitionAlpha
+        );
+        conversationPoseRef.current = conversationPose;
         const rootBase = rootBaseTransformRef.current;
         if (rootBase?.position && rootBase?.rotation && rootBase?.scale && rootRef.current) {
-          const breath = (Math.sin(t * 1.18) + 1) * 0.5;
-          const sway = Math.sin(t * (runtime.isTalking ? 1.5 : runtime.isListening ? 1.0 : 0.82));
-          const turn = Math.sin(t * 0.48);
           rootRef.current.position.copy(rootBase.position);
           rootRef.current.rotation.copy(rootBase.rotation);
           rootRef.current.scale.copy(rootBase.scale);
-          rootRef.current.position.y += 0.012 + breath * 0.02;
-          rootRef.current.position.x += sway * 0.012;
-          rootRef.current.rotation.y += turn * 0.028;
-          rootRef.current.rotation.x += runtime.isTalking ? 0.012 : 0.006;
+          rootRef.current.position.y += conversationPose?.root?.y || 0;
+          rootRef.current.position.x += conversationPose?.root?.x || 0;
+          rootRef.current.rotation.y += conversationPose?.root?.rotY || 0;
+          rootRef.current.rotation.x += conversationPose?.root?.rotX || 0;
         }
         if (bonesRef.current.hips) {
-          bonesRef.current.hips.rotation.y = choreography.hipsY * motionState.bodySway;
+          bonesRef.current.hips.rotation.y = conversationPose?.hips?.y || 0;
         }
         if (bonesRef.current.neck) {
-          bonesRef.current.neck.rotation.x = choreography.neckX * motionState.idleHead;
-          bonesRef.current.neck.rotation.y = choreography.neckY * motionState.idleHead;
+          bonesRef.current.neck.rotation.x = conversationPose?.neck?.x || 0;
+          bonesRef.current.neck.rotation.y = conversationPose?.neck?.y || 0;
         }
         if (bonesRef.current.head) {
-          const headScale = Math.max(motionState.idleHead, motionState.talkHead);
-          bonesRef.current.head.rotation.x = choreography.headX * headScale;
-          bonesRef.current.head.rotation.y = choreography.headY * headScale;
-          bonesRef.current.head.rotation.z = choreography.headZ * motionState.idleHead;
+          bonesRef.current.head.rotation.x = conversationPose?.head?.x || 0;
+          bonesRef.current.head.rotation.y = conversationPose?.head?.y || 0;
+          bonesRef.current.head.rotation.z = conversationPose?.head?.z || 0;
         }
         if (bonesRef.current.leftShoulder) {
-          bonesRef.current.leftShoulder.rotation.z = choreography.leftShoulderZ * motionState.bodySway;
+          bonesRef.current.leftShoulder.rotation.x = conversationPose?.leftShoulder?.x || 0;
+          bonesRef.current.leftShoulder.rotation.y = conversationPose?.leftShoulder?.y || 0;
+          bonesRef.current.leftShoulder.rotation.z = conversationPose?.leftShoulder?.z || 0;
         }
         if (bonesRef.current.rightShoulder) {
-          bonesRef.current.rightShoulder.rotation.z = choreography.rightShoulderZ * motionState.bodySway;
+          bonesRef.current.rightShoulder.rotation.x = conversationPose?.rightShoulder?.x || 0;
+          bonesRef.current.rightShoulder.rotation.y = conversationPose?.rightShoulder?.y || 0;
+          bonesRef.current.rightShoulder.rotation.z = conversationPose?.rightShoulder?.z || 0;
         }
         if (bonesRef.current.leftArm) {
-          bonesRef.current.leftArm.rotation.z = choreography.leftArmZ * Math.max(motionState.bodySway, motionState.talkHead);
+          bonesRef.current.leftArm.rotation.x = conversationPose?.leftArm?.x || 0;
+          bonesRef.current.leftArm.rotation.y = conversationPose?.leftArm?.y || 0;
+          bonesRef.current.leftArm.rotation.z = conversationPose?.leftArm?.z || 0;
         }
         if (bonesRef.current.rightArm) {
-          bonesRef.current.rightArm.rotation.z = choreography.rightArmZ * Math.max(motionState.bodySway, motionState.talkHead);
+          bonesRef.current.rightArm.rotation.x = conversationPose?.rightArm?.x || 0;
+          bonesRef.current.rightArm.rotation.y = conversationPose?.rightArm?.y || 0;
+          bonesRef.current.rightArm.rotation.z = conversationPose?.rightArm?.z || 0;
         }
         if (bonesRef.current.leftForeArm) {
-          bonesRef.current.leftForeArm.rotation.z = choreography.leftForeArmZ * Math.max(motionState.bodySway, motionState.talkHead);
+          bonesRef.current.leftForeArm.rotation.x = conversationPose?.leftForeArm?.x || 0;
+          bonesRef.current.leftForeArm.rotation.y = conversationPose?.leftForeArm?.y || 0;
+          bonesRef.current.leftForeArm.rotation.z = conversationPose?.leftForeArm?.z || 0;
         }
         if (bonesRef.current.rightForeArm) {
-          bonesRef.current.rightForeArm.rotation.z = choreography.rightForeArmZ * Math.max(motionState.bodySway, motionState.talkHead);
+          bonesRef.current.rightForeArm.rotation.x = conversationPose?.rightForeArm?.x || 0;
+          bonesRef.current.rightForeArm.rotation.y = conversationPose?.rightForeArm?.y || 0;
+          bonesRef.current.rightForeArm.rotation.z = conversationPose?.rightForeArm?.z || 0;
         }
-        if (isHostessRestState) {
-          const restWave = Math.sin(t * 0.74) * 0.035;
-          const restBreath = (Math.sin(t * 1.12) + 1) * 0.5;
-          if (bonesRef.current.leftShoulder) {
-            bonesRef.current.leftShoulder.rotation.x = 0.12 + restBreath * 0.03;
-            bonesRef.current.leftShoulder.rotation.y = 0.1;
-            bonesRef.current.leftShoulder.rotation.z = -0.18 + restWave;
-          }
-          if (bonesRef.current.rightShoulder) {
-            bonesRef.current.rightShoulder.rotation.x = 0.12 + restBreath * 0.03;
-            bonesRef.current.rightShoulder.rotation.y = -0.1;
-            bonesRef.current.rightShoulder.rotation.z = 0.18 - restWave;
-          }
-          if (bonesRef.current.leftArm) {
-            bonesRef.current.leftArm.rotation.x = 0.08 + restBreath * 0.025;
-            bonesRef.current.leftArm.rotation.y = 0.24;
-            bonesRef.current.leftArm.rotation.z = -2.42 + restWave * 0.55;
-          }
-          if (bonesRef.current.rightArm) {
-            bonesRef.current.rightArm.rotation.x = 0.08 + restBreath * 0.025;
-            bonesRef.current.rightArm.rotation.y = -0.24;
-            bonesRef.current.rightArm.rotation.z = 2.42 - restWave * 0.55;
-          }
-          if (bonesRef.current.leftForeArm) {
-            bonesRef.current.leftForeArm.rotation.x = 0.05 + restBreath * 0.018;
-            bonesRef.current.leftForeArm.rotation.y = 0.02;
-            bonesRef.current.leftForeArm.rotation.z = -0.14 - restWave * 0.25;
-          }
-          if (bonesRef.current.rightForeArm) {
-            bonesRef.current.rightForeArm.rotation.x = 0.05 + restBreath * 0.018;
-            bonesRef.current.rightForeArm.rotation.y = -0.02;
-            bonesRef.current.rightForeArm.rotation.z = 0.14 + restWave * 0.25;
+        if (bonesRef.current.leftHand && conversationPose?.leftHand) {
+          bonesRef.current.leftHand.rotation.x = conversationPose.leftHand.x || 0;
+          bonesRef.current.leftHand.rotation.y = conversationPose.leftHand.y || 0;
+          bonesRef.current.leftHand.rotation.z = conversationPose.leftHand.z || 0;
+        }
+        if (bonesRef.current.rightHand && conversationPose?.rightHand) {
+          bonesRef.current.rightHand.rotation.x = conversationPose.rightHand.x || 0;
+          bonesRef.current.rightHand.rotation.y = conversationPose.rightHand.y || 0;
+          bonesRef.current.rightHand.rotation.z = conversationPose.rightHand.z || 0;
+        }
+
+        const blink = blinkOverride == null
+          ? clamp((1 - Math.pow(Math.abs(Math.sin(t * 0.28 + 0.7)), 42)) * 1.2, 0, 1)
+          : clamp(blinkOverride, 0, 1);
+        const elapsedMs = runtime.isTalking && runtime.lipsyncStartTimeMs
+          ? Math.max(0, performance.now() - Number(runtime.lipsyncStartTimeMs || 0))
+          : 0;
+        const cueTargets = runtime.isTalking
+          ? getLipsyncTargetsAtElapsed(runtime.lipsyncSequence, elapsedMs, runtime.talkIntensity)
+          : null;
+        const {
+          idleTargets,
+          moodTargets,
+          blinkTargets,
+          mouthTargets
+        } = composeLenoreFaceTargets({
+          runtime,
+          t,
+          blink,
+          cueTargets,
+          motionState
+        });
+        const safeIdleTargets = scaleTargetMap(filterTargetsToAllowedSet(idleTargets, SAFE_HEAD_TARGETS), 0.42);
+        const safeMoodTargets = scaleTargetMap(filterTargetsToAllowedSet(moodTargets, SAFE_HEAD_TARGETS), 0.38);
+        const safeBlinkTargets = scaleTargetMap(filterTargetsToAllowedSet(blinkTargets, SAFE_HEAD_TARGETS), 0.78);
+        const safeMouthTargets = scaleTargetMap(filterTargetsToAllowedSet(mouthTargets, SAFE_HEAD_TARGETS), runtime.isTalking ? 0.34 : 0);
+        const safeBrowMoodTargets = scaleTargetMap(filterTargetsToAllowedSet(moodTargets, SAFE_BROW_TARGETS), 0.34);
+        const safeBrowBlinkTargets = scaleTargetMap(filterTargetsToAllowedSet(blinkTargets, SAFE_BROW_TARGETS), 0.82);
+        const safeTongueTargets = scaleTargetMap(filterTargetsToAllowedSet(mouthTargets, SAFE_TONGUE_TARGETS), runtime.isTalking ? 0.18 : 0);
+
+        for (const entry of meshes) {
+          const mesh = entry?.mesh;
+          const role = entry?.role;
+          if (!mesh?.morphTargetDictionary || !mesh?.morphTargetInfluences) continue;
+          if (role === "head") {
+            applyMorphTargets(mesh.morphTargetDictionary, mesh.morphTargetInfluences, safeIdleTargets, "max");
+            applyMorphTargets(mesh.morphTargetDictionary, mesh.morphTargetInfluences, safeMoodTargets, "max");
+            applyMorphTargets(mesh.morphTargetDictionary, mesh.morphTargetInfluences, safeBlinkTargets, "max");
+            applyMorphTargets(mesh.morphTargetDictionary, mesh.morphTargetInfluences, safeMouthTargets, "max");
+          } else if (role === "brow" || role === "lash") {
+            applyMorphTargets(mesh.morphTargetDictionary, mesh.morphTargetInfluences, safeBrowMoodTargets, "max");
+            applyMorphTargets(mesh.morphTargetDictionary, mesh.morphTargetInfluences, safeBrowBlinkTargets, "max");
+          } else if (role === "tongue") {
+            applyMorphTargets(mesh.morphTargetDictionary, mesh.morphTargetInfluences, safeTongueTargets, "max");
           }
         }
 
@@ -1329,6 +1084,19 @@ export default function LenoreAvatar({
         delete window.__lenoreDebug;
       }
       rootRef.current = null;
+      if (hostessAttireRef.current?.group?.parent) {
+        hostessAttireRef.current.group.parent.remove(hostessAttireRef.current.group);
+      }
+      if (hostessAttireRef.current?.group) {
+        hostessAttireRef.current.group.traverse((node) => {
+          if (node.geometry?.dispose) node.geometry.dispose();
+        });
+      }
+      if (hostessAttireRef.current?.materials) {
+        hostessAttireRef.current.materials.outfitMaterial?.dispose?.();
+        hostessAttireRef.current.materials.accentMaterial?.dispose?.();
+      }
+      hostessAttireRef.current = null;
       rootBaseTransformRef.current = {
         position: null,
         rotation: null,
@@ -1345,14 +1113,22 @@ export default function LenoreAvatar({
         leftArm: null,
         rightArm: null,
         leftForeArm: null,
-        rightForeArm: null
+        rightForeArm: null,
+        leftHand: null,
+        rightHand: null
       };
       boneBaseRef.current = {};
+      sceneBoundsRef.current = {
+        box: null,
+        size: null,
+        center: null
+      };
+      appliedFrameRef.current = "";
       mixerRef.current = null;
       motionActionsRef.current = new Map();
       clockRef.current = null;
     };
-  }, [modelUrl]);
+  }, [activeModelUrl]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -1362,7 +1138,11 @@ export default function LenoreAvatar({
       if (!rect) return;
       rendererRef.current.setSize(rect.width, rect.height);
       cameraRef.current.aspect = rect.width / rect.height;
-      cameraRef.current.updateProjectionMatrix();
+      applyCameraFrame(
+        cameraRef.current,
+        sceneBoundsRef.current,
+        stateRef.current.appearance.cameraFrame || "bust"
+      );
     });
     observer.observe(host);
     return () => observer.disconnect();
@@ -1410,6 +1190,16 @@ export default function LenoreAvatar({
           background: "linear-gradient(180deg, rgba(74, 28, 42, 0.72), rgba(28, 10, 18, 0.84))",
           boxShadow: "inset 0 0 44px rgba(0,0,0,0.24), 0 0 0 1px rgba(255,255,255,0.03)",
           zIndex: 1
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: "2.5% 6.5% 3.5% 6.5%",
+          borderRadius: 24,
+          background: "linear-gradient(180deg, rgba(62, 21, 34, 0.98) 0%, rgba(62, 21, 34, 0.92) 10%, rgba(62, 21, 34, 0.18) 24%, rgba(62, 21, 34, 0) 34%)",
+          pointerEvents: "none",
+          zIndex: 1.5
         }}
       />
       <div

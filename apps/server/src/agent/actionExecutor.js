@@ -12,6 +12,7 @@ import { getRecording, deleteRecording } from "../../storage/recordings.js";
 import { deleteAgentActionsForRecording } from "../../storage/agent_actions.js";
 import { deleteMemoryEntitiesForRecording } from "../../storage/memory_entities.js";
 import { executeAction } from "../safety/executeAction.js";
+import { sendWhatsAppMessage, sendSmsMessage } from "../../integrations/messaging.js";
 import {
   exportRecordingArtifacts,
   runRecordingAction,
@@ -28,7 +29,11 @@ const SAFE_ACTIONS = new Set([
   "record_meeting.pause",
   "record_meeting.resume",
   "meeting.summarize",
+  "calendar.proposeHold",
   "email.send",
+  "messaging.telegramSend",
+  "messaging.whatsapp.send",
+  "messaging.sms.send",
   "meeting.export",
   "meeting.recap_doc",
   "meeting.draft_email",
@@ -51,11 +56,14 @@ const ACTION_DEFS = {
   "record_meeting.pause": { kind: "client" },
   "record_meeting.resume": { kind: "client" },
   "meeting.summarize": { kind: "tool", toolName: "meeting.summarize" },
+  "calendar.proposeHold": { kind: "tool", toolName: "calendar.proposeHold" },
   "email.send": { kind: "tool", toolName: "email.send" },
   "todos.create": { kind: "tool", toolName: "todos.create" },
   "messaging.slackPost": { kind: "tool", toolName: "messaging.slackPost" },
   "messaging.telegramSend": { kind: "tool", toolName: "messaging.telegramSend" },
   "messaging.discordSend": { kind: "tool", toolName: "messaging.discordSend" },
+  "messaging.whatsapp.send": { kind: "internal" },
+  "messaging.sms.send": { kind: "internal" },
   "meeting.export": { kind: "internal" },
   "meeting.email": { kind: "internal" },
   "meeting.recap_doc": { kind: "internal" },
@@ -130,6 +138,38 @@ function getRecordingForAction(recordingId, context) {
 }
 
 async function runInternalAction(type, params, context) {
+  if (type === "messaging.whatsapp.send") {
+    const to = params?.to || process.env.WHATSAPP_TO || process.env.TWILIO_WHATSAPP_TO || "";
+    const text = params?.text || params?.message || "";
+    const result = await executeAction({
+      actionType: type,
+      params: { to, text },
+      context: { userId: context?.userId || "local", sessionId: context?.sessionId || "" },
+      outboundTargets: ["https://graph.facebook.com", "https://api.twilio.com"],
+      summary: `Send WhatsApp message to ${to || "recipient"}`,
+      handler: async () => sendWhatsAppMessage(to, text)
+    });
+    if (result.status === "approval_required") {
+      return { status: "approval_required", approval: result.approval };
+    }
+    return result.data;
+  }
+  if (type === "messaging.sms.send") {
+    const to = params?.to || process.env.TWILIO_SMS_TO || "";
+    const text = params?.text || params?.message || "";
+    const result = await executeAction({
+      actionType: type,
+      params: { to, text },
+      context: { userId: context?.userId || "local", sessionId: context?.sessionId || "" },
+      outboundTargets: ["https://api.twilio.com"],
+      summary: `Send SMS message to ${to || "recipient"}`,
+      handler: async () => sendSmsMessage(to, text)
+    });
+    if (result.status === "approval_required") {
+      return { status: "approval_required", approval: result.approval };
+    }
+    return result.data;
+  }
   if (type === "docs.get") {
     const docId = params?.docId || "";
     const doc = await getGoogleDoc(String(docId), context?.userId || "");
